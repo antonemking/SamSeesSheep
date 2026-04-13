@@ -1,11 +1,13 @@
 # SamSeesSheep
 
-**Segment a sheep's face from a smartphone photo. Extract ear position. Build a depth mesh. All from a single image on an 11-acre Delaware homestead.**
+**Segment a sheep's face from a smartphone photo. Extract ear position. Build a depth mesh from a single image of my sheep.**
 
 > Part 1 of an ongoing series applying AI to small-flock animal welfare.
 
-<!-- Replace with your actual demo screenshot or GIF -->
-![Demo pipeline: photo → segmentation → face extraction → ear overlay → depth mesh](docs/demo-pipeline.png)
+```mermaid
+graph LR
+    A[Photo] --> B[Segmentation] --> C[Face Extraction] --> D[Ear Overlay] --> E[Depth Mesh]
+```
 
 ---
 
@@ -25,38 +27,26 @@ Meanwhile, Meta's Segment Anything Model (SAM) made foundation-level segmentatio
 
 ## The pipeline
 
-### 1. Upload a photo
+### 1. Upload + click 3 points + segmentation
 
-Smartphone photo of a sheep's face. No special hardware. Whatever lighting the sky gives you.
+Upload a smartphone photo. No special hardware.
 
-<!-- Replace with your upload screenshot -->
-![Upload](docs/step-1-upload.png)
+<img src="docs/upload-area.png" width="400">
 
-### 2. Click 3 points: face center, each ear tip
+Click 3 points: face center (**F**), then each ear tip (**1**, **2**). SAM segments the head and isolates each ear using positive/negative prompts. The head mask extracts a clean face on black background. Ear masks are color-coded and angles are computed relative to the head midline using PCA.
 
-SAM segments the head using all 3 points as positive prompts. Each ear is isolated using SAM's positive/negative prompt capability — ear tip as positive, face center as negative — so the model cleanly separates each ear from the face.
+![Point selection, face extraction, and ear segmentation](docs/face-extract-seg.png)
 
-<!-- Replace with your 3-click screenshot showing F, 1, 2 dots -->
-![Click to segment](docs/step-2-click.png)
-
-### 3. Face extraction + ear segmentation
-
-The head mask extracts a clean face on black background. Ear masks are color-coded and angles are computed relative to the head midline using PCA.
-
-**Thresholds from published literature:**
+**Ear angle thresholds from published literature:**
 - &gt; 30&deg; above horizontal → **up/alert**
 - -10&deg; to 30&deg; → **neutral**
 - &lt; -10&deg; → **down/back** (potential pain indicator)
 
-<!-- Replace with your face extraction + ear overlay side-by-side -->
-![Segmentation results](docs/step-3-segmentation.png)
-
-### 4. Depth mesh
+### 2. Depth mesh
 
 Depth Anything V2 estimates monocular depth from the cropped head region. Poisson surface reconstruction builds a smooth 2.5D mesh. The turntable rocks &plusmn;40&deg; to show facial topology.
 
-<!-- Replace with your turntable screenshot or GIF -->
-![Depth mesh turntable](docs/step-4-depth-mesh.png)
+![Depth mesh turntable](docs/depth-mesh.gif)
 
 ## Architecture
 
@@ -124,9 +114,7 @@ This is a feasibility study, not a product. The 4-weekend plan:
 
 ## Built by
 
-[Antone King](https://github.com/antonemking) — AI architect by day, farmer by dawn. 11 acres, 5 sheep, a herd of goats, and the conviction that the most interesting AI applications of the next decade won't be in the consumer cloud. They'll be on commodity phones in places where the dataset is whatever you can carry out to the pasture.
-
-First public artifact of [Lorewood Advisors](https://github.com/lorewood-advisors) — applied AI for agriculture, built from the bottom of the market upward.
+[Antone King](https://github.com/antonemking) - I apply AI to agriculture and movement science
 
 ---
 
