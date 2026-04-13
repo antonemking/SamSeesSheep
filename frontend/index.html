@@ -68,7 +68,29 @@ h1{font-family:'SF Mono',monospace;color:#3fb950;font-size:1.4rem}
   <div><img id="img-ears"><div class="cap">Ear segmentation</div></div>
 </div>
 
-<!-- 4. Turntable -->
+<!-- 4. Ear angle measurements -->
+<div id="measurements" class="hidden">
+  <div style="display:flex;gap:1.5rem;justify-content:center;margin:1.5rem 0">
+    <div style="text-align:center">
+      <div style="font-size:.65rem;color:#484f58;margin-bottom:.25rem">Left Ear</div>
+      <div id="m-left" style="font-size:2rem;font-weight:800;font-family:'SF Mono',monospace">--</div>
+      <div id="m-left-label" style="font-size:.7rem;margin-top:.15rem">--</div>
+    </div>
+    <div style="text-align:center">
+      <div style="font-size:.65rem;color:#484f58;margin-bottom:.25rem">Right Ear</div>
+      <div id="m-right" style="font-size:2rem;font-weight:800;font-family:'SF Mono',monospace">--</div>
+      <div id="m-right-label" style="font-size:.7rem;margin-top:.15rem">--</div>
+    </div>
+  </div>
+  <div style="text-align:center;font-size:.6rem;color:#484f58">
+    Thresholds: <span style="color:#3fb950">&gt;30&deg; up</span> &middot;
+    <span style="color:#d29922">-10&deg;&ndash;30&deg; neutral</span> &middot;
+    <span style="color:#f85149">&lt;-10&deg; down</span>
+    &mdash; McLennan 2019
+  </div>
+</div>
+
+<!-- 5. Turntable -->
 <div id="turntable-section" class="hidden">
   <div style="font-size:.7rem;color:#484f58;margin-bottom:4px">Depth relief</div>
   <div class="turntable-wrap" id="turntable-container">
@@ -206,8 +228,9 @@ $('click-photo').addEventListener('click',async e=>{
     }
     if(photo.ear_angles){
       const la=photo.ear_angles.left_ear_angle_deg, ra=photo.ear_angles.right_ear_angle_deg;
-      $('click-hint').textContent='L: '+(la!=null?la.toFixed(1)+'\u00b0':'--')+'  R: '+(ra!=null?ra.toFixed(1)+'\u00b0':'--');
+      $('click-hint').textContent='Segmented';
       $('click-hint').style.color='#3fb950';
+      showMeasurements(la, ra);
     }
     $('status').textContent='Segmented in '+Math.round(photo.segmentation.segmentation_time_ms)+'ms.';
     // Auto-generate depth mesh
@@ -217,6 +240,25 @@ $('click-photo').addEventListener('click',async e=>{
   }
   clickStep=0; clickPoints=[];
 });
+
+/* ── Measurements ── */
+function angleColor(deg){ return deg>30?'#3fb950':deg<-10?'#f85149':'#d29922'; }
+function angleLabel(deg){ return deg>30?'up / alert':deg<-10?'down / back':'neutral'; }
+function showMeasurements(la, ra){
+  $('measurements').classList.remove('hidden');
+  if(la!=null){
+    $('m-left').textContent=la.toFixed(1)+'\u00b0';
+    $('m-left').style.color=angleColor(la);
+    $('m-left-label').textContent=angleLabel(la);
+    $('m-left-label').style.color=angleColor(la);
+  }
+  if(ra!=null){
+    $('m-right').textContent=ra.toFixed(1)+'\u00b0';
+    $('m-right').style.color=angleColor(ra);
+    $('m-right-label').textContent=angleLabel(ra);
+    $('m-right-label').style.color=angleColor(ra);
+  }
+}
 
 /* ── Mesh (auto-triggered after segmentation) ── */
 async function generateMesh(){

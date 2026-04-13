@@ -29,19 +29,20 @@ _device = None
 
 
 def _load_model():
-    """Load SAM model from HuggingFace. Downloads ~375MB on first run."""
+    """Load SAM 2.1 model from HuggingFace. Downloads ~350MB on first run."""
     global _model, _processor, _device
     try:
-        from transformers import SamModel, SamProcessor
+        from transformers import Sam2Model, Sam2Processor
 
         _device = "cuda" if torch.cuda.is_available() else "cpu"
-        logger.info("Loading SAM model (facebook/sam-vit-base) on %s...", _device)
-        _processor = SamProcessor.from_pretrained("facebook/sam-vit-base")
-        _model = SamModel.from_pretrained("facebook/sam-vit-base").to(_device)
+        model_id = "facebook/sam2.1-hiera-small"
+        logger.info("Loading SAM 2.1 hiera-small on %s...", _device)
+        _processor = Sam2Processor.from_pretrained(model_id)
+        _model = Sam2Model.from_pretrained(model_id).to(_device)
         _model.eval()
-        logger.info("SAM model loaded.")
+        logger.info("SAM 2.1 model loaded.")
     except Exception as e:
-        logger.error("Failed to load SAM model: %s", e)
+        logger.error("Failed to load SAM 2.1 model: %s", e)
         _model = None
 
 
@@ -61,12 +62,15 @@ def _predict_mask(
     image_pil: Image.Image,
     points: list[list[int]],
     labels: list[int] | None = None,
+    target_area: tuple[float, float] | None = None,
 ) -> Optional[np.ndarray]:
-    """Run SAM with point prompts. Returns the best mask or None.
+    """Run SAM 2.1 with point prompts. Returns the best mask or None.
 
     Args:
         points: list of [x, y] coordinates
         labels: 1=positive (include), 0=negative (exclude). Defaults to all positive.
+        target_area: (min_frac, max_frac) of image area. If set, prefer masks
+                     in this size range over highest score. Use for heads.
     """
     if _model is None or _processor is None:
         return None
@@ -74,8 +78,9 @@ def _predict_mask(
     if labels is None:
         labels = [1] * len(points)
 
-    input_points = [points]
-    input_labels = [labels]
+    # SAM 2 expects 4-level nesting: [image, object, point, xy]
+    input_points = [[points]]
+    input_labels = [[labels]]
     inputs = _processor(
         image_pil,
         input_points=input_points,
@@ -86,19 +91,32 @@ def _predict_mask(
     with torch.no_grad():
         outputs = _model(**inputs)
 
-    masks = _processor.image_processor.post_process_masks(
+    masks = _processor.post_process_masks(
         outputs.pred_masks.cpu(),
         inputs["original_sizes"].cpu(),
-        inputs["reshaped_input_sizes"].cpu(),
     )
 
     scores = outputs.iou_scores.cpu().numpy()[0][0]
     mask_array = masks[0][0].numpy()
+    h, w = mask_array.shape[1], mask_array.shape[2]
+    total_pixels = h * w
 
-    # SAM returns 3 masks at different granularity (small, medium, large).
-    # Pick the highest-scoring mask. The negative prompts already constrain
-    # SAM to exclude the face, so the best-scoring mask is the ear.
-    best_idx = scores.argmax()
+    if target_area is not None:
+        # Pick the best-scoring mask that falls within the target size range
+        min_frac, max_frac = target_area
+        best_idx = None
+        best_score = -1
+        for i in range(len(scores)):
+            frac = mask_array[i].sum() / total_pixels
+            if min_frac <= frac <= max_frac and scores[i] > best_score:
+                best_score = scores[i]
+                best_idx = i
+        # Fallback: pick the largest mask if none matched
+        if best_idx is None:
+            areas = [mask_array[i].sum() for i in range(len(scores))]
+            best_idx = int(np.argmax(areas))
+    else:
+        best_idx = scores.argmax()
 
     best_mask = mask_array[best_idx]
     return best_mask.astype(np.uint8) * 255
@@ -368,7 +386,7 @@ def segment_sheep_at_point(
     confidence = {}
 
     # Step 1: Segment at the clicked point — this is the face
-    head_mask = _predict_mask(image_pil, [[px, py]])
+    head_mask = _predict_mask(image_pil, [[px, py]], target_area=(0.02, 0.40))
 
     if head_mask is not None and (head_mask > 127).sum() > h * w * MIN_MASK_AREA_FRACTION:
         result_masks["head"] = _mask_to_base64_png(head_mask)
@@ -484,7 +502,10 @@ def segment_sheep_multipoint(
         if pt:
             all_points.append(list(pt))
 
-    head_mask = _predict_mask(image_pil, all_points, labels=[1] * len(all_points))
+    head_mask = _predict_mask(
+        image_pil, all_points, labels=[1] * len(all_points),
+        target_area=(0.02, 0.40),
+    )
 
     if head_mask is not None and (head_mask > 127).sum() > h * w * MIN_MASK_AREA_FRACTION:
         result_masks["head"] = _mask_to_base64_png(head_mask)

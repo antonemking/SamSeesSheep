@@ -129,11 +129,20 @@ def _classify_ear_position(angle_relative_to_head: float) -> EarPosition:
 
 
 def _normalize_angle(angle: float) -> float:
-    """Normalize angle to [-180, 180] range."""
+    """Normalize angle to [-90, 90] range.
+
+    PCA eigenvectors have a 180-degree direction ambiguity — the axis
+    can point either way. Since ear angles in the SPFES context are
+    always in roughly [-60, +60], anything outside ±90 is a PCA flip.
+    """
     while angle > 180:
         angle -= 360
     while angle < -180:
         angle += 360
+    if angle > 90:
+        angle -= 180
+    elif angle < -90:
+        angle += 180
     return angle
 
 
