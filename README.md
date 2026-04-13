@@ -1,6 +1,6 @@
 # SamSeesSheep
 
-**Segment a sheep's face from a smartphone photo. Extract ear position. Build a depth mesh from a single image of my sheep.**
+**Segment a sheep's face from a smartphone photo. Extract ear position. Build a depth mesh from a single image.**
 
 > Part 1 of an ongoing series applying AI to small-flock animal welfare.
 
