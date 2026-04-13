@@ -1,0 +1,90 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual envs
+.venv/
+venv/
+env/
+ENV/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Model weights (often large; track via DVC or Git LFS instead)
+*.pt
+*.pth
+*.onnx
+*.tflite
+*.mlmodel
+*.bin
+weights/
+checkpoints/
+
+# Animal data (DO NOT commit raw photos of livestock without explicit permission)
+data/raw/
+data/photos/
+data/video/
+*.jpg
+*.jpeg
+*.png
+*.mp4
+*.mov
+*.heic
+!docs/**/*.png
+!docs/**/*.jpg
+# Keep all data and docs local
+data/
+docs/
+
+# Annotations (commit only the schema, not the labels themselves until reviewed)
+data/annotations/
+*.coco.json
+*.label.json
+
+# Local secrets and configs
+.env
+.env.local
+*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*~
+
+# Logs and reports (keep schemas, not contents)
+logs/
+*.log
+reports/runs/
+
+# Runtime data
+data/uploads/
+data/results/
+
+# DVC (if added later)
+/.dvc/cache
+/.dvc/tmp

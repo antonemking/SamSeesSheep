@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SamSeesSheep</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0d1117;color:#e6edf3;line-height:1.6;max-width:720px;margin:0 auto;padding:2rem 1.5rem}
+a{color:#58a6ff}
+h1{font-family:'SF Mono',monospace;color:#3fb950;font-size:1.4rem}
+.sub{color:#8b949e;font-size:.85rem;margin:.25rem 0 1.5rem}
+.upload{border:2px dashed #30363d;border-radius:6px;padding:1.5rem;text-align:center;cursor:pointer;margin:1.5rem 0;transition:border-color .2s}
+.upload:hover{border-color:#3fb950}
+.upload input{position:absolute;width:0;height:0;overflow:hidden;opacity:0}
+.upload p{color:#8b949e;font-size:.85rem}
+.hidden{display:none!important}
+.status{font-size:.8rem;color:#8b949e;margin:.5rem 0}
+.spinner{display:inline-block;width:14px;height:14px;border:2px solid #30363d;border-top-color:#3fb950;border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.btn{padding:.5rem 1.2rem;border-radius:5px;font-size:.85rem;font-weight:600;border:1px solid #3fb950;cursor:pointer;background:#161b22;color:#3fb950;transition:background .15s}
+.btn:hover{background:#21262d}
+.btn:disabled{opacity:.35;cursor:default}
+
+/* Preview with click dots */
+.click-photo{position:relative;cursor:crosshair;display:inline-block}
+.click-photo img{max-width:100%;border-radius:6px;border:1px solid #30363d;display:block}
+.click-dot{position:absolute;width:18px;height:18px;border-radius:50%;border:2px solid #3fb950;background:rgba(63,185,80,.3);transform:translate(-50%,-50%);pointer-events:none;font-size:9px;font-weight:700;color:#fff;display:flex;align-items:center;justify-content:center;text-shadow:0 1px 2px #000}
+.click-dot.ear{border-color:#f0883e;background:rgba(240,136,62,.3)}
+
+/* Segmentation results */
+.seg-row{display:flex;gap:1rem;margin:1.5rem 0;flex-wrap:wrap;justify-content:center}
+.seg-row>div{flex:1;min-width:200px;text-align:center}
+.seg-row img{width:100%;max-width:340px;border-radius:6px;border:1px solid #30363d}
+.seg-row .cap{font-size:.7rem;color:#484f58;margin-top:.3rem}
+
+/* Turntable */
+.turntable-wrap{position:relative;width:100%;border-radius:6px;overflow:hidden;background:#0d1117;margin:1.5rem 0;cursor:grab;user-select:none}
+.turntable-wrap:active{cursor:grabbing}
+.turntable-wrap img{display:block;width:100%}
+.turntable-overlay{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#8b949e;font-size:.85rem;pointer-events:none;text-align:center}
+.turntable-hint{position:absolute;bottom:8px;right:12px;font-size:.65rem;color:#484f58;pointer-events:none;transition:opacity 2s}
+
+.footer{margin-top:2.5rem;padding-top:1.5rem;border-top:1px solid #30363d;font-size:.75rem;color:#484f58}
+.footer p{margin-bottom:.3rem}
+</style>
+</head>
+<body>
+<h1>SamSeesSheep</h1>
+<p class="sub">SAM segmentation + depth mesh for sheep facial welfare monitoring. Based on <a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC6523241/">McLennan &amp; Mahmoud 2019 (SPFES)</a>.
+  <a href="https://github.com/antonemking/SamSeesSheep/blob/main/VALIDATION.md">VALIDATION.md</a></p>
+
+<!-- 1. Upload -->
+<div class="upload" id="upload-zone">
+  <p><strong>Drop a sheep photo</strong> or click to browse</p>
+  <input type="file" id="file-input" accept="image/*,.heic,.heif" style="display:none">
+</div>
+
+<!-- 2. Preview + click to segment -->
+<div id="click-section" class="hidden" style="margin:1.5rem 0;text-align:center">
+  <div class="click-photo" id="click-photo"><img id="click-img"></div>
+  <div id="click-hint" style="font-size:.75rem;color:#3fb950;margin-top:.3rem"></div>
+</div>
+
+<!-- 3. Segmentation results -->
+<div class="seg-row hidden" id="seg-row">
+  <div><img id="img-extraction" style="background:#000"><div class="cap">Face extraction</div></div>
+  <div><img id="img-ears"><div class="cap">Ear segmentation</div></div>
+</div>
+
+<!-- 4. Turntable -->
+<div id="turntable-section" class="hidden">
+  <div style="font-size:.7rem;color:#484f58;margin-bottom:4px">Depth relief</div>
+  <div class="turntable-wrap" id="turntable-container">
+    <img id="turntable-img" draggable="false">
+    <div class="turntable-overlay hidden" id="turntable-loading"><span class="spinner"></span><br>Building depth mesh...</div>
+    <div class="turntable-hint" id="turntable-hint">drag to rotate</div>
+  </div>
+</div>
+
+<div class="status" id="status"></div>
+
+<div class="footer">
+  <p>SAM + Depth Anything V2 + Poisson reconstruction. Ear thresholds: <a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC6523241/">McLennan &amp; Mahmoud 2019</a>, Reefmann 2009.</p>
+  <p><a href="https://github.com/antonemking">Antone King</a> &mdash; Delaware homestead. <a href="https://github.com/antonemking/SamSeesSheep">Source</a>.</p>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+let currentPhotoId=null;
+
+/* ── Turntable ── */
+let ttFrames=[], ttIndex=0, ttAuto=true, ttRafId=null, ttLastTime=0;
+function startTurntable(frames){
+  ttFrames=frames.map(f=>'data:image/jpeg;base64,'+f);
+  ttIndex=0; ttAuto=true; ttLastTime=0;
+  $('turntable-img').src=ttFrames[0];
+  $('turntable-hint').style.opacity='1';
+  if(ttRafId) cancelAnimationFrame(ttRafId);
+  (function tick(t){
+    ttRafId=requestAnimationFrame(tick);
+    if(!ttAuto||!ttFrames.length) return;
+    if(t-ttLastTime>1000/12){
+      ttIndex=(ttIndex+1)%ttFrames.length;
+      $('turntable-img').src=ttFrames[ttIndex];
+      ttLastTime=t;
+    }
+  })(0);
+}
+(function(){
+  const el=$('turntable-container');
+  let dragging=false, startX=0, startIdx=0;
+  el.addEventListener('pointerdown',e=>{
+    dragging=true; ttAuto=false; startX=e.clientX; startIdx=ttIndex;
+    el.setPointerCapture(e.pointerId);
+    $('turntable-hint').style.opacity='0';
+  });
+  el.addEventListener('pointermove',e=>{
+    if(!dragging||!ttFrames.length) return;
+    const steps=Math.round((e.clientX-startX)/15);
+    ttIndex=((startIdx+steps)%ttFrames.length+ttFrames.length)%ttFrames.length;
+    $('turntable-img').src=ttFrames[ttIndex];
+  });
+  el.addEventListener('pointerup',()=>{ dragging=false; ttAuto=true; });
+})();
+
+/* ── Upload ── */
+const zone=$('upload-zone'), input=$('file-input');
+zone.addEventListener('dragover',e=>{e.preventDefault();zone.style.borderColor='#3fb950'});
+zone.addEventListener('dragleave',()=>zone.style.borderColor='#30363d');
+zone.addEventListener('drop',e=>{e.preventDefault();zone.style.borderColor='#30363d';if(e.dataTransfer.files.length)upload(e.dataTransfer.files)});
+zone.addEventListener('click',()=>input.click());
+input.addEventListener('change',e=>{if(e.target.files.length)upload(e.target.files)});
+
+async function upload(files){
+  $('status').innerHTML='<span class="spinner"></span> Uploading...';
+  const fd=new FormData();
+  fd.append('files',files[0]);
+  try{
+    const r=await fetch('/api/upload',{method:'POST',body:fd});
+    const photos=await r.json();
+    if(photos.length){
+      currentPhotoId=photos[0].photo_id;
+      $('click-img').src='/uploads/'+photos[0].filename;
+      $('click-section').classList.remove('hidden');
+      $('seg-row').classList.add('hidden');
+      $('mesh-btn-section').classList.add('hidden');
+      $('turntable-section').classList.add('hidden');
+      startClickFlow();
+    }
+  }catch(e){$('status').textContent='Upload failed.';}
+}
+
+/* ── 3-click: face → ear → ear ── */
+const STEPS=[
+  {label:'face',dot:'',   dotLabel:'F', hint:'1/3: Click the center of the face', color:'#3fb950'},
+  {label:'ear1',dot:'ear',dotLabel:'1', hint:'2/3: Click the first ear tip',      color:'#f0883e'},
+  {label:'ear2',dot:'ear',dotLabel:'2', hint:'3/3: Click the other ear tip',      color:'#f0883e'},
+];
+let clickStep=0, clickPoints=[];
+
+function startClickFlow(){
+  clickStep=0; clickPoints=[];
+  $('click-photo').querySelectorAll('.click-dot').forEach(d=>d.remove());
+  $('click-hint').textContent=STEPS[0].hint;
+  $('click-hint').style.color=STEPS[0].color;
+  $('status').textContent='';
+}
+
+$('click-photo').addEventListener('click',async e=>{
+  if(!currentPhotoId||clickStep>=STEPS.length) return;
+  const img=$('click-img'), rect=img.getBoundingClientRect();
+  const x=(e.clientX-rect.left)/rect.width, y=(e.clientY-rect.top)/rect.height;
+  const step=STEPS[clickStep];
+
+  clickPoints.push({x,y,label:step.label});
+  const d=document.createElement('div');
+  d.className='click-dot'+(step.dot?' '+step.dot:'');
+  d.style.left=(x*100)+'%'; d.style.top=(y*100)+'%';
+  d.textContent=step.dotLabel;
+  $('click-photo').appendChild(d);
+  clickStep++;
+
+  if(clickStep<STEPS.length){
+    const next=STEPS[clickStep];
+    $('click-hint').textContent=next.hint;
+    $('click-hint').style.color=next.color;
+    return;
+  }
+
+  $('click-hint').innerHTML='<span class="spinner"></span> Segmenting...';
+  $('click-hint').style.color='#8b949e';
+
+  try{
+    const r=await fetch('/api/analyze/multiclick',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({photo_id:currentPhotoId,points:clickPoints})
+    });
+    const photo=await r.json();
+    if(photo.segmentation?.masks){
+      const m=photo.segmentation.masks;
+      if(m._extraction) $('img-extraction').src='data:image/jpeg;base64,'+m._extraction;
+      if(m._ear_overlay) $('img-ears').src='data:image/jpeg;base64,'+m._ear_overlay;
+      $('seg-row').classList.remove('hidden');
+    }
+    if(photo.ear_angles){
+      const la=photo.ear_angles.left_ear_angle_deg, ra=photo.ear_angles.right_ear_angle_deg;
+      $('click-hint').textContent='L: '+(la!=null?la.toFixed(1)+'\u00b0':'--')+'  R: '+(ra!=null?ra.toFixed(1)+'\u00b0':'--');
+      $('click-hint').style.color='#3fb950';
+    }
+    $('status').textContent='Segmented in '+Math.round(photo.segmentation.segmentation_time_ms)+'ms.';
+    // Auto-generate depth mesh
+    generateMesh();
+  }catch(e){
+    $('click-hint').textContent='Failed.'; $('click-hint').style.color='#f85149';
+  }
+  clickStep=0; clickPoints=[];
+});
+
+/* ── Mesh (auto-triggered after segmentation) ── */
+async function generateMesh(){
+  if(!currentPhotoId) return;
+  $('turntable-section').classList.remove('hidden');
+  $('turntable-loading').classList.remove('hidden');
+  $('status').innerHTML='<span class="spinner"></span> Building depth mesh (~15s)...';
+  try{
+    const res=await fetch('/api/analyze/mesh',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({photo_id:currentPhotoId})});
+    if(!res.ok) throw new Error((await res.json()).detail||res.statusText);
+    const d=await res.json();
+    if(d.turntable?.length){
+      startTurntable(d.turntable);
+      $('turntable-loading').classList.add('hidden');
+      $('status').textContent='Depth mesh ready. Drag to rotate.';
+    }
+  }catch(e){
+    $('turntable-loading').classList.add('hidden');
+    $('status').textContent='Mesh failed: '+(e.message||e);
+  }
+}
+</script>
+</body>
+</html>
