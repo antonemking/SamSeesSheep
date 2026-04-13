@@ -54,7 +54,7 @@ Depth Anything V2 estimates monocular depth from the cropped head region. Poisso
 Smartphone photo
        │
        ▼
-   SAM (facebook/sam-vit-base)
+   SAM 2.1 (facebook/sam2.1-hiera-small)
    3-point prompt: face + ear tips
        │
        ├──► Head mask ──► Face extraction (clay render)
@@ -66,7 +66,7 @@ Smartphone photo
 
 | Component | Model | Size | Runs on |
 |---|---|---|---|
-| Segmentation | SAM vit-base | 375 MB | GPU (GTX 1660 Ti) |
+| Segmentation | SAM 2.1 hiera-small | ~350 MB | GPU (GTX 1660 Ti) |
 | Depth estimation | Depth Anything V2 Small | 50 MB | GPU |
 | Mesh reconstruction | Open3D Poisson | CPU | CPU |
 | Ear angle extraction | PCA + ellipse fitting | No model | CPU |
@@ -92,7 +92,7 @@ uv run uvicorn backend.main:app --host 0.0.0.0 --port 8000
 
 Open `http://localhost:8000`. Upload a sheep photo. Click the face, then each ear tip.
 
-**Requirements:** Python 3.12+, CUDA GPU recommended (runs on CPU but slow). SAM and Depth Anything models download automatically on first run (~425 MB total).
+**Requirements:** Python 3.12+, CUDA GPU recommended (runs on CPU but slow). SAM 2.1 and Depth Anything V2 models download automatically on first run (~400 MB total).
 
 ## What's next
 
@@ -104,6 +104,11 @@ This is a feasibility study, not a product. The 4-weekend plan:
 4. **Weekend 4 — Decide.** Pass or kill against the criterion.
 
 **Kill criterion:** If fewer than 70% of documented stress events show measurable ear-position change, the project ends. The writeup of what failed is itself the deliverable.
+
+**Roadmap:**
+- Upgrade to [SAM 3](https://huggingface.co/facebook/sam3) — text-prompted segmentation ("sheep head", "left ear") could replace manual click annotation entirely
+- Camera placement at water troughs, feeders, and handling chute for automated capture
+- Fine-tune against SPFES scoring rubric with labeled data
 
 ## References
 

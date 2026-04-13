@@ -1,6 +1,6 @@
 # VALIDATION
 
-**This document is the contract.** It states what `sheep-seg` measures, what it does not measure, and how confident you should be in either. It is the first artifact in this repository because every other artifact's claims should be readable through this lens.
+**This document is the contract.** It states what `SamSeesSheep` measures, what it does not measure, and how confident you should be in either. It is the first artifact in this repository because every other artifact's claims should be readable through this lens.
 
 This document will be updated as evidence accumulates. It will not be updated to make the project look better than it is.
 
@@ -93,7 +93,7 @@ This follows the **trust deltas, not absolutes** principle: pairwise comparisons
 
 | Item | Method | Status |
 |---|---|---|
-| SAM 3 segmentation success rate on sheep faces in real pasture conditions | 30 phone photos across varied lighting/angles/distances; manual scoring | Pending |
+| SAM 2.1 segmentation success rate on sheep faces in real pasture conditions | 30 phone photos across varied lighting/angles/distances; manual scoring | Pending |
 | Annotator baseline (me) for ear-up vs. ear-down on still frames | 100 frames double-labeled with 1-week gap; intra-rater agreement | Pending |
 | Behavioral baseline observation of the 5 sheep | 2 hours unassisted notebook observation | Pending |
 
@@ -126,6 +126,6 @@ This project commits, structurally, to the following anti-overclaim norms. Each 
 
 ## Document version
 
-**v0.0.0** — Day 0 skeleton. No measurements yet. This document predates the first commit of code or data and exists to set the claim space before any claims are made.
+**v0.1.0** — Pipeline built. SAM 2.1 hiera-small segmentation + Depth Anything V2 depth mesh operational. Ear angle extraction via PCA with McLennan SPFES thresholds. No systematic measurements yet — claim space is set, measurement begins Weekend 3.
 
 This document will be versioned alongside the code. Every release will increment the version of this document and note what changed in [`CHANGELOG.md`](./CHANGELOG.md).
