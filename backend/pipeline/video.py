@@ -28,19 +28,46 @@ _video_processor = None
 _device = None
 
 
+def _free_sam3_image_model():
+    """Unload the SAM 3 image model to free VRAM for the video model."""
+    import torch
+    from backend.pipeline import segment as _seg
+    if _seg._sam3_model is not None:
+        logger.info("Unloading SAM 3 image model to free VRAM...")
+        _seg._sam3_model.cpu()
+        _seg._sam3_model = None
+        _seg._sam3_processor = None
+        torch.cuda.empty_cache()
+
+
 def _load_video_model():
-    """Load SAM 3 Video model from HuggingFace."""
+    """Load SAM 3 Video model from HuggingFace.
+
+    Uses fp32 — Turing GPUs (1660 Ti) don't accelerate fp16. The
+    PYTORCH_CUDA_ALLOC_CONF setting reduces memory fragmentation so
+    we can fit the model + per-frame inference state on 6GB.
+    """
     global _video_model, _video_processor, _device
     try:
+        import os
+        os.environ.setdefault(
+            "PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True"
+        )
         import torch
         from transformers import Sam3VideoModel, Sam3VideoProcessor
+
+        # Free image model first — they don't both fit on a 6GB GPU
+        _free_sam3_image_model()
 
         _device = "cuda" if torch.cuda.is_available() else "cpu"
         logger.info("Loading SAM 3 Video on %s...", _device)
         _video_processor = Sam3VideoProcessor.from_pretrained("facebook/sam3")
         _video_model = Sam3VideoModel.from_pretrained("facebook/sam3").to(_device)
         _video_model.eval()
-        logger.info("SAM 3 Video model loaded.")
+        logger.info(
+            "SAM 3 Video loaded. VRAM allocated: %.2f GB",
+            torch.cuda.memory_allocated() / 1024 ** 3,
+        )
     except Exception as e:
         logger.error("Failed to load SAM 3 Video: %s", e)
         _video_model = None
@@ -49,7 +76,11 @@ def _load_video_model():
 def _extract_frames(
     video_path: Path, max_frames: int = 30, target_fps: float = 2.0
 ) -> list[Image.Image]:
-    """Extract evenly-spaced frames from a video as PIL Images."""
+    """Extract evenly-spaced frames from a video as PIL Images.
+
+    Falls back to even sampling when fps metadata is unreliable
+    (common for webm files where pyav can return time-base values).
+    """
     import imageio.v3 as iio
 
     frames = iio.imread(str(video_path), plugin="pyav")
@@ -57,22 +88,40 @@ def _extract_frames(
     if total == 0:
         return []
 
-    # Get the actual fps from metadata if possible
+    # Try to read fps; webm often reports junk values (e.g. 1000)
+    actual_fps = 30.0
     try:
         meta = iio.immeta(str(video_path), plugin="pyav")
-        actual_fps = float(meta.get("fps", 30.0))
+        meta_fps = float(meta.get("fps", 30.0))
+        if 0.5 <= meta_fps <= 240:
+            actual_fps = meta_fps
     except Exception:
-        actual_fps = 30.0
+        pass
 
-    # Sample at target_fps or evenly if that would exceed max_frames
-    duration_s = total / actual_fps
-    target_count = min(max_frames, max(2, int(duration_s * target_fps)))
+    # Sample target_fps frames per second of video, clamped to max_frames.
+    # If we don't have many frames, just take them all (up to max_frames).
+    if total <= max_frames:
+        target_count = total
+    else:
+        duration_s = total / actual_fps
+        target_count = max(min(max_frames, total),
+                           min(max_frames, int(duration_s * target_fps)))
+        target_count = max(target_count, min(max_frames, 8))  # at least 8 frames
+
     idxs = np.linspace(0, total - 1, target_count).astype(int)
-
-    pil_frames = [Image.fromarray(frames[i]) for i in idxs]
+    # Downscale to keep VRAM usage bounded (SAM 3 internal res is small anyway)
+    MAX_DIM = 768
+    pil_frames = []
+    for i in idxs:
+        img = Image.fromarray(frames[i])
+        w, h = img.size
+        if max(w, h) > MAX_DIM:
+            scale = MAX_DIM / max(w, h)
+            img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+        pil_frames.append(img)
     logger.info(
-        "Video: %d frames @ %.1f fps (%.1fs), sampling %d frames",
-        total, actual_fps, duration_s, len(pil_frames),
+        "Video: %d total frames, fps_used=%.1f, sampling %d frames at %s",
+        total, actual_fps, len(pil_frames), pil_frames[0].size,
     )
     return pil_frames
 
@@ -137,46 +186,42 @@ def analyze_video(
 
     frame_w, frame_h = pil_frames[0].size
 
-    # One session with all three prompts — propagation runs once
+    # Three separate sessions (one per prompt). Single-session multi-prompt
+    # hits OOM on 6GB GPUs because each additional prompt adds tracking state.
     head_key = f"{subject} head"
     ear_key = f"{subject} ear"
     nose_key = f"{subject} nose"
     prompt_list = [head_key, ear_key, nose_key]
 
-    t0 = time.time()
-    session = _video_processor.init_video_session(
-        video=pil_frames, inference_device=_device
-    )
-    _video_processor.add_text_prompt(session, prompt_list)
-    prompt_text_to_id = {v: k for k, v in session.prompts.items()}
+    results_per_prompt: dict[str, list[dict]] = {}
+    for prompt_text in prompt_list:
+        t0 = time.time()
+        session = _video_processor.init_video_session(
+            video=pil_frames, inference_device=_device
+        )
+        _video_processor.add_text_prompt(session, prompt_text)
 
-    # Collect per-frame outputs, split by prompt via obj_id_to_prompt_id
-    results_per_prompt: dict[str, list[dict]] = {p: [] for p in prompt_list}
-    for i, output in enumerate(
-        _video_model.propagate_in_video_iterator(session, show_progress_bar=False)
-    ):
-        # Each prompt gets its own per-frame view of the outputs
-        per_prompt = {p: {"obj_id_to_mask": {}, "obj_id_to_score": {},
-                         "object_ids": []} for p in prompt_list}
-        for obj_id, mask_t in output.obj_id_to_mask.items():
-            pid = session.obj_id_to_prompt_id.get(obj_id)
-            if pid is None or pid not in session.prompts:
-                continue
-            prompt_text = session.prompts[pid]
-            if prompt_text not in per_prompt:
-                continue
-            per_prompt[prompt_text]["obj_id_to_mask"][obj_id] = mask_t.cpu()
-            per_prompt[prompt_text]["obj_id_to_score"][obj_id] = output.obj_id_to_score.get(obj_id, 0.0)
-            per_prompt[prompt_text]["object_ids"].append(obj_id)
-        for p in prompt_list:
-            results_per_prompt[p].append(per_prompt[p])
+        per_frame_outputs = []
+        for i, output in enumerate(
+            _video_model.propagate_in_video_iterator(
+                session, show_progress_bar=False
+            )
+        ):
+            per_frame_outputs.append({
+                "obj_id_to_mask": {k: v.cpu() for k, v in output.obj_id_to_mask.items()},
+                "obj_id_to_score": dict(output.obj_id_to_score),
+                "object_ids": list(output.object_ids),
+            })
+        results_per_prompt[prompt_text] = per_frame_outputs
 
-    logger.info(
-        "Tracked %d prompts across %d frames in %.1fs",
-        len(prompt_list), len(pil_frames), time.time() - t0,
-    )
-    del session
-    torch.cuda.empty_cache()
+        logger.info(
+            "Tracked '%s' across %d frames in %.1fs",
+            prompt_text, len(pil_frames), time.time() - t0,
+        )
+        # Free tracking state from this prompt before the next session
+        session.reset_inference_session()
+        del session
+        torch.cuda.empty_cache()
 
     per_frame = []
 
@@ -267,24 +312,46 @@ def analyze_video(
         nb = (nose_mask > 127) if nose_mask is not None else None
 
         anatomical = _compute_anatomical_midline(nb, lb, rb)
-        if anatomical is not None and (lb is not None or rb is not None):
+        if anatomical is not None:
             head_up_angle, head_center = anatomical
-            head_horizontal = head_up_angle - 90.0
-            frame_data["head_midline_angle_deg"] = head_up_angle
+        elif lb is not None or rb is not None:
+            # Fallback: assume head is upright (head-up = image-up = 90°),
+            # use ear midpoint as head center
+            head_up_angle = 90.0
+            pts = []
+            for m in (lb, rb):
+                if m is None:
+                    continue
+                coords = np.where(m)
+                if len(coords[0]):
+                    pts.append((coords[1].mean(), coords[0].mean()))
+            if not pts:
+                per_frame.append(frame_data)
+                continue
+            cx_mean = sum(p[0] for p in pts) / len(pts)
+            cy_mean = sum(p[1] for p in pts) / len(pts)
+            head_center = (cx_mean, cy_mean)
+            frame_data["midline_fallback"] = "vertical"
+        else:
+            per_frame.append(frame_data)
+            continue
 
-            for side, ear_bool in (("left", lb), ("right", rb)):
-                if ear_bool is None:
-                    continue
-                direction = _compute_ear_direction(ear_bool, head_center)
-                if direction is None:
-                    continue
-                dx, dy = direction
-                world_angle = float(np.degrees(np.arctan2(-dy, dx)))
-                rel = _normalize_angle(world_angle - head_horizontal)
-                if side == "left":
-                    rel = _normalize_angle(-rel + 180) if rel > 0 else _normalize_angle(-rel - 180)
-                frame_data[f"{side}_ear_angle_deg"] = rel
-                frame_data[f"{side}_ear_position"] = _classify_ear_position(rel).value
+        head_horizontal = head_up_angle - 90.0
+        frame_data["head_midline_angle_deg"] = head_up_angle
+
+        for side, ear_bool in (("left", lb), ("right", rb)):
+            if ear_bool is None:
+                continue
+            direction = _compute_ear_direction(ear_bool, head_center)
+            if direction is None:
+                continue
+            dx, dy = direction
+            world_angle = float(np.degrees(np.arctan2(-dy, dx)))
+            rel = _normalize_angle(world_angle - head_horizontal)
+            if side == "left":
+                rel = _normalize_angle(-rel + 180) if rel > 0 else _normalize_angle(-rel - 180)
+            frame_data[f"{side}_ear_angle_deg"] = rel
+            frame_data[f"{side}_ear_position"] = _classify_ear_position(rel).value
 
         per_frame.append(frame_data)
 

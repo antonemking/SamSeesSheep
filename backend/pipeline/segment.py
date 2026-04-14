@@ -32,11 +32,25 @@ _sam3_model = None
 _sam3_processor = None
 
 
+def _free_sam3_video_model():
+    """Unload the SAM 3 video model to free VRAM for the image model."""
+    from backend.pipeline import video as _vid
+    if _vid._video_model is not None:
+        logger.info("Unloading SAM 3 video model to free VRAM...")
+        _vid._video_model.cpu()
+        _vid._video_model = None
+        _vid._video_processor = None
+        torch.cuda.empty_cache()
+
+
 def _load_sam3_model():
     """Load SAM 3 model from HuggingFace. Downloads ~3 GB on first run."""
     global _sam3_model, _sam3_processor, _device
     try:
         from transformers import Sam3Model, Sam3Processor
+
+        # Free video model first — they don't both fit on a 6GB GPU
+        _free_sam3_video_model()
 
         _device = "cuda" if torch.cuda.is_available() else "cpu"
         logger.info("Loading SAM 3 on %s...", _device)
