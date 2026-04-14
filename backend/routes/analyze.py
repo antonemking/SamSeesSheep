@@ -125,15 +125,29 @@ class VideoAnalyzeRequest(PydanticBaseModel):
     video_id: str
     subject: str = "sheep"
     max_frames: int = 30
+    # Click point (normalized 0-1) to select which animal to track
+    click_x: float | None = None
+    click_y: float | None = None
 
 
 @router.post("/analyze/video")
 async def analyze_video_endpoint(req: VideoAnalyzeRequest) -> dict:
     """Run SAM 3 Video tracking across a clip to get per-frame ear angles."""
-    matches = list(UPLOAD_DIR.glob(f"{req.video_id}.*"))
+    # Match the video file, skipping the extracted first-frame JPEG
+    all_matches = list(UPLOAD_DIR.glob(f"{req.video_id}.*"))
+    matches = [
+        p for p in all_matches
+        if "_frame0" not in p.stem and p.suffix.lower() in {
+            ".mp4", ".mov", ".webm", ".m4v", ".avi"
+        }
+    ]
     if not matches:
         raise HTTPException(status_code=404, detail=f"Video {req.video_id} not found")
     video_path = matches[0]
+
+    click_point = None
+    if req.click_x is not None and req.click_y is not None:
+        click_point = (req.click_x, req.click_y)
 
     from backend.pipeline.video import analyze_video as _run
     import gc, torch
@@ -143,7 +157,10 @@ async def analyze_video_endpoint(req: VideoAnalyzeRequest) -> dict:
     last_err = None
     for n in attempt_frames:
         try:
-            result = _run(video_path, subject=req.subject, max_frames=n)
+            result = _run(
+                video_path, subject=req.subject, max_frames=n,
+                click_point=click_point,
+            )
             if n < req.max_frames:
                 result["retry_reduced_frames_from"] = req.max_frames
             break

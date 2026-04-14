@@ -172,8 +172,14 @@ def analyze_video(
     video_path: Path,
     subject: str = "sheep",
     max_frames: int = 30,
+    click_point: Optional[tuple[float, float]] = None,
 ) -> dict:
     """Run SAM 3 Video tracking across a clip.
+
+    Args:
+        click_point: optional (x, y) normalized 0-1 click on frame 0. When
+            provided, we pick the tracked object whose frame-0 mask contains
+            (or is nearest to) this point, locking tracking to that subject.
 
     Returns a dict with per-frame ear angles and summary stats.
     """
@@ -238,7 +244,32 @@ def analyze_video(
 
     per_frame = []
 
-    # Pick a stable primary ID per prompt from the first few frames with detections
+    # Pick a stable primary ID per prompt.
+    # If a click_point was provided, pick the object whose frame-0 mask
+    # contains or is nearest to that point — locks tracking to that subject.
+    def click_primary(prompt_results: list[dict]) -> Optional[int]:
+        if not click_point or not prompt_results:
+            return None
+        cx_norm, cy_norm = click_point
+        target_x, target_y = cx_norm * frame_w, cy_norm * frame_h
+        frame0 = prompt_results[0]
+        best_id, best_dist = None, float("inf")
+        for oid, mask_t in frame0["obj_id_to_mask"].items():
+            m = _mask_from_logits(mask_t, target_size=(frame_h, frame_w))
+            if m.sum() < 20:
+                continue
+            # If click is inside the mask, distance = 0 (best match)
+            if m[int(target_y), int(target_x)] > 127:
+                return oid
+            # Else use centroid distance as fallback
+            coords = np.where(m > 127)
+            cy, cx = coords[0].mean(), coords[1].mean()
+            d = ((cy - target_y) ** 2 + (cx - target_x) ** 2) ** 0.5
+            if d < best_dist:
+                best_dist = d
+                best_id = oid
+        return best_id
+
     def stable_primary(prompt_results: list[dict]) -> Optional[int]:
         votes = {}
         for fr in prompt_results[:min(5, len(prompt_results))]:
@@ -251,8 +282,11 @@ def analyze_video(
             return None
         return max(votes, key=votes.get)
 
-    primary_head = stable_primary(results_per_prompt[head_key])
-    primary_nose = stable_primary(results_per_prompt[nose_key])
+    # For head: click selection is critical (determines which animal we track)
+    primary_head = click_primary(results_per_prompt[head_key]) or \
+                   stable_primary(results_per_prompt[head_key])
+    primary_nose = click_primary(results_per_prompt[nose_key]) or \
+                   stable_primary(results_per_prompt[nose_key])
 
     for i in range(len(pil_frames)):
         frame_data = {"frame_idx": i}

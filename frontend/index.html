@@ -105,22 +105,35 @@ h1{font-family:'SF Mono',monospace;color:#3fb950;font-size:1.4rem}
   </div>
 </div>
 
-<!-- 4b. Video: annotated tracking + per-frame ear angle timeline -->
+<!-- 4b. Video: click-to-select, annotated tracking + timeline -->
 <div id="video-section" class="hidden" style="margin:1.5rem 0">
   <div style="border:1px solid #30363d;border-radius:6px;padding:1rem;background:#0d1117">
-    <div style="display:flex;gap:1rem;flex-wrap:wrap;justify-content:center;align-items:start;margin-bottom:1rem">
-      <div style="flex:1;min-width:240px;max-width:360px;text-align:center">
-        <div style="font-size:.65rem;color:#484f58;margin-bottom:4px">Original</div>
-        <video id="video-preview" controls style="width:100%;border-radius:6px"></video>
-      </div>
-      <div style="flex:1;min-width:240px;max-width:360px;text-align:center">
-        <div style="font-size:.65rem;color:#484f58;margin-bottom:4px">SAM 3 tracked (head · ears · nose)</div>
-        <img id="video-annotated" style="width:100%;border-radius:6px;background:#0d1117">
+
+    <!-- Selector: user clicks the animal to track -->
+    <div id="video-selector" class="hidden" style="text-align:center;margin-bottom:1rem">
+      <div style="font-size:.75rem;color:#3fb950;margin-bottom:.5rem">Click on the animal you want to track</div>
+      <div class="click-photo" id="video-frame-photo" style="display:inline-block;max-width:100%">
+        <img id="video-frame0" style="max-width:100%;max-height:360px;border-radius:6px;border:1px solid #30363d;display:block">
       </div>
     </div>
-    <div style="font-size:.7rem;color:#484f58;margin-bottom:4px">Per-frame ear angle timeline</div>
-    <canvas id="video-chart" width="680" height="240" style="width:100%;display:block"></canvas>
-    <div id="video-stats" style="font-size:.7rem;color:#8b949e;margin-top:.5rem;text-align:center"></div>
+
+    <!-- Results -->
+    <div id="video-results" class="hidden">
+      <div style="display:flex;gap:1rem;flex-wrap:wrap;justify-content:center;align-items:start;margin-bottom:1rem">
+        <div style="flex:1;min-width:240px;max-width:360px;text-align:center">
+          <div style="font-size:.65rem;color:#484f58;margin-bottom:4px">Original</div>
+          <video id="video-preview" controls style="width:100%;border-radius:6px"></video>
+        </div>
+        <div style="flex:1;min-width:240px;max-width:360px;text-align:center">
+          <div style="font-size:.65rem;color:#484f58;margin-bottom:4px">SAM 3 tracked (head · ears · nose)</div>
+          <img id="video-annotated" style="width:100%;border-radius:6px;background:#0d1117">
+        </div>
+      </div>
+      <div style="font-size:.7rem;color:#484f58;margin-bottom:4px">Per-frame ear angle timeline</div>
+      <canvas id="video-chart" width="680" height="240" style="width:100%;display:block"></canvas>
+      <div id="video-stats" style="font-size:.7rem;color:#8b949e;margin-top:.5rem;text-align:center"></div>
+    </div>
+
   </div>
 </div>
 
@@ -213,36 +226,68 @@ async function upload(files){
   }catch(e){$('status').textContent='Upload failed.';}
 }
 
+let currentVideoId=null;
+
 async function uploadVideo(file){
   $('status').innerHTML='<span class="spinner"></span> Uploading video...';
   $('click-section').classList.add('hidden');
   $('seg-row').classList.add('hidden');
   $('measurements').classList.add('hidden');
   $('turntable-section').classList.add('hidden');
+  $('video-results').classList.add('hidden');
+  $('video-selector').classList.add('hidden');
   const fd=new FormData();
   fd.append('file', file);
   try{
     const r=await fetch('/api/upload_video',{method:'POST',body:fd});
     const info=await r.json();
+    currentVideoId=info.video_id;
     $('video-preview').src='/uploads/'+info.filename;
     $('video-section').classList.remove('hidden');
-    analyzeVideo(info.video_id);
+    // Show first frame for click-to-select
+    if(info.first_frame_url){
+      $('video-frame0').src=info.first_frame_url;
+      $('video-selector').classList.remove('hidden');
+      $('status').textContent='Click the animal you want to track.';
+    } else {
+      // Fallback: no first frame, run without click
+      analyzeVideo(currentVideoId, null, null);
+    }
   }catch(e){$('status').textContent='Video upload failed.';}
 }
 
-async function analyzeVideo(videoId){
+// Click handler on the first frame
+$('video-frame-photo').addEventListener('click', e=>{
+  if(!currentVideoId) return;
+  const img=$('video-frame0'), rect=img.getBoundingClientRect();
+  const x=(e.clientX-rect.left)/rect.width;
+  const y=(e.clientY-rect.top)/rect.height;
+  // Mark the click
+  img.parentNode.querySelectorAll('.click-dot').forEach(d=>d.remove());
+  const dot=document.createElement('div');
+  dot.className='click-dot';
+  dot.style.left=(x*100)+'%'; dot.style.top=(y*100)+'%';
+  dot.textContent='●';
+  img.parentNode.appendChild(dot);
+  analyzeVideo(currentVideoId, x, y);
+});
+
+async function analyzeVideo(videoId, clickX, clickY){
   const subject=document.querySelector('input[name="subject"]:checked').value;
   $('status').innerHTML='<span class="spinner"></span> SAM 3 tracking '+subject+' across frames (~1-3 min)...';
   try{
+    const body={video_id:videoId, subject:subject, max_frames:15};
+    if(clickX!=null && clickY!=null){ body.click_x=clickX; body.click_y=clickY; }
     const r=await fetch('/api/analyze/video',{
       method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({video_id:videoId, subject:subject, max_frames:15})
+      body:JSON.stringify(body)
     });
     if(!r.ok){ throw new Error((await r.json()).detail || r.statusText); }
     const d=await r.json();
     if(d.annotated_gif_url){
       $('video-annotated').src=d.annotated_gif_url;
     }
+    $('video-results').classList.remove('hidden');
     renderVideoTimeline(d);
     const s=d.summary||{};
     $('status').textContent='Tracked '+d.n_frames+' frames in '+Math.round(d.elapsed_s)+'s. '+s.frames_with_measurement+' with ear measurements.';
