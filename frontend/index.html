@@ -56,8 +56,13 @@ h1{font-family:'SF Mono',monospace;color:#3fb950;font-size:1.4rem}
   <input type="file" id="file-input" accept="image/*,.heic,.heif" style="display:none">
 </div>
 
-<!-- 2. Preview + click to segment -->
+<!-- 2. Subject type + preview -->
 <div id="click-section" class="hidden" style="margin:1.5rem 0;text-align:center">
+  <div style="margin-bottom:.75rem;font-size:.75rem;color:#8b949e">
+    Subject:
+    <label style="margin-left:.5rem"><input type="radio" name="subject" value="sheep" checked> sheep</label>
+    <label style="margin-left:.75rem"><input type="radio" name="subject" value="goat"> goat</label>
+  </div>
   <div class="click-photo" id="click-photo"><img id="click-img"></div>
   <div id="click-hint" style="font-size:.75rem;color:#3fb950;margin-top:.3rem"></div>
 </div>
@@ -167,57 +172,24 @@ async function upload(files){
       $('click-img').src='/uploads/'+photos[0].filename;
       $('click-section').classList.remove('hidden');
       $('seg-row').classList.add('hidden');
-      $('mesh-btn-section').classList.add('hidden');
+      $('measurements').classList.add('hidden');
       $('turntable-section').classList.add('hidden');
-      startClickFlow();
+      // Auto-segment with SAM 3 (no clicks needed)
+      autoSegment();
     }
   }catch(e){$('status').textContent='Upload failed.';}
 }
 
-/* ── 3-click: face → ear → ear ── */
-const STEPS=[
-  {label:'face',dot:'',   dotLabel:'F', hint:'1/3: Click the center of the face', color:'#3fb950'},
-  {label:'ear1',dot:'ear',dotLabel:'1', hint:'2/3: Click the first ear tip',      color:'#f0883e'},
-  {label:'ear2',dot:'ear',dotLabel:'2', hint:'3/3: Click the other ear tip',      color:'#f0883e'},
-];
-let clickStep=0, clickPoints=[];
-
-function startClickFlow(){
-  clickStep=0; clickPoints=[];
-  $('click-photo').querySelectorAll('.click-dot').forEach(d=>d.remove());
-  $('click-hint').textContent=STEPS[0].hint;
-  $('click-hint').style.color=STEPS[0].color;
-  $('status').textContent='';
-}
-
-$('click-photo').addEventListener('click',async e=>{
-  if(!currentPhotoId||clickStep>=STEPS.length) return;
-  const img=$('click-img'), rect=img.getBoundingClientRect();
-  const x=(e.clientX-rect.left)/rect.width, y=(e.clientY-rect.top)/rect.height;
-  const step=STEPS[clickStep];
-
-  clickPoints.push({x,y,label:step.label});
-  const d=document.createElement('div');
-  d.className='click-dot'+(step.dot?' '+step.dot:'');
-  d.style.left=(x*100)+'%'; d.style.top=(y*100)+'%';
-  d.textContent=step.dotLabel;
-  $('click-photo').appendChild(d);
-  clickStep++;
-
-  if(clickStep<STEPS.length){
-    const next=STEPS[clickStep];
-    $('click-hint').textContent=next.hint;
-    $('click-hint').style.color=next.color;
-    return;
-  }
-
-  $('click-hint').innerHTML='<span class="spinner"></span> Segmenting...';
+async function autoSegment(){
+  const subject=document.querySelector('input[name="subject"]:checked').value;
+  $('click-hint').innerHTML='<span class="spinner"></span> SAM 3 auto-detecting '+subject+' features...';
   $('click-hint').style.color='#8b949e';
+  $('status').textContent='';
 
   try{
-    const r=await fetch('/api/analyze/multiclick',{
+    const r=await fetch('/api/analyze/auto',{
       method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({photo_id:currentPhotoId,points:clickPoints})
+      body:JSON.stringify({photo_id:currentPhotoId, subject:subject})
     });
     const photo=await r.json();
     if(photo.segmentation?.masks){
@@ -228,17 +200,25 @@ $('click-photo').addEventListener('click',async e=>{
     }
     if(photo.ear_angles){
       const la=photo.ear_angles.left_ear_angle_deg, ra=photo.ear_angles.right_ear_angle_deg;
-      $('click-hint').textContent='Segmented';
+      $('click-hint').textContent='SAM 3 detected: head + '+([la,ra].filter(x=>x!=null).length)+' ears';
       $('click-hint').style.color='#3fb950';
       showMeasurements(la, ra);
+    } else {
+      $('click-hint').textContent='Segmented';
+      $('click-hint').style.color='#3fb950';
     }
-    $('status').textContent='Segmented in '+Math.round(photo.segmentation.segmentation_time_ms)+'ms.';
-    // Auto-generate depth mesh
+    $('status').textContent='SAM 3 segmented in '+Math.round(photo.segmentation.segmentation_time_ms)+'ms.';
     generateMesh();
   }catch(e){
-    $('click-hint').textContent='Failed.'; $('click-hint').style.color='#f85149';
+    $('click-hint').textContent='Auto-segment failed.';
+    $('click-hint').style.color='#f85149';
+    $('status').textContent=e.message||e;
   }
-  clickStep=0; clickPoints=[];
+}
+
+// Re-run when subject type changes
+document.querySelectorAll('input[name="subject"]').forEach(r=>{
+  r.addEventListener('change',()=>{ if(currentPhotoId) autoSegment(); });
 });
 
 /* ── Measurements ── */

@@ -27,6 +27,27 @@ _model = None
 _processor = None
 _device = None
 
+# SAM 3 (text-prompted) model cache
+_sam3_model = None
+_sam3_processor = None
+
+
+def _load_sam3_model():
+    """Load SAM 3 model from HuggingFace. Downloads ~3 GB on first run."""
+    global _sam3_model, _sam3_processor, _device
+    try:
+        from transformers import Sam3Model, Sam3Processor
+
+        _device = "cuda" if torch.cuda.is_available() else "cpu"
+        logger.info("Loading SAM 3 on %s...", _device)
+        _sam3_processor = Sam3Processor.from_pretrained("facebook/sam3")
+        _sam3_model = Sam3Model.from_pretrained("facebook/sam3").to(_device)
+        _sam3_model.eval()
+        logger.info("SAM 3 model loaded.")
+    except Exception as e:
+        logger.error("Failed to load SAM 3 model: %s", e)
+        _sam3_model = None
+
 
 def _load_model():
     """Load SAM 2.1 model from HuggingFace. Downloads ~350MB on first run."""
@@ -606,4 +627,149 @@ def _generate_demo_masks(image: np.ndarray, photo_id: str) -> SegmentationResult
         },
         confidence_scores={"head": 0.95, "left_ear": 0.82, "right_ear": 0.80},
         segmentation_time_ms=0.0,
+    )
+
+
+def _sam3_segment_text(image_pil: Image.Image, text: str) -> list[tuple[np.ndarray, float]]:
+    """Run SAM 3 with a text prompt. Returns list of (mask, score) tuples
+    sorted by score descending.
+    """
+    if _sam3_model is None or _sam3_processor is None:
+        return []
+
+    w, h = image_pil.size
+    inputs = _sam3_processor(
+        images=image_pil, text=text, return_tensors="pt"
+    ).to(_device)
+
+    with torch.no_grad():
+        outputs = _sam3_model(**inputs)
+
+    results = _sam3_processor.post_process_instance_segmentation(
+        outputs, threshold=0.3, mask_threshold=0.5, target_sizes=[(h, w)]
+    )[0]
+
+    out = []
+    for mask, score in zip(results["masks"], results["scores"]):
+        if hasattr(mask, "cpu"):
+            mask = mask.cpu().numpy()
+        mask_uint8 = (mask > 0.5).astype(np.uint8) * 255
+        out.append((mask_uint8, float(score)))
+
+    out.sort(key=lambda x: -x[1])
+    return out
+
+
+def segment_sheep_sam3(
+    image: np.ndarray, photo_id: str, subject: str = "sheep"
+) -> SegmentationResult:
+    """Segment sheep face using SAM 3 with text prompts — no clicks needed.
+
+    Uses open-vocabulary segmentation to auto-detect head, ears, eyes.
+    When multiple animals are in frame, picks the largest head instance
+    and filters features to those inside its bounding box.
+
+    Args:
+        subject: "sheep" or "goat" — guides the text prompts
+    """
+    global _sam3_model
+
+    if _sam3_model is None:
+        _load_sam3_model()
+    if _sam3_model is None:
+        logger.warning("SAM 3 unavailable, falling back to grid search")
+        return segment_sheep(image, photo_id)
+
+    start = time.time()
+    h, w = image.shape[:2]
+
+    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    image_pil = Image.fromarray(image_rgb)
+
+    result_masks = {}
+    raw_masks = {}
+    confidence = {}
+
+    # 1. Find the head — pick the largest high-confidence instance
+    head_candidates = _sam3_segment_text(image_pil, f"{subject} head")
+    if not head_candidates:
+        head_candidates = _sam3_segment_text(image_pil, "head")
+
+    head_mask = None
+    head_bbox = None
+    for mask, score in head_candidates:
+        area_frac = (mask > 127).sum() / (h * w)
+        # Head should be between 2% and 60% of image
+        if 0.02 <= area_frac <= 0.60:
+            head_mask = mask
+            coords = np.where(mask > 127)
+            head_bbox = (coords[0].min(), coords[1].min(),
+                         coords[0].max(), coords[1].max())
+            confidence["head"] = score
+            break
+
+    if head_mask is None:
+        logger.warning("SAM 3 could not find head")
+        return SegmentationResult(
+            photo_id=photo_id,
+            head_mask_found=False,
+            left_ear_mask_found=False,
+            right_ear_mask_found=False,
+            masks={},
+            confidence_scores={},
+            segmentation_time_ms=(time.time() - start) * 1000,
+        )
+
+    result_masks["head"] = _mask_to_base64_png(head_mask)
+    raw_masks["head"] = head_mask
+
+    # 2. Find ears — filter to those inside the head bbox
+    ear_candidates = _sam3_segment_text(image_pil, f"{subject} ear")
+    if not ear_candidates:
+        ear_candidates = _sam3_segment_text(image_pil, "ear")
+
+    head_center_x = (head_bbox[1] + head_bbox[3]) // 2
+    valid_ears = []
+    for mask, score in ear_candidates:
+        coords = np.where(mask > 127)
+        if len(coords[0]) < 50:
+            continue
+        cy, cx = int(coords[0].mean()), int(coords[1].mean())
+        # Ear centroid must be inside or near the head bbox
+        in_head = (head_bbox[0] - 50 <= cy <= head_bbox[2] + 50 and
+                   head_bbox[1] - 50 <= cx <= head_bbox[3] + 50)
+        if in_head:
+            valid_ears.append((mask, score, cx))
+        if len(valid_ears) >= 2:
+            break
+
+    # Sort by x-position (left = viewer's left)
+    valid_ears.sort(key=lambda e: e[2])
+    if len(valid_ears) >= 1:
+        result_masks["left_ear"] = _mask_to_base64_png(valid_ears[0][0])
+        raw_masks["left_ear"] = valid_ears[0][0]
+        confidence["left_ear"] = valid_ears[0][1]
+    if len(valid_ears) >= 2:
+        result_masks["right_ear"] = _mask_to_base64_png(valid_ears[1][0])
+        raw_masks["right_ear"] = valid_ears[1][0]
+        confidence["right_ear"] = valid_ears[1][1]
+
+    # Visualizations
+    result_masks["_extraction"] = _create_extraction(image, head_mask)
+    result_masks["_ear_overlay"] = _create_ear_overlay(image, raw_masks)
+
+    elapsed_ms = (time.time() - start) * 1000
+    logger.info(
+        "SAM 3 segmented %s (head + %d ears) in %.0fms",
+        photo_id, len(valid_ears), elapsed_ms,
+    )
+
+    return SegmentationResult(
+        photo_id=photo_id,
+        head_mask_found="head" in result_masks,
+        left_ear_mask_found="left_ear" in result_masks,
+        right_ear_mask_found="right_ear" in result_masks,
+        masks=result_masks,
+        confidence_scores=confidence,
+        segmentation_time_ms=elapsed_ms,
     )

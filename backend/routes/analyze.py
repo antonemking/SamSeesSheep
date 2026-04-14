@@ -19,7 +19,7 @@ from backend.pipeline.mesh3d import render_mesh_views, render_turntable
 from backend.pipeline.ear_angle import extract_ear_angles, _decode_mask
 from backend.pipeline.eup import compute_eup
 from backend.pipeline.narrative import generate_narrative
-from backend.pipeline.segment import segment_sheep_at_point, segment_sheep, segment_sheep_multipoint
+from backend.pipeline.segment import segment_sheep_at_point, segment_sheep, segment_sheep_multipoint, segment_sheep_sam3
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +102,46 @@ async def analyze_click(req: ClickRequest) -> PhotoAnalysis:
     py = int(req.y * h)
 
     seg_result = segment_sheep_at_point(image, req.photo_id, px, py)
+    ear_result = extract_ear_angles(seg_result)
+
+    analysis = PhotoAnalysis(
+        photo_id=req.photo_id,
+        filename=photo_path.name,
+        image_width=w,
+        image_height=h,
+        image_url=f"/uploads/{photo_path.name}" if "uploads" in str(photo_path) else f"/sample/{photo_path.name}",
+        segmentation=seg_result,
+        ear_angles=ear_result,
+    )
+
+    _session.photos = [p for p in _session.photos if p.photo_id != req.photo_id]
+    _session.photos.append(analysis)
+    _session.eup = compute_eup(_session.photos)
+
+    return analysis
+
+
+class AutoSegmentRequest(PydanticBaseModel):
+    photo_id: str
+    subject: str = "sheep"  # or "goat"
+
+
+@router.post("/analyze/auto")
+async def analyze_auto(req: AutoSegmentRequest) -> PhotoAnalysis:
+    """Auto-segment using SAM 3 with text prompts — no clicks needed."""
+    matches = list(UPLOAD_DIR.glob(f"{req.photo_id}.*"))
+    if not matches:
+        matches = list(SAMPLE_DIR.glob(f"{req.photo_id}.*"))
+    if not matches:
+        raise HTTPException(status_code=404, detail=f"Photo {req.photo_id} not found")
+
+    photo_path = matches[0]
+    image = cv2.imread(str(photo_path))
+    if image is None:
+        raise HTTPException(status_code=400, detail="Could not read image")
+
+    h, w = image.shape[:2]
+    seg_result = segment_sheep_sam3(image, req.photo_id, subject=req.subject)
     ear_result = extract_ear_angles(seg_result)
 
     analysis = PhotoAnalysis(
