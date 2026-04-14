@@ -152,9 +152,19 @@ def _pick_primary_object(
     return best_id
 
 
-def _mask_from_logits(mask_logits, threshold: float = 0.0) -> np.ndarray:
-    """Convert SAM 3 mask logits tensor to a uint8 binary mask."""
+def _mask_from_logits(
+    mask_logits, threshold: float = 0.0,
+    target_size: tuple[int, int] | None = None,
+) -> np.ndarray:
+    """Convert SAM 3 mask logits tensor to a uint8 binary mask.
+
+    Resizes to target_size (H, W) if provided, since SAM 3 Video outputs
+    masks at its internal resolution, not the input frame resolution.
+    """
     mask = (mask_logits.squeeze(0) > threshold).cpu().numpy().astype(np.uint8) * 255
+    if target_size is not None and mask.shape != target_size:
+        h, w = target_size
+        mask = cv2.resize(mask, (w, h), interpolation=cv2.INTER_NEAREST)
     return mask
 
 
@@ -246,6 +256,7 @@ def analyze_video(
 
     for i in range(len(pil_frames)):
         frame_data = {"frame_idx": i}
+        frame_w, frame_h = pil_frames[i].size
 
         head_out = results_per_prompt[head_key][i]
         ear_out = results_per_prompt[ear_key][i]
@@ -254,7 +265,10 @@ def analyze_video(
         # Head mask
         head_mask = None
         if primary_head is not None and primary_head in head_out["obj_id_to_mask"]:
-            head_mask = _mask_from_logits(head_out["obj_id_to_mask"][primary_head])
+            head_mask = _mask_from_logits(
+                head_out["obj_id_to_mask"][primary_head],
+                target_size=(frame_h, frame_w),
+            )
             if head_mask.sum() == 0:
                 head_mask = None
             else:
@@ -274,7 +288,7 @@ def analyze_video(
         # Ears: pick the 2 highest-confidence ones inside head bbox, sort by x
         ear_candidates = []
         for oid, mask_t in ear_out["obj_id_to_mask"].items():
-            m = _mask_from_logits(mask_t)
+            m = _mask_from_logits(mask_t, target_size=(frame_h, frame_w))
             if m.sum() < 50:
                 continue
             mc = np.where(m > 127)
@@ -299,7 +313,10 @@ def analyze_video(
         # Nose mask
         nose_mask = None
         if primary_nose is not None and primary_nose in nose_out["obj_id_to_mask"]:
-            nm = _mask_from_logits(nose_out["obj_id_to_mask"][primary_nose])
+            nm = _mask_from_logits(
+                nose_out["obj_id_to_mask"][primary_nose],
+                target_size=(frame_h, frame_w),
+            )
             mc = np.where(nm > 127)
             if len(mc[0]) > 20:
                 cy, cx = mc[0].mean(), mc[1].mean()
@@ -358,10 +375,15 @@ def analyze_video(
 
         per_frame.append(frame_data)
 
+    # Build an annotated GIF showing masks tracking across frames
+    gif_url = _build_annotated_gif(
+        pil_frames, per_frame, results_per_prompt,
+        primary_head, prompt_list, video_path,
+    )
+
     elapsed = time.time() - start
     logger.info("Video analysis: %d frames in %.1fs", len(pil_frames), elapsed)
 
-    # Summary stats
     left_angles = [f["left_ear_angle_deg"] for f in per_frame if "left_ear_angle_deg" in f]
     right_angles = [f["right_ear_angle_deg"] for f in per_frame if "right_ear_angle_deg" in f]
 
@@ -369,6 +391,7 @@ def analyze_video(
         "n_frames": len(pil_frames),
         "elapsed_s": elapsed,
         "per_frame": per_frame,
+        "annotated_gif_url": gif_url,
         "summary": {
             "frames_with_measurement": sum(
                 1 for f in per_frame
@@ -380,3 +403,91 @@ def analyze_video(
             "right_std_deg": float(np.std(right_angles)) if right_angles else None,
         },
     }
+
+
+def _build_annotated_gif(
+    pil_frames: list[Image.Image],
+    per_frame: list[dict],
+    results_per_prompt: dict,
+    primary_head: Optional[int],
+    prompt_list: list[str],
+    video_path: Path,
+) -> Optional[str]:
+    """Composite SAM 3 masks onto each frame and save as a looping GIF.
+
+    Head = green fill, ears = orange contours, nose = yellow dot.
+    """
+    try:
+        import imageio.v3 as iio
+    except Exception:
+        return None
+
+    from backend.config import RESULTS_DIR
+    head_key, ear_key, nose_key = prompt_list
+
+    annotated = []
+    for i, pil in enumerate(pil_frames):
+        frame = np.array(pil).copy()  # RGB
+        h, w = frame.shape[:2]
+
+        # Head: green translucent fill
+        head_out = results_per_prompt[head_key][i]
+        if primary_head is not None and primary_head in head_out["obj_id_to_mask"]:
+            m = _mask_from_logits(
+                head_out["obj_id_to_mask"][primary_head], target_size=(h, w),
+            )
+            if m.sum() > 0:
+                bool_m = m > 127
+                frame[bool_m] = (
+                    frame[bool_m].astype(np.float32) * 0.55 +
+                    np.array([63, 185, 80], dtype=np.float32) * 0.45
+                ).astype(np.uint8)
+
+        # Ears: thick contour in orange
+        ear_out = results_per_prompt[ear_key][i]
+        for oid, mask_t in ear_out["obj_id_to_mask"].items():
+            m = _mask_from_logits(mask_t, target_size=(h, w))
+            if m.sum() < 50:
+                continue
+            contours, _ = cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            cv2.drawContours(frame, contours, -1, (240, 136, 62), 3)
+
+        # Nose: yellow filled region
+        nose_out = results_per_prompt[nose_key][i]
+        for oid, mask_t in nose_out["obj_id_to_mask"].items():
+            m = _mask_from_logits(mask_t, target_size=(h, w))
+            if m.sum() < 20:
+                continue
+            bool_m = m > 127
+            frame[bool_m] = (
+                frame[bool_m].astype(np.float32) * 0.4 +
+                np.array([227, 179, 65], dtype=np.float32) * 0.6
+            ).astype(np.uint8)
+
+        # Overlay ear angle readings in corner
+        fd = per_frame[i]
+        la = fd.get("left_ear_angle_deg")
+        ra = fd.get("right_ear_angle_deg")
+        text = f"f{i}  L: {la:+.1f}  R: {ra:+.1f}" if la is not None and ra is not None else f"f{i}"
+        cv2.putText(
+            frame, text, (10, 25),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2, cv2.LINE_AA,
+        )
+
+        annotated.append(frame)
+
+    # Write as GIF
+    gif_name = f"{video_path.stem}_annotated.gif"
+    gif_path = RESULTS_DIR / gif_name
+    try:
+        iio.imwrite(
+            str(gif_path), annotated, loop=0, duration=250, plugin="pillow"
+        )
+        logger.info(
+            "Annotated GIF: %d frames, %.0f KB",
+            len(annotated), gif_path.stat().st_size / 1024,
+        )
+    except Exception as e:
+        logger.warning("GIF export failed: %s", e)
+        return None
+    return f"/results/{gif_name}"

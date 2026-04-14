@@ -105,11 +105,20 @@ h1{font-family:'SF Mono',monospace;color:#3fb950;font-size:1.4rem}
   </div>
 </div>
 
-<!-- 4b. Video: per-frame ear angle timeline -->
+<!-- 4b. Video: annotated tracking + per-frame ear angle timeline -->
 <div id="video-section" class="hidden" style="margin:1.5rem 0">
-  <div style="font-size:.7rem;color:#484f58;margin-bottom:4px">Per-frame ear angle timeline</div>
   <div style="border:1px solid #30363d;border-radius:6px;padding:1rem;background:#0d1117">
-    <video id="video-preview" controls style="width:100%;max-width:512px;display:block;margin:0 auto 1rem;border-radius:6px"></video>
+    <div style="display:flex;gap:1rem;flex-wrap:wrap;justify-content:center;align-items:start;margin-bottom:1rem">
+      <div style="flex:1;min-width:240px;max-width:360px;text-align:center">
+        <div style="font-size:.65rem;color:#484f58;margin-bottom:4px">Original</div>
+        <video id="video-preview" controls style="width:100%;border-radius:6px"></video>
+      </div>
+      <div style="flex:1;min-width:240px;max-width:360px;text-align:center">
+        <div style="font-size:.65rem;color:#484f58;margin-bottom:4px">SAM 3 tracked (head · ears · nose)</div>
+        <img id="video-annotated" style="width:100%;border-radius:6px;background:#0d1117">
+      </div>
+    </div>
+    <div style="font-size:.7rem;color:#484f58;margin-bottom:4px">Per-frame ear angle timeline</div>
     <canvas id="video-chart" width="680" height="240" style="width:100%;display:block"></canvas>
     <div id="video-stats" style="font-size:.7rem;color:#8b949e;margin-top:.5rem;text-align:center"></div>
   </div>
@@ -231,6 +240,9 @@ async function analyzeVideo(videoId){
     });
     if(!r.ok){ throw new Error((await r.json()).detail || r.statusText); }
     const d=await r.json();
+    if(d.annotated_gif_url){
+      $('video-annotated').src=d.annotated_gif_url;
+    }
     renderVideoTimeline(d);
     const s=d.summary||{};
     $('status').textContent='Tracked '+d.n_frames+' frames in '+Math.round(d.elapsed_s)+'s. '+s.frames_with_measurement+' with ear measurements.';
