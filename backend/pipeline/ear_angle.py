@@ -100,16 +100,99 @@ def _compute_mask_angle(mask: np.ndarray) -> Optional[tuple[float, float]]:
 
 
 def _compute_head_midline(head_mask: np.ndarray) -> Optional[float]:
-    """Estimate the dorsal midline angle of the head.
+    """Estimate the dorsal midline angle of the head (fallback).
 
-    The head midline is approximated as the major axis of the head mask,
-    which should align roughly with the nose-to-poll axis.
+    Uses PCA on the head mask. For frontal photos this gives the
+    left-right axis across the face, not the actual nose-to-poll axis.
+    Use _compute_anatomical_midline() when nose + ears are available.
     """
     result = _compute_mask_angle(head_mask)
     if result is None:
         return None
     angle, _ = result
     return angle
+
+
+def _mask_centroid(mask: np.ndarray) -> Optional[tuple[float, float]]:
+    """Return (cx, cy) centroid of a mask, or None if empty."""
+    coords = np.where(mask)
+    if len(coords[0]) == 0:
+        return None
+    return float(coords[1].mean()), float(coords[0].mean())
+
+
+def _compute_anatomical_midline(
+    nose_mask: Optional[np.ndarray],
+    left_ear_mask: Optional[np.ndarray],
+    right_ear_mask: Optional[np.ndarray],
+) -> Optional[tuple[float, tuple[float, float]]]:
+    """Compute the dorsal head axis from nose + ear landmarks.
+
+    Returns (angle_deg, head_center) where:
+    - angle_deg is the angle of the axis pointing from nose toward the
+      between-ears midpoint (the "up" direction of the head)
+    - head_center is (cx, cy) of the midpoint between ears, used as a
+      reference for ear-base disambiguation
+
+    The axis direction:
+    - In a frontal photo with head upright: angle ~ +90 (points up the image)
+    - In a profile photo with nose forward-right: angle ~ 0 or 180
+    """
+    nose_c = _mask_centroid(nose_mask) if nose_mask is not None else None
+    left_c = _mask_centroid(left_ear_mask) if left_ear_mask is not None else None
+    right_c = _mask_centroid(right_ear_mask) if right_ear_mask is not None else None
+
+    if nose_c is None:
+        return None
+
+    # Ear midpoint (use whatever ears we have)
+    if left_c and right_c:
+        ear_mid = ((left_c[0] + right_c[0]) / 2, (left_c[1] + right_c[1]) / 2)
+    elif left_c:
+        ear_mid = left_c
+    elif right_c:
+        ear_mid = right_c
+    else:
+        return None
+
+    # Vector from nose to ear-midpoint = "head up" direction
+    dx = ear_mid[0] - nose_c[0]
+    dy = ear_mid[1] - nose_c[1]
+    # In image coordinates, y increases downward — flip for math convention
+    angle_rad = np.arctan2(-dy, dx)
+    angle_deg = float(np.degrees(angle_rad))
+    return angle_deg, ear_mid
+
+
+def _compute_ear_direction(
+    ear_mask: np.ndarray, head_center: tuple[float, float]
+) -> Optional[tuple[float, float]]:
+    """Compute the ear's pointing direction (base → tip) as a unit vector.
+
+    Base = point on the ear mask closest to head center.
+    Tip = point on the ear mask farthest from head center.
+    Direction = tip - base, normalized.
+    """
+    coords = np.where(ear_mask)
+    if len(coords[0]) < 10:
+        return None
+
+    xs = coords[1].astype(np.float64)
+    ys = coords[0].astype(np.float64)
+    hx, hy = head_center
+
+    dists = np.sqrt((xs - hx) ** 2 + (ys - hy) ** 2)
+    base_idx = int(np.argmin(dists))
+    tip_idx = int(np.argmax(dists))
+
+    bx, by = xs[base_idx], ys[base_idx]
+    tx, ty = xs[tip_idx], ys[tip_idx]
+
+    dx, dy = tx - bx, ty - by
+    mag = np.sqrt(dx * dx + dy * dy)
+    if mag < 1e-6:
+        return None
+    return float(dx / mag), float(dy / mag)
 
 
 def _classify_ear_position(angle_relative_to_head: float) -> EarPosition:
@@ -151,45 +234,76 @@ def extract_ear_angles(
 ) -> EarAngleResult:
     """Extract ear angles from segmentation masks.
 
-    Computes the angle of each ear relative to the head's dorsal midline,
-    then classifies each ear as up/neutral/down per SPFES thresholds.
+    When nose + ears are all available (SAM 3), uses anatomical midline:
+      1. Head "up" axis from nose → ear-midpoint
+      2. For each ear, compute (base → tip) direction vector
+      3. Measure ear angle relative to head-horizontal (perpendicular to head-up)
+    Falls back to PCA + head-mask midline if landmarks are missing.
     """
     result = EarAngleResult(photo_id=segmentation.photo_id)
 
-    # Get head midline
+    # Decode available masks once
+    masks_data = {}
+    for k in ("head", "left_ear", "right_ear", "nose"):
+        if k in segmentation.masks:
+            masks_data[k] = _decode_mask(segmentation.masks[k])
+
+    anatomical = _compute_anatomical_midline(
+        masks_data.get("nose"),
+        masks_data.get("left_ear"),
+        masks_data.get("right_ear"),
+    )
+
+    if anatomical is not None:
+        # Preferred path: use anatomical midline + directed ear vectors
+        head_up_angle, head_center = anatomical
+        # Head-horizontal axis is perpendicular to head-up axis
+        head_horizontal_angle = head_up_angle - 90.0
+        result.head_midline_angle_deg = head_up_angle
+
+        for side, mask_key in (("left", "left_ear"), ("right", "right_ear")):
+            ear_mask = masks_data.get(mask_key)
+            if ear_mask is None:
+                continue
+            direction = _compute_ear_direction(ear_mask, head_center)
+            if direction is None:
+                continue
+            dx, dy = direction
+            # Angle of ear direction in image (standard math convention: y up)
+            ear_angle_world = float(np.degrees(np.arctan2(-dy, dx)))
+            # Angle relative to head-horizontal: + = up, - = down
+            rel = _normalize_angle(ear_angle_world - head_horizontal_angle)
+            # For left ear (viewer's left, negative x direction from center),
+            # flip sign so "up" means forward/up regardless of side
+            if side == "left":
+                rel = -rel + 180 if rel > 0 else -rel - 180
+                rel = _normalize_angle(rel)
+            setattr(result, f"{side}_ear_angle_deg", rel)
+            setattr(result, f"{side}_ear_position", _classify_ear_position(rel))
+            result.measurement_quality = max(result.measurement_quality, 0.9)
+        return result
+
+    # Fallback: PCA on ear masks + head-mask major axis as midline
     head_midline = None
-    if "head" in segmentation.masks:
-        head_mask = _decode_mask(segmentation.masks["head"])
-        head_midline = _compute_head_midline(head_mask)
+    if "head" in masks_data:
+        head_midline = _compute_head_midline(masks_data["head"])
         if head_midline is not None:
             result.head_midline_angle_deg = head_midline
 
-    # Process left ear
-    if "left_ear" in segmentation.masks:
-        left_mask = _decode_mask(segmentation.masks["left_ear"])
-        left_result = _compute_mask_angle(left_mask)
-        if left_result is not None:
-            angle, quality = left_result
-            if head_midline is not None:
-                relative_angle = _normalize_angle(angle - head_midline)
-            else:
-                relative_angle = _normalize_angle(angle)
-            result.left_ear_angle_deg = relative_angle
-            result.left_ear_position = _classify_ear_position(relative_angle)
-            result.measurement_quality = max(result.measurement_quality, quality)
-
-    # Process right ear
-    if "right_ear" in segmentation.masks:
-        right_mask = _decode_mask(segmentation.masks["right_ear"])
-        right_result = _compute_mask_angle(right_mask)
-        if right_result is not None:
-            angle, quality = right_result
-            if head_midline is not None:
-                relative_angle = _normalize_angle(angle - head_midline)
-            else:
-                relative_angle = _normalize_angle(angle)
-            result.right_ear_angle_deg = relative_angle
-            result.right_ear_position = _classify_ear_position(relative_angle)
-            result.measurement_quality = max(result.measurement_quality, quality)
+    for side, mask_key in (("left", "left_ear"), ("right", "right_ear")):
+        ear_mask = masks_data.get(mask_key)
+        if ear_mask is None:
+            continue
+        r = _compute_mask_angle(ear_mask)
+        if r is None:
+            continue
+        angle, quality = r
+        if head_midline is not None:
+            rel = _normalize_angle(angle - head_midline)
+        else:
+            rel = _normalize_angle(angle)
+        setattr(result, f"{side}_ear_angle_deg", rel)
+        setattr(result, f"{side}_ear_position", _classify_ear_position(rel))
+        result.measurement_quality = max(result.measurement_quality, quality)
 
     return result
