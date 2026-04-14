@@ -283,10 +283,36 @@ def analyze_video(
         return max(votes, key=votes.get)
 
     # For head: click selection is critical (determines which animal we track)
-    primary_head = click_primary(results_per_prompt[head_key]) or \
-                   stable_primary(results_per_prompt[head_key])
-    primary_nose = click_primary(results_per_prompt[nose_key]) or \
-                   stable_primary(results_per_prompt[nose_key])
+    # Log candidates to help debug which animal got selected
+    if click_point is not None:
+        frame0_heads = results_per_prompt[head_key][0]
+        logger.info("Click at normalized (%.2f, %.2f) = pixel (%d, %d)",
+                    click_point[0], click_point[1],
+                    int(click_point[0] * frame_w), int(click_point[1] * frame_h))
+        for oid, mask_t in frame0_heads["obj_id_to_mask"].items():
+            m = _mask_from_logits(mask_t, target_size=(frame_h, frame_w))
+            if m.sum() < 20:
+                continue
+            coords = np.where(m > 127)
+            cy, cx = coords[0].mean(), coords[1].mean()
+            area_frac = m.sum() / (frame_h * frame_w * 255)
+            score = frame0_heads["obj_id_to_score"].get(oid, 0)
+            tx = int(click_point[0] * frame_w)
+            ty = int(click_point[1] * frame_h)
+            inside = m[ty, tx] > 127 if 0 <= ty < frame_h and 0 <= tx < frame_w else False
+            logger.info(
+                "  head obj_id=%d: score=%.2f, centroid=(%.0f,%.0f), area=%.2f%%, click_inside=%s",
+                oid, score, cx, cy, area_frac*100, inside,
+            )
+
+    # Note: avoid `a or b` because a valid object ID can be 0 (falsy in Python)
+    primary_head = click_primary(results_per_prompt[head_key])
+    if primary_head is None:
+        primary_head = stable_primary(results_per_prompt[head_key])
+    primary_nose = click_primary(results_per_prompt[nose_key])
+    if primary_nose is None:
+        primary_nose = stable_primary(results_per_prompt[nose_key])
+    logger.info("Selected primary_head=%s, primary_nose=%s", primary_head, primary_nose)
 
     for i in range(len(pil_frames)):
         frame_data = {"frame_idx": i}
@@ -426,7 +452,7 @@ def analyze_video(
     # Build an annotated GIF showing masks tracking across frames
     gif_url = _build_annotated_gif(
         pil_frames, per_frame, results_per_prompt,
-        primary_head, prompt_list, video_path,
+        primary_head, primary_nose, prompt_list, video_path,
     )
 
     elapsed = time.time() - start
@@ -458,6 +484,7 @@ def _build_annotated_gif(
     per_frame: list[dict],
     results_per_prompt: dict,
     primary_head: Optional[int],
+    primary_nose: Optional[int],
     prompt_list: list[str],
     video_path: Path,
 ) -> Optional[str]:
@@ -479,38 +506,53 @@ def _build_annotated_gif(
         h, w = frame.shape[:2]
 
         # Head: green translucent fill
+        head_mask_bool = None
+        dilated_head = None
         head_out = results_per_prompt[head_key][i]
         if primary_head is not None and primary_head in head_out["obj_id_to_mask"]:
             m = _mask_from_logits(
                 head_out["obj_id_to_mask"][primary_head], target_size=(h, w),
             )
             if m.sum() > 0:
-                bool_m = m > 127
-                frame[bool_m] = (
-                    frame[bool_m].astype(np.float32) * 0.55 +
+                head_mask_bool = m > 127
+                frame[head_mask_bool] = (
+                    frame[head_mask_bool].astype(np.float32) * 0.55 +
                     np.array([63, 185, 80], dtype=np.float32) * 0.45
                 ).astype(np.uint8)
+                dilated_head = cv2.dilate(
+                    m, np.ones((15, 15), np.uint8), iterations=1,
+                ) > 127
 
-        # Ears: thick contour in orange
+        # Ears: thick contour in orange, filtered to the tracked head
         ear_out = results_per_prompt[ear_key][i]
         for oid, mask_t in ear_out["obj_id_to_mask"].items():
             m = _mask_from_logits(mask_t, target_size=(h, w))
             if m.sum() < 50:
                 continue
+            ear_bool = m > 127
+            # Skip ears not attached to the tracked head (e.g., other animal's ears)
+            if dilated_head is not None:
+                coords = np.where(ear_bool)
+                cy, cx = int(coords[0].mean()), int(coords[1].mean())
+                centroid_inside = dilated_head[cy, cx]
+                overlap_frac = (ear_bool & dilated_head).sum() / max(1, ear_bool.sum())
+                if not centroid_inside and overlap_frac < 0.15:
+                    continue
             contours, _ = cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             cv2.drawContours(frame, contours, -1, (240, 136, 62), 3)
 
-        # Nose: yellow filled region
+        # Nose: yellow filled region (only the tracked nose)
         nose_out = results_per_prompt[nose_key][i]
-        for oid, mask_t in nose_out["obj_id_to_mask"].items():
-            m = _mask_from_logits(mask_t, target_size=(h, w))
-            if m.sum() < 20:
-                continue
-            bool_m = m > 127
-            frame[bool_m] = (
-                frame[bool_m].astype(np.float32) * 0.4 +
-                np.array([227, 179, 65], dtype=np.float32) * 0.6
-            ).astype(np.uint8)
+        if primary_nose is not None and primary_nose in nose_out["obj_id_to_mask"]:
+            m = _mask_from_logits(
+                nose_out["obj_id_to_mask"][primary_nose], target_size=(h, w),
+            )
+            if m.sum() >= 20:
+                bool_m = m > 127
+                frame[bool_m] = (
+                    frame[bool_m].astype(np.float32) * 0.4 +
+                    np.array([227, 179, 65], dtype=np.float32) * 0.6
+                ).astype(np.uint8)
 
         # Overlay ear angle readings in corner
         fd = per_frame[i]
