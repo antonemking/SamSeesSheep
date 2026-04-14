@@ -281,7 +281,11 @@ async def generate_mesh(req: MeshRequest):
     if photo_analysis is None or photo_analysis.segmentation is None:
         raise HTTPException(status_code=400, detail="Run segmentation first (click on face)")
 
-    head_mask_b64 = photo_analysis.segmentation.masks.get("head")
+    # Prefer the tight face mask (built from landmarks) over the full head mask
+    head_mask_b64 = (
+        photo_analysis.segmentation.masks.get("face")
+        or photo_analysis.segmentation.masks.get("head")
+    )
     if not head_mask_b64:
         raise HTTPException(status_code=400, detail="No head mask found")
 

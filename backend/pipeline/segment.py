@@ -630,6 +630,55 @@ def _generate_demo_masks(image: np.ndarray, photo_id: str) -> SegmentationResult
     )
 
 
+def _build_face_mask(
+    head_mask: np.ndarray,
+    raw_masks: dict[str, np.ndarray],
+    head_bbox: tuple[int, int, int, int],
+) -> np.ndarray | None:
+    """Build a tight face mask from landmark positions.
+
+    Uses ears, eyes, and nose bounding boxes to compute a face-only bbox,
+    then intersects it with the head mask. This excludes neck/wool from
+    the downstream face extraction and depth mesh.
+    """
+    landmarks = [raw_masks.get(k) for k in
+                 ("left_ear", "right_ear", "left_eye", "right_eye", "nose")]
+    landmarks = [m for m in landmarks if m is not None]
+    if len(landmarks) < 3:
+        # Not enough landmarks to construct a reliable face bbox
+        return None
+
+    # Union of landmark bboxes
+    ys_min, xs_min, ys_max, xs_max = [], [], [], []
+    for m in landmarks:
+        coords = np.where(m > 127)
+        if len(coords[0]) == 0:
+            continue
+        ys_min.append(coords[0].min())
+        xs_min.append(coords[1].min())
+        ys_max.append(coords[0].max())
+        xs_max.append(coords[1].max())
+
+    if not ys_min:
+        return None
+
+    # Face bbox: tight around landmarks + ~10% padding
+    y1, x1 = min(ys_min), min(xs_min)
+    y2, x2 = max(ys_max), max(xs_max)
+    pad_y = int((y2 - y1) * 0.10)
+    pad_x = int((x2 - x1) * 0.10)
+    h, w = head_mask.shape[:2]
+    y1 = max(head_bbox[0], y1 - pad_y)
+    y2 = min(head_bbox[2], y2 + pad_y)
+    x1 = max(head_bbox[1], x1 - pad_x)
+    x2 = min(head_bbox[3], x2 + pad_x)
+
+    # Intersect head mask with face bbox
+    face_mask = np.zeros_like(head_mask)
+    face_mask[y1:y2, x1:x2] = head_mask[y1:y2, x1:x2]
+    return face_mask
+
+
 def _sam3_segment_text(image_pil: Image.Image, text: str) -> list[tuple[np.ndarray, float]]:
     """Run SAM 3 with a text prompt. Returns list of (mask, score) tuples
     sorted by score descending.
@@ -754,14 +803,69 @@ def segment_sheep_sam3(
         raw_masks["right_ear"] = valid_ears[1][0]
         confidence["right_ear"] = valid_ears[1][1]
 
-    # Visualizations
-    result_masks["_extraction"] = _create_extraction(image, head_mask)
+    # 3. Eyes — same approach, filter to inside head bbox
+    eye_candidates = _sam3_segment_text(image_pil, f"{subject} eye")
+    if not eye_candidates:
+        eye_candidates = _sam3_segment_text(image_pil, "eye")
+
+    valid_eyes = []
+    for mask, score in eye_candidates:
+        coords = np.where(mask > 127)
+        if len(coords[0]) < 20:
+            continue
+        cy, cx = int(coords[0].mean()), int(coords[1].mean())
+        # Eyes must be inside the head bbox
+        if (head_bbox[0] <= cy <= head_bbox[2] and
+                head_bbox[1] <= cx <= head_bbox[3]):
+            valid_eyes.append((mask, score, cx))
+        if len(valid_eyes) >= 2:
+            break
+
+    valid_eyes.sort(key=lambda e: e[2])
+    if len(valid_eyes) >= 1:
+        result_masks["left_eye"] = _mask_to_base64_png(valid_eyes[0][0])
+        raw_masks["left_eye"] = valid_eyes[0][0]
+        confidence["left_eye"] = valid_eyes[0][1]
+    if len(valid_eyes) >= 2:
+        result_masks["right_eye"] = _mask_to_base64_png(valid_eyes[1][0])
+        raw_masks["right_eye"] = valid_eyes[1][0]
+        confidence["right_eye"] = valid_eyes[1][1]
+
+    # 4. Nose — single instance expected
+    nose_candidates = _sam3_segment_text(image_pil, f"{subject} nose")
+    if not nose_candidates:
+        nose_candidates = _sam3_segment_text(image_pil, "nose")
+
+    for mask, score in nose_candidates:
+        coords = np.where(mask > 127)
+        if len(coords[0]) < 20:
+            continue
+        cy, cx = int(coords[0].mean()), int(coords[1].mean())
+        if (head_bbox[0] <= cy <= head_bbox[2] and
+                head_bbox[1] <= cx <= head_bbox[3]):
+            result_masks["nose"] = _mask_to_base64_png(mask)
+            raw_masks["nose"] = mask
+            confidence["nose"] = score
+            break
+
+    # 5. Build a tight face bbox from landmarks (ears, eyes, nose).
+    # The head mask often includes the neck; this restricts to just
+    # the face region for a cleaner extraction and depth mesh.
+    face_mask = _build_face_mask(head_mask, raw_masks, head_bbox)
+    if face_mask is not None:
+        result_masks["face"] = _mask_to_base64_png(face_mask)
+        raw_masks["face"] = face_mask
+
+    # Visualizations — use tight face mask for extraction when available
+    extraction_mask = face_mask if face_mask is not None else head_mask
+    result_masks["_extraction"] = _create_extraction(image, extraction_mask)
     result_masks["_ear_overlay"] = _create_ear_overlay(image, raw_masks)
 
     elapsed_ms = (time.time() - start) * 1000
+    has_nose = "nose" in result_masks
     logger.info(
-        "SAM 3 segmented %s (head + %d ears) in %.0fms",
-        photo_id, len(valid_ears), elapsed_ms,
+        "SAM 3 segmented %s (head + %d ears + %d eyes + nose=%s) in %.0fms",
+        photo_id, len(valid_ears), len(valid_eyes), has_nose, elapsed_ms,
     )
 
     return SegmentationResult(
