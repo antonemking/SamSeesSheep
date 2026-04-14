@@ -121,6 +121,32 @@ async def analyze_click(req: ClickRequest) -> PhotoAnalysis:
     return analysis
 
 
+class VideoAnalyzeRequest(PydanticBaseModel):
+    video_id: str
+    subject: str = "sheep"
+    max_frames: int = 30
+
+
+@router.post("/analyze/video")
+async def analyze_video_endpoint(req: VideoAnalyzeRequest) -> dict:
+    """Run SAM 3 Video tracking across a clip to get per-frame ear angles."""
+    matches = list(UPLOAD_DIR.glob(f"{req.video_id}.*"))
+    if not matches:
+        raise HTTPException(status_code=404, detail=f"Video {req.video_id} not found")
+    video_path = matches[0]
+
+    from backend.pipeline.video import analyze_video as _run
+    try:
+        result = _run(video_path, subject=req.subject, max_frames=req.max_frames)
+    except Exception as e:
+        logger.exception("Video analysis failed")
+        raise HTTPException(status_code=500, detail=f"Video analysis failed: {e}")
+
+    result["video_id"] = req.video_id
+    result["video_url"] = f"/uploads/{video_path.name}"
+    return result
+
+
 class AutoSegmentRequest(PydanticBaseModel):
     photo_id: str
     subject: str = "sheep"  # or "goat"

@@ -52,3 +52,21 @@ async def upload_photos(files: list[UploadFile]) -> list[PhotoAnalysis]:
         )
         results.append(analysis)
     return results
+
+
+@router.post("/upload_video")
+async def upload_video(file: UploadFile) -> dict:
+    """Upload a video for frame-by-frame analysis."""
+    import uuid as _uuid
+    video_id = str(_uuid.uuid4())[:8]
+    suffix = Path(file.filename or "video.mp4").suffix.lower() or ".mp4"
+    if suffix not in {".mp4", ".mov", ".webm", ".m4v", ".avi"}:
+        suffix = ".mp4"
+    save_path = UPLOAD_DIR / f"{video_id}{suffix}"
+    contents = await file.read()
+    save_path.write_bytes(contents)
+    return {
+        "video_id": video_id,
+        "filename": save_path.name,
+        "size_kb": len(contents) // 1024,
+    }

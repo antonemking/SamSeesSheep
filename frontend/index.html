@@ -52,8 +52,8 @@ h1{font-family:'SF Mono',monospace;color:#3fb950;font-size:1.4rem}
 
 <!-- 1. Upload -->
 <div class="upload" id="upload-zone">
-  <p><strong>Drop a sheep photo</strong> or click to browse</p>
-  <input type="file" id="file-input" accept="image/*,.heic,.heif" style="display:none">
+  <p><strong>Drop a sheep photo or video</strong> or click to browse</p>
+  <input type="file" id="file-input" accept="image/*,video/*,.heic,.heif,.mp4,.mov,.webm" style="display:none">
 </div>
 
 <!-- 2. Subject type + model toggle + preview -->
@@ -102,6 +102,16 @@ h1{font-family:'SF Mono',monospace;color:#3fb950;font-size:1.4rem}
   </div>
   <div style="text-align:center;font-size:.6rem;color:#484f58;font-style:italic">
     Single-frame reading &mdash; trust deltas over time, not absolutes. See <a href="https://github.com/antonemking/SamSeesSheep/blob/main/VALIDATION.md" style="color:#484f58">VALIDATION.md</a>.
+  </div>
+</div>
+
+<!-- 4b. Video: per-frame ear angle timeline -->
+<div id="video-section" class="hidden" style="margin:1.5rem 0">
+  <div style="font-size:.7rem;color:#484f58;margin-bottom:4px">Per-frame ear angle timeline</div>
+  <div style="border:1px solid #30363d;border-radius:6px;padding:1rem;background:#0d1117">
+    <video id="video-preview" controls style="width:100%;max-width:512px;display:block;margin:0 auto 1rem;border-radius:6px"></video>
+    <canvas id="video-chart" width="680" height="240" style="width:100%;display:block"></canvas>
+    <div id="video-stats" style="font-size:.7rem;color:#8b949e;margin-top:.5rem;text-align:center"></div>
   </div>
 </div>
 
@@ -171,9 +181,13 @@ zone.addEventListener('click',()=>input.click());
 input.addEventListener('change',e=>{if(e.target.files.length)upload(e.target.files)});
 
 async function upload(files){
+  const f = files[0];
+  const isVideo = f.type.startsWith('video/') || /\.(mp4|mov|webm|m4v)$/i.test(f.name);
+  if (isVideo) return uploadVideo(f);
+
   $('status').innerHTML='<span class="spinner"></span> Uploading...';
   const fd=new FormData();
-  fd.append('files',files[0]);
+  fd.append('files',f);
   try{
     const r=await fetch('/api/upload',{method:'POST',body:fd});
     const photos=await r.json();
@@ -184,9 +198,114 @@ async function upload(files){
       $('seg-row').classList.add('hidden');
       $('measurements').classList.add('hidden');
       $('turntable-section').classList.add('hidden');
+      $('video-section').classList.add('hidden');
       runSelectedModel();
     }
   }catch(e){$('status').textContent='Upload failed.';}
+}
+
+async function uploadVideo(file){
+  $('status').innerHTML='<span class="spinner"></span> Uploading video...';
+  $('click-section').classList.add('hidden');
+  $('seg-row').classList.add('hidden');
+  $('measurements').classList.add('hidden');
+  $('turntable-section').classList.add('hidden');
+  const fd=new FormData();
+  fd.append('file', file);
+  try{
+    const r=await fetch('/api/upload_video',{method:'POST',body:fd});
+    const info=await r.json();
+    $('video-preview').src='/uploads/'+info.filename;
+    $('video-section').classList.remove('hidden');
+    analyzeVideo(info.video_id);
+  }catch(e){$('status').textContent='Video upload failed.';}
+}
+
+async function analyzeVideo(videoId){
+  const subject=document.querySelector('input[name="subject"]:checked').value;
+  $('status').innerHTML='<span class="spinner"></span> SAM 3 tracking '+subject+' across frames (~1-3 min)...';
+  try{
+    const r=await fetch('/api/analyze/video',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({video_id:videoId, subject:subject, max_frames:30})
+    });
+    if(!r.ok){ throw new Error((await r.json()).detail || r.statusText); }
+    const d=await r.json();
+    renderVideoTimeline(d);
+    const s=d.summary||{};
+    $('status').textContent='Tracked '+d.n_frames+' frames in '+Math.round(d.elapsed_s)+'s. '+s.frames_with_measurement+' with ear measurements.';
+  }catch(e){
+    $('status').textContent='Video analysis failed: '+(e.message||e);
+  }
+}
+
+function renderVideoTimeline(data){
+  const perFrame=data.per_frame||[];
+  const cv=$('video-chart'); const ctx=cv.getContext('2d');
+  // Handle DPR for crisp rendering
+  const rect=cv.getBoundingClientRect();
+  cv.width=rect.width*devicePixelRatio;
+  cv.height=240*devicePixelRatio;
+  ctx.scale(devicePixelRatio, devicePixelRatio);
+  const W=rect.width, H=240;
+  ctx.fillStyle='#0d1117'; ctx.fillRect(0,0,W,H);
+
+  // Axes: x = frame index, y = angle from -60 to +60
+  const PAD_L=40, PAD_R=10, PAD_T=15, PAD_B=25;
+  const plotW=W-PAD_L-PAD_R, plotH=H-PAD_T-PAD_B;
+  const yMin=-60, yMax=60;
+  const yToPx=y=>PAD_T+plotH*(1-(y-yMin)/(yMax-yMin));
+  const xToPx=i=>PAD_L+plotW*(i/(perFrame.length-1||1));
+
+  // Threshold bands
+  ctx.fillStyle='rgba(63,185,80,.10)';  ctx.fillRect(PAD_L, yToPx(60), plotW, yToPx(30)-yToPx(60));
+  ctx.fillStyle='rgba(210,153,34,.10)'; ctx.fillRect(PAD_L, yToPx(30), plotW, yToPx(-10)-yToPx(30));
+  ctx.fillStyle='rgba(248,81,73,.10)';  ctx.fillRect(PAD_L, yToPx(-10), plotW, yToPx(-60)-yToPx(-10));
+
+  // Grid lines at 0, 30, -10
+  ctx.strokeStyle='#30363d'; ctx.lineWidth=1;
+  ctx.font='10px SF Mono, monospace'; ctx.fillStyle='#484f58';
+  [30, 0, -10, -60, 60].forEach(y=>{
+    const py=yToPx(y);
+    ctx.beginPath(); ctx.moveTo(PAD_L, py); ctx.lineTo(W-PAD_R, py); ctx.stroke();
+    ctx.fillText(y+'\u00b0', 5, py+3);
+  });
+  // X axis label
+  ctx.fillText('frame', W/2-15, H-5);
+
+  // Plot left ear (bright blue) and right ear (orange)
+  function plot(key, color){
+    ctx.strokeStyle=color; ctx.lineWidth=2; ctx.beginPath();
+    let started=false;
+    perFrame.forEach((f,i)=>{
+      const v=f[key];
+      if(v==null){ started=false; return; }
+      const px=xToPx(i), py=yToPx(Math.max(yMin,Math.min(yMax,v)));
+      if(!started){ ctx.moveTo(px,py); started=true; } else { ctx.lineTo(px,py); }
+    });
+    ctx.stroke();
+    // Dots
+    ctx.fillStyle=color;
+    perFrame.forEach((f,i)=>{
+      const v=f[key]; if(v==null) return;
+      const px=xToPx(i), py=yToPx(Math.max(yMin,Math.min(yMax,v)));
+      ctx.beginPath(); ctx.arc(px,py,2.5,0,Math.PI*2); ctx.fill();
+    });
+  }
+  plot('left_ear_angle_deg', '#58a6ff');
+  plot('right_ear_angle_deg', '#f0883e');
+
+  // Legend
+  ctx.font='11px SF Mono, monospace';
+  ctx.fillStyle='#58a6ff'; ctx.fillText('\u2014 left',  PAD_L+10, PAD_T+12);
+  ctx.fillStyle='#f0883e'; ctx.fillText('\u2014 right', PAD_L+70, PAD_T+12);
+
+  // Stats line
+  const s=data.summary||{};
+  const fmt=x=>x==null?'--':x.toFixed(1)+'\u00b0';
+  $('video-stats').innerHTML =
+    'Left mean: '+fmt(s.left_mean_deg)+' &plusmn; '+fmt(s.left_std_deg)+
+    '  &middot;  Right mean: '+fmt(s.right_mean_deg)+' &plusmn; '+fmt(s.right_std_deg);
 }
 
 function runSelectedModel(){
