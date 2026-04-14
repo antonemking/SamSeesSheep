@@ -80,23 +80,28 @@ h1{font-family:'SF Mono',monospace;color:#3fb950;font-size:1.4rem}
 
 <!-- 4. Ear angle measurements -->
 <div id="measurements" class="hidden">
-  <div style="display:flex;gap:1.5rem;justify-content:center;margin:1.5rem 0">
+  <div style="display:flex;gap:1.5rem;justify-content:center;margin:1.5rem 0 .75rem">
     <div style="text-align:center">
       <div style="font-size:.65rem;color:#484f58;margin-bottom:.25rem">Left Ear</div>
       <div id="m-left" style="font-size:2rem;font-weight:800;font-family:'SF Mono',monospace">--</div>
       <div id="m-left-label" style="font-size:.7rem;margin-top:.15rem">--</div>
+      <div id="m-left-conf" style="font-size:.6rem;color:#484f58;margin-top:.1rem">--</div>
     </div>
     <div style="text-align:center">
       <div style="font-size:.65rem;color:#484f58;margin-bottom:.25rem">Right Ear</div>
       <div id="m-right" style="font-size:2rem;font-weight:800;font-family:'SF Mono',monospace">--</div>
       <div id="m-right-label" style="font-size:.7rem;margin-top:.15rem">--</div>
+      <div id="m-right-conf" style="font-size:.6rem;color:#484f58;margin-top:.1rem">--</div>
     </div>
   </div>
-  <div style="text-align:center;font-size:.6rem;color:#484f58">
+  <div style="text-align:center;font-size:.6rem;color:#484f58;margin-bottom:.3rem">
     Thresholds: <span style="color:#3fb950">&gt;30&deg; up</span> &middot;
     <span style="color:#d29922">-10&deg;&ndash;30&deg; neutral</span> &middot;
     <span style="color:#f85149">&lt;-10&deg; down</span>
-    &mdash; McLennan 2019
+    &mdash; <a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC6523241/" style="color:#484f58">McLennan 2019</a>
+  </div>
+  <div style="text-align:center;font-size:.6rem;color:#484f58;font-style:italic">
+    Single-frame reading &mdash; trust deltas over time, not absolutes. See <a href="https://github.com/antonemking/SamSeesSheep/blob/main/VALIDATION.md" style="color:#484f58">VALIDATION.md</a>.
   </div>
 </div>
 
@@ -215,7 +220,7 @@ async function autoSegment(){
       const la=photo.ear_angles.left_ear_angle_deg, ra=photo.ear_angles.right_ear_angle_deg;
       $('click-hint').textContent='SAM 3 detected: head + '+([la,ra].filter(x=>x!=null).length)+' ears';
       $('click-hint').style.color='#3fb950';
-      showMeasurements(la, ra);
+      showMeasurements(la, ra, photo.segmentation?.confidence_scores);
     } else {
       $('click-hint').textContent='Segmented';
       $('click-hint').style.color='#3fb950';
@@ -301,7 +306,7 @@ $('click-photo').addEventListener('click',async e=>{
       const la=photo.ear_angles.left_ear_angle_deg, ra=photo.ear_angles.right_ear_angle_deg;
       $('click-hint').textContent='SAM 2.1 segmented';
       $('click-hint').style.color='#3fb950';
-      showMeasurements(la, ra);
+      showMeasurements(la, ra, photo.segmentation?.confidence_scores);
     }
     $('status').textContent='SAM 2.1 segmented in '+Math.round(photo.segmentation.segmentation_time_ms)+'ms.';
     generateMesh();
@@ -314,19 +319,22 @@ $('click-photo').addEventListener('click',async e=>{
 /* ── Measurements ── */
 function angleColor(deg){ return deg>30?'#3fb950':deg<-10?'#f85149':'#d29922'; }
 function angleLabel(deg){ return deg>30?'up / alert':deg<-10?'down / back':'neutral'; }
-function showMeasurements(la, ra){
+function showMeasurements(la, ra, conf){
   $('measurements').classList.remove('hidden');
+  conf = conf || {};
   if(la!=null){
     $('m-left').textContent=la.toFixed(1)+'\u00b0';
     $('m-left').style.color=angleColor(la);
     $('m-left-label').textContent=angleLabel(la);
     $('m-left-label').style.color=angleColor(la);
+    if(conf.left_ear!=null) $('m-left-conf').textContent='conf '+(conf.left_ear*100).toFixed(0)+'%';
   }
   if(ra!=null){
     $('m-right').textContent=ra.toFixed(1)+'\u00b0';
     $('m-right').style.color=angleColor(ra);
     $('m-right-label').textContent=angleLabel(ra);
     $('m-right-label').style.color=angleColor(ra);
+    if(conf.right_ear!=null) $('m-right-conf').textContent='conf '+(conf.right_ear*100).toFixed(0)+'%';
   }
 }
 
