@@ -227,7 +227,7 @@ async function analyzeVideo(videoId){
   try{
     const r=await fetch('/api/analyze/video',{
       method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({video_id:videoId, subject:subject, max_frames:30})
+      body:JSON.stringify({video_id:videoId, subject:subject, max_frames:15})
     });
     if(!r.ok){ throw new Error((await r.json()).detail || r.statusText); }
     const d=await r.json();

@@ -136,11 +136,31 @@ async def analyze_video_endpoint(req: VideoAnalyzeRequest) -> dict:
     video_path = matches[0]
 
     from backend.pipeline.video import analyze_video as _run
-    try:
-        result = _run(video_path, subject=req.subject, max_frames=req.max_frames)
-    except Exception as e:
-        logger.exception("Video analysis failed")
-        raise HTTPException(status_code=500, detail=f"Video analysis failed: {e}")
+    import gc, torch
+
+    # If OOM, clean up and retry with fewer frames
+    attempt_frames = [req.max_frames, max(6, req.max_frames // 2), 6]
+    last_err = None
+    for n in attempt_frames:
+        try:
+            result = _run(video_path, subject=req.subject, max_frames=n)
+            if n < req.max_frames:
+                result["retry_reduced_frames_from"] = req.max_frames
+            break
+        except torch.cuda.OutOfMemoryError as e:
+            logger.warning("Video OOM at max_frames=%d, cleaning up", n)
+            gc.collect()
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+            last_err = e
+        except Exception as e:
+            logger.exception("Video analysis failed")
+            raise HTTPException(status_code=500, detail=f"Video analysis failed: {e}")
+    else:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Video analysis failed (OOM after retries): {last_err}",
+        )
 
     result["video_id"] = req.video_id
     result["video_url"] = f"/uploads/{video_path.name}"

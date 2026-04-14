@@ -34,13 +34,16 @@ _sam3_processor = None
 
 def _free_sam3_video_model():
     """Unload the SAM 3 video model to free VRAM for the image model."""
+    import gc
     from backend.pipeline import video as _vid
     if _vid._video_model is not None:
         logger.info("Unloading SAM 3 video model to free VRAM...")
         _vid._video_model.cpu()
         _vid._video_model = None
         _vid._video_processor = None
+        gc.collect()
         torch.cuda.empty_cache()
+        torch.cuda.synchronize()
 
 
 def _load_sam3_model():
