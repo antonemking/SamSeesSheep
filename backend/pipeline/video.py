@@ -319,19 +319,33 @@ def analyze_video(
             coords[0].max(), coords[1].max(),
         )
 
-        # Ears: pick the 2 highest-confidence ones inside head bbox, sort by x
+        # Ears: only keep those attached to the tracked head.
+        # Require ear centroid to sit inside the head mask, OR the ear mask
+        # to overlap the head mask by > 15%. This rejects ears belonging to
+        # other animals that happen to fall inside the head's bounding box.
+        head_bool = head_mask > 127
+        head_area = head_bool.sum()
+        dilated_head = cv2.dilate(
+            head_mask, np.ones((15, 15), np.uint8), iterations=1,
+        ) > 127
         ear_candidates = []
         for oid, mask_t in ear_out["obj_id_to_mask"].items():
             m = _mask_from_logits(mask_t, target_size=(frame_h, frame_w))
             if m.sum() < 50:
                 continue
-            mc = np.where(m > 127)
-            cy, cx = mc[0].mean(), mc[1].mean()
-            if (head_bbox[0] - 50 <= cy <= head_bbox[2] + 50 and
-                    head_bbox[1] - 50 <= cx <= head_bbox[3] + 50):
-                ear_candidates.append(
-                    (m, ear_out["obj_id_to_score"][oid], cx, oid)
-                )
+            ear_bool = m > 127
+            coords = np.where(ear_bool)
+            cy, cx = coords[0].mean(), coords[1].mean()
+            # Accept if centroid falls inside the (dilated) head mask
+            # OR if at least 15% of the ear mask overlaps the head
+            centroid_inside = dilated_head[int(cy), int(cx)]
+            overlap = (ear_bool & dilated_head).sum()
+            overlap_frac = overlap / ear_bool.sum()
+            if not centroid_inside and overlap_frac < 0.15:
+                continue
+            ear_candidates.append(
+                (m, ear_out["obj_id_to_score"][oid], cx, oid)
+            )
         ear_candidates.sort(key=lambda e: -e[1])  # by score desc
         ear_candidates = ear_candidates[:2]
         ear_candidates.sort(key=lambda e: e[2])   # then by x asc
