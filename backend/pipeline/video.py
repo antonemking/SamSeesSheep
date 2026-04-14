@@ -314,6 +314,46 @@ def analyze_video(
         primary_nose = stable_primary(results_per_prompt[nose_key])
     logger.info("Selected primary_head=%s, primary_nose=%s", primary_head, primary_nose)
 
+    # Lock to specific ear object IDs.
+    # Scan early frames to find up to 2 ears that are clearly attached to
+    # our tracked head. Only those 2 IDs are followed across the rest of
+    # the video — this rejects "flash" detections from other animals.
+    locked_ear_ids: set = set()
+    if primary_head is not None:
+        for i in range(min(5, len(pil_frames))):
+            fw, fh = pil_frames[i].size
+            head_t = results_per_prompt[head_key][i]["obj_id_to_mask"].get(primary_head)
+            if head_t is None:
+                continue
+            hm = _mask_from_logits(head_t, target_size=(fh, fw))
+            if hm.sum() == 0:
+                continue
+            dilated = cv2.dilate(hm, np.ones((15, 15), np.uint8), iterations=1) > 127
+            cands = []
+            for oid, mt in results_per_prompt[ear_key][i]["obj_id_to_mask"].items():
+                if oid in locked_ear_ids:
+                    continue
+                m = _mask_from_logits(mt, target_size=(fh, fw))
+                if m.sum() < 50:
+                    continue
+                eb = m > 127
+                cs = np.where(eb)
+                cy, cx = int(cs[0].mean()), int(cs[1].mean())
+                inside = dilated[cy, cx]
+                overlap = (eb & dilated).sum() / max(1, eb.sum())
+                if inside or overlap >= 0.15:
+                    score = results_per_prompt[ear_key][i]["obj_id_to_score"].get(oid, 0)
+                    cands.append((oid, score))
+            # Add highest-scoring ear candidates until we have 2
+            cands.sort(key=lambda x: -x[1])
+            for oid, _ in cands:
+                if len(locked_ear_ids) >= 2:
+                    break
+                locked_ear_ids.add(oid)
+            if len(locked_ear_ids) >= 2:
+                break
+    logger.info("Locked ear IDs: %s", locked_ear_ids)
+
     for i in range(len(pil_frames)):
         frame_data = {"frame_idx": i}
         frame_w, frame_h = pil_frames[i].size
@@ -356,14 +396,17 @@ def analyze_video(
         ) > 127
         ear_candidates = []
         for oid, mask_t in ear_out["obj_id_to_mask"].items():
+            # Only follow locked ear IDs (set in frame 0) — rejects flash
+            # detections from other animals
+            if locked_ear_ids and oid not in locked_ear_ids:
+                continue
             m = _mask_from_logits(mask_t, target_size=(frame_h, frame_w))
             if m.sum() < 50:
                 continue
             ear_bool = m > 127
             coords = np.where(ear_bool)
             cy, cx = coords[0].mean(), coords[1].mean()
-            # Accept if centroid falls inside the (dilated) head mask
-            # OR if at least 15% of the ear mask overlaps the head
+            # Safety net: even locked IDs must still be attached to the head
             centroid_inside = dilated_head[int(cy), int(cx)]
             overlap = (ear_bool & dilated_head).sum()
             overlap_frac = overlap / ear_bool.sum()
@@ -452,7 +495,7 @@ def analyze_video(
     # Build an annotated GIF showing masks tracking across frames
     gif_url = _build_annotated_gif(
         pil_frames, per_frame, results_per_prompt,
-        primary_head, primary_nose, prompt_list, video_path,
+        primary_head, primary_nose, locked_ear_ids, prompt_list, video_path,
     )
 
     elapsed = time.time() - start
@@ -485,6 +528,7 @@ def _build_annotated_gif(
     results_per_prompt: dict,
     primary_head: Optional[int],
     primary_nose: Optional[int],
+    locked_ear_ids: set,
     prompt_list: list[str],
     video_path: Path,
 ) -> Optional[str]:
@@ -523,14 +567,16 @@ def _build_annotated_gif(
                     m, np.ones((15, 15), np.uint8), iterations=1,
                 ) > 127
 
-        # Ears: thick contour in orange, filtered to the tracked head
+        # Ears: thick contour in orange, only the locked ear IDs
         ear_out = results_per_prompt[ear_key][i]
         for oid, mask_t in ear_out["obj_id_to_mask"].items():
+            if locked_ear_ids and oid not in locked_ear_ids:
+                continue
             m = _mask_from_logits(mask_t, target_size=(h, w))
             if m.sum() < 50:
                 continue
             ear_bool = m > 127
-            # Skip ears not attached to the tracked head (e.g., other animal's ears)
+            # Also require the ear to still be attached to the tracked head
             if dilated_head is not None:
                 coords = np.where(ear_bool)
                 cy, cx = int(coords[0].mean()), int(coords[1].mean())
