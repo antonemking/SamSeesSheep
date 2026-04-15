@@ -142,6 +142,15 @@ h1{font-family:'SF Mono',monospace;color:#3fb950;font-size:1.4rem}
 
     <!-- Selector: user clicks the animal to track -->
     <div id="video-selector" class="hidden" style="text-align:center;margin-bottom:1rem">
+      <!-- VLM scene description (shown before user clicks) -->
+      <div id="video-scene" class="hidden" style="text-align:left;max-width:512px;margin:0 auto .75rem;padding:.75rem;border:1px solid #30363d;border-radius:6px;background:#161b22">
+        <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.35rem">
+          <div style="font-size:.6rem;color:#3fb950;text-transform:uppercase;letter-spacing:.1em;font-weight:700">Orchestrator</div>
+          <div id="video-scene-model" style="font-size:.55rem;color:#484f58"></div>
+        </div>
+        <div id="video-scene-summary" style="font-size:.85rem;color:#e6edf3;line-height:1.5;margin-bottom:.4rem"></div>
+        <div id="video-scene-subjects" style="font-size:.7rem;color:#8b949e"></div>
+      </div>
       <div style="font-size:.75rem;color:#3fb950;margin-bottom:.5rem">Click on the animal you want to track</div>
       <div class="click-photo" id="video-frame-photo" style="display:inline-block;max-width:100%">
         <img id="video-frame0" style="max-width:100%;max-height:360px;border-radius:6px;border:1px solid #30363d;display:block">
@@ -280,12 +289,48 @@ async function uploadVideo(file){
     if(info.first_frame_url){
       $('video-frame0').src=info.first_frame_url;
       $('video-selector').classList.remove('hidden');
+      $('video-scene').classList.add('hidden');
       $('status').textContent='Click the animal you want to track.';
+      // Also fire the VLM describe — same backend as the selected model
+      describeVideoFrame(info.video_id);
     } else {
-      // Fallback: no first frame, run without click
       analyzeVideo(currentVideoId, null, null);
     }
   }catch(e){$('status').textContent='Video upload failed.';}
+}
+
+async function describeVideoFrame(videoId){
+  // Choose backend based on current model toggle. Fall back to cloud
+  // if the toggle is on a non-VLM mode (sam3 / sam21).
+  const selected = document.querySelector('input[name="model"]:checked').value;
+  const backend = selected === 'orch-local' ? 'local' : 'cloud';
+  const photoId = videoId + '_frame0';
+  try{
+    const r = await fetch('/api/orchestrator/describe', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({photo_id: photoId, backend})
+    });
+    if(!r.ok) return;
+    const d = await r.json();
+    const scene = d.scene || {};
+    if(scene.scene_summary){
+      $('video-scene-summary').textContent = scene.scene_summary;
+    }
+    const subjects = scene.subjects || [];
+    if(subjects.length){
+      $('video-scene-subjects').innerHTML = subjects.map(s=>{
+        const parts=[s.label, s.color, s.position, s.facing].filter(x=>x);
+        return '· ' + parts.join(' — ');
+      }).join('<br>');
+    } else {
+      $('video-scene-subjects').textContent = '';
+    }
+    $('video-scene-model').textContent = scene.model_used ? '· ' + scene.model_used : '';
+    $('video-scene').classList.remove('hidden');
+  }catch(e){
+    // Silent failure — describing is a nice-to-have, clicking still works
+    console.warn('describe failed:', e);
+  }
 }
 
 // Click handler on the first frame

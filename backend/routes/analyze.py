@@ -184,6 +184,41 @@ async def analyze_video_endpoint(req: VideoAnalyzeRequest) -> dict:
     return result
 
 
+class DescribeRequest(PydanticBaseModel):
+    photo_id: str
+    backend: str = "cloud"
+
+
+@router.post("/orchestrator/describe")
+async def orchestrator_describe(req: DescribeRequest) -> dict:
+    """Run ONLY the VLM orchestrator on an image — no SAM 3 segmentation.
+
+    Used by the video flow to show a scene description alongside the
+    click-to-track selector without running the full image pipeline.
+    """
+    matches = list(UPLOAD_DIR.glob(f"{req.photo_id}.*"))
+    if not matches:
+        matches = list(SAMPLE_DIR.glob(f"{req.photo_id}.*"))
+    if not matches:
+        raise HTTPException(status_code=404, detail=f"Photo {req.photo_id} not found")
+    photo_path = matches[0]
+
+    if req.backend == "local":
+        from backend.pipeline.local_orchestrator import orchestrate_scene_local
+        scene = orchestrate_scene_local(photo_path)
+        if scene is None:
+            raise HTTPException(status_code=500, detail="Local VLM failed to run")
+    else:
+        from backend.pipeline.orchestrator import orchestrate_scene
+        scene = orchestrate_scene(photo_path)
+        if scene is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Cloud orchestrator unavailable. Set ANTHROPIC_API_KEY in .env.",
+            )
+    return {"scene": scene, "photo_id": req.photo_id}
+
+
 class OrchestratedRequest(PydanticBaseModel):
     photo_id: str
     backend: str = "cloud"  # "cloud" (Claude) or "local" (Gemma 4)
