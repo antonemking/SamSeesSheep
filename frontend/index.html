@@ -407,32 +407,36 @@ function renderVideoTimeline(data){
   // X axis label
   ctx.fillText('frame', W/2-15, H-5);
 
-  // Plot left ear (bright blue) and right ear (orange)
-  function plot(key, color){
-    ctx.strokeStyle=color; ctx.lineWidth=2; ctx.beginPath();
+  // Plot smoothed line (thicker, primary signal) + raw dots (small, context)
+  function plot(rawKey, color){
+    const smoothKey = rawKey + '_smoothed';
+    // Smoothed line — the main signal
+    ctx.strokeStyle=color; ctx.lineWidth=2.5; ctx.beginPath();
     let started=false;
     perFrame.forEach((f,i)=>{
-      const v=f[key];
+      const v=f[smoothKey];
       if(v==null){ started=false; return; }
       const px=xToPx(i), py=yToPx(Math.max(yMin,Math.min(yMax,v)));
       if(!started){ ctx.moveTo(px,py); started=true; } else { ctx.lineTo(px,py); }
     });
     ctx.stroke();
-    // Dots
-    ctx.fillStyle=color;
+    // Raw per-frame dots — honest about the noise underneath
+    ctx.fillStyle=color; ctx.globalAlpha=0.35;
     perFrame.forEach((f,i)=>{
-      const v=f[key]; if(v==null) return;
+      const v=f[rawKey]; if(v==null) return;
       const px=xToPx(i), py=yToPx(Math.max(yMin,Math.min(yMax,v)));
-      ctx.beginPath(); ctx.arc(px,py,2.5,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(px,py,2,0,Math.PI*2); ctx.fill();
     });
+    ctx.globalAlpha=1;
   }
   plot('left_ear_angle_deg', '#58a6ff');
   plot('right_ear_angle_deg', '#f0883e');
 
   // Legend
-  ctx.font='11px SF Mono, monospace';
+  ctx.font='10px SF Mono, monospace';
   ctx.fillStyle='#58a6ff'; ctx.fillText('\u2014 left',  PAD_L+10, PAD_T+12);
   ctx.fillStyle='#f0883e'; ctx.fillText('\u2014 right', PAD_L+70, PAD_T+12);
+  ctx.fillStyle='#484f58'; ctx.fillText('line = 3-frame median · dots = raw', PAD_L+140, PAD_T+12);
 
   // Stats line
   const s=data.summary||{};

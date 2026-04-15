@@ -152,6 +152,29 @@ def _pick_primary_object(
     return best_id
 
 
+def _apply_median_smoothing(
+    per_frame: list[dict], key: str, window: int = 3
+) -> None:
+    """Add a smoothed version of `key` to each frame dict as `<key>_smoothed`.
+
+    Uses a centered median filter over `window` frames. Frames missing the
+    raw key keep no smoothed value. Window edges use what's available.
+    """
+    if window < 2:
+        return
+    values = [f.get(key) for f in per_frame]
+    half = window // 2
+    for i, raw in enumerate(values):
+        if raw is None:
+            continue
+        nearby = [
+            values[j] for j in range(max(0, i - half), min(len(values), i + half + 1))
+            if values[j] is not None
+        ]
+        if nearby:
+            per_frame[i][f"{key}_smoothed"] = float(np.median(nearby))
+
+
 def _mask_from_logits(
     mask_logits, threshold: float = 0.0,
     target_size: tuple[int, int] | None = None,
@@ -501,8 +524,14 @@ def analyze_video(
     elapsed = time.time() - start
     logger.info("Video analysis: %d frames in %.1fs", len(pil_frames), elapsed)
 
-    left_angles = [f["left_ear_angle_deg"] for f in per_frame if "left_ear_angle_deg" in f]
-    right_angles = [f["right_ear_angle_deg"] for f in per_frame if "right_ear_angle_deg" in f]
+    # Smooth the per-frame angles with a 3-frame rolling median.
+    # Median filter wins over averaging: single outlier frames (mask
+    # jitter, brief mis-detection) get rejected, real trends survive.
+    _apply_median_smoothing(per_frame, "left_ear_angle_deg", window=3)
+    _apply_median_smoothing(per_frame, "right_ear_angle_deg", window=3)
+
+    left_angles = [f["left_ear_angle_deg_smoothed"] for f in per_frame if "left_ear_angle_deg_smoothed" in f]
+    right_angles = [f["right_ear_angle_deg_smoothed"] for f in per_frame if "right_ear_angle_deg_smoothed" in f]
 
     return {
         "n_frames": len(pil_frames),
