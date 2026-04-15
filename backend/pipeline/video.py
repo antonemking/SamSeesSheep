@@ -152,6 +152,59 @@ def _pick_primary_object(
     return best_id
 
 
+def _detect_alert_regions(
+    per_frame: list[dict], min_run: int = 3
+) -> list[dict]:
+    """Find sustained periods where ear-angle patterns cross thresholds.
+
+    Returns a list of regions: {type, ear, start_frame, end_frame, peak}.
+    Patterns reflect published literature (never single-frame events):
+      - "down"   : ear smoothed < -10° (Reefmann 2009, McLennan 2019)
+      - "asym"   : |L - R| > 25° (Boissy 2011)
+    """
+    regions: list[dict] = []
+
+    def find_runs(values: list, predicate, peak_fn):
+        runs = []
+        start = None
+        for i, v in enumerate(values):
+            if v is not None and predicate(v):
+                if start is None:
+                    start = i
+            else:
+                if start is not None and i - start >= min_run:
+                    vals = [values[k] for k in range(start, i) if values[k] is not None]
+                    runs.append((start, i - 1, peak_fn(vals)))
+                start = None
+        if start is not None and len(values) - start >= min_run:
+            vals = [values[k] for k in range(start, len(values)) if values[k] is not None]
+            runs.append((start, len(values) - 1, peak_fn(vals)))
+        return runs
+
+    left_smoothed = [f.get("left_ear_angle_deg_smoothed") for f in per_frame]
+    right_smoothed = [f.get("right_ear_angle_deg_smoothed") for f in per_frame]
+
+    # Persistent down-back (either ear)
+    for start, end, peak in find_runs(left_smoothed, lambda v: v < -10, min):
+        regions.append({"type": "down", "ear": "left", "start_frame": start,
+                        "end_frame": end, "peak_deg": peak})
+    for start, end, peak in find_runs(right_smoothed, lambda v: v < -10, min):
+        regions.append({"type": "down", "ear": "right", "start_frame": start,
+                        "end_frame": end, "peak_deg": peak})
+
+    # Sustained asymmetry
+    asym = [
+        abs(l - r) if (l is not None and r is not None) else None
+        for l, r in zip(left_smoothed, right_smoothed)
+    ]
+    for start, end, peak in find_runs(asym, lambda v: v > 25, max):
+        regions.append({"type": "asym", "ear": "both", "start_frame": start,
+                        "end_frame": end, "peak_deg": peak})
+
+    regions.sort(key=lambda r: r["start_frame"])
+    return regions
+
+
 def _apply_median_smoothing(
     per_frame: list[dict], key: str, window: int = 3
 ) -> None:
@@ -253,6 +306,7 @@ def analyze_video(
                 "obj_id_to_mask": {k: v.cpu() for k, v in output.obj_id_to_mask.items()},
                 "obj_id_to_score": dict(output.obj_id_to_score),
                 "object_ids": list(output.object_ids),
+                "removed_obj_ids": set(output.removed_obj_ids or []),
             })
         results_per_prompt[prompt_text] = per_frame_outputs
 
@@ -385,9 +439,13 @@ def analyze_video(
         ear_out = results_per_prompt[ear_key][i]
         nose_out = results_per_prompt[nose_key][i]
 
-        # Head mask
+        # Head mask. If primary_head was removed/suppressed or its mask is
+        # empty on this frame, we mark the frame as a tracking gap.
         head_mask = None
-        if primary_head is not None and primary_head in head_out["obj_id_to_mask"]:
+        removed = head_out.get("removed_obj_ids") or set()
+        if (primary_head is not None
+                and primary_head in head_out["obj_id_to_mask"]
+                and primary_head not in removed):
             head_mask = _mask_from_logits(
                 head_out["obj_id_to_mask"][primary_head],
                 target_size=(frame_h, frame_w),
@@ -398,8 +456,11 @@ def analyze_video(
                 frame_data["head_confidence"] = head_out["obj_id_to_score"].get(primary_head)
 
         if head_mask is None:
+            frame_data["tracking_gap"] = True
             per_frame.append(frame_data)
             continue
+
+        frame_data["tracking_gap"] = False
 
         # Head bbox
         coords = np.where(head_mask > 127)
@@ -530,23 +591,32 @@ def analyze_video(
     _apply_median_smoothing(per_frame, "left_ear_angle_deg", window=3)
     _apply_median_smoothing(per_frame, "right_ear_angle_deg", window=3)
 
+    # Detect pattern-based alert regions per VALIDATION.md rules —
+    # sustained runs (>= min_run frames), never single-frame events.
+    alert_regions = _detect_alert_regions(per_frame, min_run=3)
+
     left_angles = [f["left_ear_angle_deg_smoothed"] for f in per_frame if "left_ear_angle_deg_smoothed" in f]
     right_angles = [f["right_ear_angle_deg_smoothed"] for f in per_frame if "right_ear_angle_deg_smoothed" in f]
 
+    gaps = sum(1 for f in per_frame if f.get("tracking_gap"))
     return {
         "n_frames": len(pil_frames),
         "elapsed_s": elapsed,
         "per_frame": per_frame,
         "annotated_gif_url": gif_url,
+        "alert_regions": alert_regions,
         "summary": {
             "frames_with_measurement": sum(
                 1 for f in per_frame
                 if "left_ear_angle_deg" in f or "right_ear_angle_deg" in f
             ),
+            "frames_tracked": len(per_frame) - gaps,
+            "frames_gap": gaps,
             "left_mean_deg": float(np.mean(left_angles)) if left_angles else None,
             "left_std_deg": float(np.std(left_angles)) if left_angles else None,
             "right_mean_deg": float(np.mean(right_angles)) if right_angles else None,
             "right_std_deg": float(np.std(right_angles)) if right_angles else None,
+            "alert_count": len(alert_regions),
         },
     }
 

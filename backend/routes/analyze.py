@@ -124,6 +124,7 @@ async def analyze_click(req: ClickRequest) -> PhotoAnalysis:
 class VideoAnalyzeRequest(PydanticBaseModel):
     video_id: str
     subject: str = "sheep"
+    # Phase 2: longer clips. Default 30, OOM retry drops to 15 / 6 if needed.
     max_frames: int = 30
     # Click point (normalized 0-1) to select which animal to track
     click_x: float | None = None

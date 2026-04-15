@@ -170,7 +170,7 @@ h1{font-family:'SF Mono',monospace;color:#3fb950;font-size:1.4rem}
         </div>
       </div>
       <div style="font-size:.7rem;color:#484f58;margin-bottom:4px">Per-frame ear angle timeline</div>
-      <canvas id="video-chart" width="680" height="240" style="width:100%;display:block"></canvas>
+      <canvas id="video-chart" width="680" height="260" style="width:100%;display:block"></canvas>
       <div id="video-stats" style="font-size:.7rem;color:#8b949e;margin-top:.5rem;text-align:center"></div>
     </div>
 
@@ -375,17 +375,20 @@ async function analyzeVideo(videoId, clickX, clickY){
 
 function renderVideoTimeline(data){
   const perFrame=data.per_frame||[];
+  const alertRegions=data.alert_regions||[];
   const cv=$('video-chart'); const ctx=cv.getContext('2d');
   // Handle DPR for crisp rendering
   const rect=cv.getBoundingClientRect();
+  const CH_H=260;  // chart height — added 20px for presence bar
   cv.width=rect.width*devicePixelRatio;
-  cv.height=240*devicePixelRatio;
+  cv.height=CH_H*devicePixelRatio;
   ctx.scale(devicePixelRatio, devicePixelRatio);
-  const W=rect.width, H=240;
+  const W=rect.width, H=CH_H;
   ctx.fillStyle='#0d1117'; ctx.fillRect(0,0,W,H);
 
-  // Axes: x = frame index, y = angle from -60 to +60
-  const PAD_L=40, PAD_R=10, PAD_T=15, PAD_B=25;
+  // Axes. Reserve the bottom 20px for a presence bar.
+  const PAD_L=40, PAD_R=10, PAD_T=15, PAD_B=45;
+  const PRESENCE_H=12;
   const plotW=W-PAD_L-PAD_R, plotH=H-PAD_T-PAD_B;
   const yMin=-60, yMax=60;
   const yToPx=y=>PAD_T+plotH*(1-(y-yMin)/(yMax-yMin));
@@ -396,6 +399,34 @@ function renderVideoTimeline(data){
   ctx.fillStyle='rgba(210,153,34,.10)'; ctx.fillRect(PAD_L, yToPx(30), plotW, yToPx(-10)-yToPx(30));
   ctx.fillStyle='rgba(248,81,73,.10)';  ctx.fillRect(PAD_L, yToPx(-10), plotW, yToPx(-60)-yToPx(-10));
 
+  // Alert regions — red-shaded vertical bands behind the line
+  alertRegions.forEach(r=>{
+    const x1=xToPx(r.start_frame), x2=xToPx(r.end_frame);
+    ctx.fillStyle='rgba(248,81,73,.18)';
+    ctx.fillRect(x1, PAD_T, Math.max(2, x2-x1), plotH);
+    // Tick at the top with alert type
+    ctx.fillStyle='#f85149';
+    ctx.font='9px SF Mono, monospace';
+    const label = r.type==='down' ? r.ear[0].toUpperCase()+' down' : 'asym';
+    ctx.fillText(label, x1+2, PAD_T+10);
+  });
+
+  // Tracking-gap shading — grey bands where animal left the frame
+  let gapStart=null;
+  perFrame.forEach((f,i)=>{
+    const isGap = f.tracking_gap === true;
+    if(isGap && gapStart===null) gapStart=i;
+    if(!isGap && gapStart!==null){
+      ctx.fillStyle='rgba(139,148,158,.12)';
+      ctx.fillRect(xToPx(gapStart), PAD_T, xToPx(i)-xToPx(gapStart), plotH);
+      gapStart=null;
+    }
+  });
+  if(gapStart!==null){
+    ctx.fillStyle='rgba(139,148,158,.12)';
+    ctx.fillRect(xToPx(gapStart), PAD_T, xToPx(perFrame.length-1)-xToPx(gapStart), plotH);
+  }
+
   // Grid lines at 0, 30, -10
   ctx.strokeStyle='#30363d'; ctx.lineWidth=1;
   ctx.font='10px SF Mono, monospace'; ctx.fillStyle='#484f58';
@@ -404,7 +435,20 @@ function renderVideoTimeline(data){
     ctx.beginPath(); ctx.moveTo(PAD_L, py); ctx.lineTo(W-PAD_R, py); ctx.stroke();
     ctx.fillText(y+'\u00b0', 5, py+3);
   });
+
+  // Presence bar below the plot — green when tracked, grey when gap
+  const presY = PAD_T + plotH + 8;
+  ctx.fillStyle='#484f58';
+  ctx.fillText('presence:', 5, presY + PRESENCE_H - 3);
+  perFrame.forEach((f,i)=>{
+    const x1=xToPx(i), x2=xToPx(Math.min(i+1, perFrame.length-1));
+    const w=Math.max(2, x2-x1);
+    ctx.fillStyle=f.tracking_gap ? '#30363d' : '#3fb950';
+    ctx.fillRect(x1, presY, w, PRESENCE_H);
+  });
+
   // X axis label
+  ctx.fillStyle='#484f58';
   ctx.fillText('frame', W/2-15, H-5);
 
   // Plot smoothed line (thicker, primary signal) + raw dots (small, context)
@@ -441,9 +485,14 @@ function renderVideoTimeline(data){
   // Stats line
   const s=data.summary||{};
   const fmt=x=>x==null?'--':x.toFixed(1)+'\u00b0';
+  const pres = s.frames_tracked!=null
+    ? ' &middot; tracked '+s.frames_tracked+'/'+(s.frames_tracked+s.frames_gap)+' frames'
+    : '';
+  const alerts = s.alert_count ? ' &middot; <span style="color:#f85149">'+s.alert_count+' alert'+(s.alert_count===1?'':'s')+'</span>' : '';
   $('video-stats').innerHTML =
-    'Left mean: '+fmt(s.left_mean_deg)+' &plusmn; '+fmt(s.left_std_deg)+
-    '  &middot;  Right mean: '+fmt(s.right_mean_deg)+' &plusmn; '+fmt(s.right_std_deg);
+    'L: '+fmt(s.left_mean_deg)+' &plusmn; '+fmt(s.left_std_deg)+
+    '  &middot;  R: '+fmt(s.right_mean_deg)+' &plusmn; '+fmt(s.right_std_deg) +
+    pres + alerts;
 }
 
 function runSelectedModel(){
