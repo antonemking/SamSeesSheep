@@ -186,11 +186,16 @@ async def analyze_video_endpoint(req: VideoAnalyzeRequest) -> dict:
 
 class OrchestratedRequest(PydanticBaseModel):
     photo_id: str
+    backend: str = "cloud"  # "cloud" (Claude) or "local" (Gemma 4)
 
 
 @router.post("/analyze/orchestrated")
 async def analyze_orchestrated(req: OrchestratedRequest) -> dict:
-    """Claude vision describes the scene and decides what SAM 3 should segment."""
+    """VLM orchestrator: describes the scene and decides what SAM 3 should segment.
+
+    backend="cloud" uses Claude (fast, needs ANTHROPIC_API_KEY).
+    backend="local" uses Gemma 4 E4B-it at 4-bit (slower, no network needed).
+    """
     matches = list(UPLOAD_DIR.glob(f"{req.photo_id}.*"))
     if not matches:
         matches = list(SAMPLE_DIR.glob(f"{req.photo_id}.*"))
@@ -204,14 +209,23 @@ async def analyze_orchestrated(req: OrchestratedRequest) -> dict:
 
     h, w = image.shape[:2]
 
-    # Step 1: Claude looks at the scene
-    from backend.pipeline.orchestrator import orchestrate_scene
-    scene = orchestrate_scene(photo_path)
-    if scene is None:
-        raise HTTPException(
-            status_code=400,
-            detail="Orchestrator unavailable. Set ANTHROPIC_API_KEY in env.",
-        )
+    # Step 1: VLM reads the scene
+    if req.backend == "local":
+        from backend.pipeline.local_orchestrator import orchestrate_scene_local
+        scene = orchestrate_scene_local(photo_path)
+        if scene is None:
+            raise HTTPException(
+                status_code=500,
+                detail="Local VLM (Gemma 4) failed to load or run. Check logs.",
+            )
+    else:
+        from backend.pipeline.orchestrator import orchestrate_scene
+        scene = orchestrate_scene(photo_path)
+        if scene is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Cloud orchestrator unavailable. Set ANTHROPIC_API_KEY in .env.",
+            )
 
     # Step 2: Use the first subject's label as the SAM 3 subject prompt
     subjects = scene.get("subjects", [])

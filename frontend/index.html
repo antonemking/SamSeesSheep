@@ -65,7 +65,8 @@ h1{font-family:'SF Mono',monospace;color:#3fb950;font-size:1.4rem}
   </div>
   <div style="margin-bottom:.75rem;font-size:.75rem;color:#8b949e">
     Model:
-    <label style="margin-left:.5rem"><input type="radio" name="model" value="orchestrated" checked> Claude + SAM 3 (orchestrated)</label>
+    <label style="margin-left:.5rem"><input type="radio" name="model" value="orch-cloud" checked> Claude + SAM 3 (cloud)</label>
+    <label style="margin-left:.75rem"><input type="radio" name="model" value="orch-local"> Gemma 4 + SAM 3 (local)</label>
     <label style="margin-left:.75rem"><input type="radio" name="model" value="sam3"> SAM 3 (auto)</label>
     <label style="margin-left:.75rem"><input type="radio" name="model" value="sam21"> SAM 2.1 (3 clicks)</label>
   </div>
@@ -401,21 +402,25 @@ function runSelectedModel(){
   $('orchestrator').classList.add('hidden');
   if(model === 'sam21'){
     startClickFlow();
-  } else if(model === 'orchestrated'){
-    orchestratedSegment();
+  } else if(model === 'orch-cloud'){
+    orchestratedSegment('cloud');
+  } else if(model === 'orch-local'){
+    orchestratedSegment('local');
   } else {
     autoSegment();
   }
 }
 
-async function orchestratedSegment(){
-  $('click-hint').innerHTML='<span class="spinner"></span> Claude is reading the scene...';
+async function orchestratedSegment(backend){
+  const brain = backend === 'local' ? 'Gemma 4 (local)' : 'Claude (cloud)';
+  const load_note = backend === 'local' ? ' First call loads the model (~30s).' : '';
+  $('click-hint').innerHTML='<span class="spinner"></span> '+brain+' is reading the scene...'+load_note;
   $('click-hint').style.color='#8b949e';
   $('status').textContent='';
   try{
     const r=await fetch('/api/analyze/orchestrated',{
       method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({photo_id:currentPhotoId})
+      body:JSON.stringify({photo_id:currentPhotoId, backend:backend})
     });
     if(!r.ok){ throw new Error((await r.json()).detail || r.statusText); }
     const d=await r.json();
@@ -429,7 +434,8 @@ async function orchestratedSegment(){
     }
     if(photo.ear_angles){
       const la=photo.ear_angles.left_ear_angle_deg, ra=photo.ear_angles.right_ear_angle_deg;
-      $('click-hint').textContent='Orchestrated by Claude, segmented by SAM 3';
+      const brain = backend === 'local' ? 'Gemma 4 (local)' : 'Claude (cloud)';
+      $('click-hint').textContent='Orchestrated by '+brain+', segmented by SAM 3';
       $('click-hint').style.color='#3fb950';
       showMeasurements(la, ra, photo.segmentation?.confidence_scores);
     }
