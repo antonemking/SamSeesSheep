@@ -35,6 +35,19 @@ h1{font-family:'SF Mono',monospace;color:#3fb950;font-size:1.4rem}
 .seg-row .cap{font-size:.7rem;color:#484f58;margin-top:.3rem}
 
 /* Turntable */
+/* Dashboard sections for video analysis report */
+.dash-section{margin-bottom:1.25rem}
+.dash-h{font-size:.6rem;color:#3fb950;text-transform:uppercase;letter-spacing:.12em;font-weight:700;margin-bottom:.35rem}
+.dash-cap{font-size:.65rem;color:#8b949e;font-style:italic}
+.alert-card{border-left:3px solid #f85149;background:#161b22;padding:.6rem .75rem;border-radius:0 4px 4px 0;margin-bottom:.5rem}
+.alert-card.asym{border-left-color:#d29922}
+.alert-card .alert-title{font-size:.8rem;color:#e6edf3;font-weight:600;margin-bottom:.15rem;display:flex;gap:.5rem;align-items:baseline}
+.alert-card .alert-badge{font-size:.55rem;text-transform:uppercase;letter-spacing:.1em;padding:.1rem .35rem;border-radius:3px;background:rgba(248,81,73,.2);color:#f85149;font-weight:700}
+.alert-card.asym .alert-badge{background:rgba(210,153,34,.2);color:#d29922}
+.alert-card .alert-detail{font-size:.7rem;color:#8b949e;line-height:1.5}
+.alert-card .alert-cite{font-size:.6rem;color:#484f58;margin-top:.2rem;font-style:italic}
+.dash-no-alerts{font-size:.75rem;color:#8b949e;font-style:italic;padding:.5rem 0}
+
 .turntable-wrap{position:relative;width:100%;border-radius:6px;overflow:hidden;background:#0d1117;margin:1.5rem 0;cursor:grab;user-select:none}
 .turntable-wrap:active{cursor:grabbing}
 .turntable-wrap img{display:block;width:100%}
@@ -157,21 +170,65 @@ h1{font-family:'SF Mono',monospace;color:#3fb950;font-size:1.4rem}
       </div>
     </div>
 
-    <!-- Results -->
-    <div id="video-results" class="hidden">
-      <div style="display:flex;gap:1rem;flex-wrap:wrap;justify-content:center;align-items:start;margin-bottom:1rem">
-        <div style="flex:1;min-width:240px;max-width:360px;text-align:center">
-          <div style="font-size:.65rem;color:#484f58;margin-bottom:4px">Original</div>
-          <video id="video-preview" controls style="width:100%;border-radius:6px"></video>
-        </div>
-        <div style="flex:1;min-width:240px;max-width:360px;text-align:center">
-          <div style="font-size:.65rem;color:#484f58;margin-bottom:4px">SAM 3 tracked (head · ears · nose)</div>
-          <img id="video-annotated" style="width:100%;border-radius:6px;background:#0d1117">
+    <!-- Results: research-grade dashboard layout -->
+    <div id="video-results" class="hidden" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
+
+      <!-- Dashboard header with dataset metadata -->
+      <div style="border-bottom:1px solid #30363d;padding-bottom:.75rem;margin-bottom:1rem">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:.5rem">
+          <div>
+            <div style="font-size:.6rem;color:#3fb950;text-transform:uppercase;letter-spacing:.12em;font-weight:700">Analysis Report</div>
+            <div style="font-size:1rem;color:#e6edf3;font-weight:600;margin-top:.15rem" id="dash-title">Ear-position tracking · single subject</div>
+          </div>
+          <div id="dash-meta" style="font-size:.7rem;color:#8b949e;font-family:'SF Mono',monospace;text-align:right"></div>
         </div>
       </div>
-      <div style="font-size:.7rem;color:#484f58;margin-bottom:4px">Per-frame ear angle timeline</div>
-      <canvas id="video-chart" width="680" height="260" style="width:100%;display:block"></canvas>
-      <div id="video-stats" style="font-size:.7rem;color:#8b949e;margin-top:.5rem;text-align:center"></div>
+
+      <!-- Section: Footage -->
+      <div class="dash-section">
+        <div class="dash-h">Footage</div>
+        <div style="display:flex;gap:1rem;flex-wrap:wrap;align-items:start">
+          <div style="flex:1;min-width:240px;max-width:360px">
+            <div class="dash-cap">Source clip</div>
+            <video id="video-preview" controls style="width:100%;border-radius:4px"></video>
+          </div>
+          <div style="flex:1;min-width:240px;max-width:360px">
+            <div class="dash-cap">SAM 3 tracked · head · ears · nose</div>
+            <img id="video-annotated" style="width:100%;border-radius:4px;background:#0d1117;display:block">
+          </div>
+        </div>
+      </div>
+
+      <!-- Section: Timeline -->
+      <div class="dash-section">
+        <div class="dash-h">Ear angle timeline</div>
+        <div class="dash-cap">Smoothed line = 3-frame rolling median · Dots = raw per-frame</div>
+        <canvas id="video-chart" width="680" height="260" style="width:100%;display:block;margin-top:.5rem"></canvas>
+        <div id="video-stats" style="font-size:.7rem;color:#8b949e;margin-top:.5rem;font-family:'SF Mono',monospace"></div>
+      </div>
+
+      <!-- Section: Alerts -->
+      <div class="dash-section" id="dash-alerts-wrap">
+        <div class="dash-h">Sustained patterns detected</div>
+        <div class="dash-cap">
+          Patterns are observational only — not a clinical diagnosis.
+          Each alert requires &ge;3 consecutive smoothed frames past a threshold.
+        </div>
+        <div id="dash-alerts" style="margin-top:.5rem"></div>
+      </div>
+
+      <!-- Section: Methodology -->
+      <div class="dash-section" style="border-top:1px solid #30363d;padding-top:.75rem;margin-top:1rem">
+        <div class="dash-h" style="color:#484f58">Methodology</div>
+        <div style="font-size:.7rem;color:#8b949e;line-height:1.7;font-family:-apple-system,sans-serif">
+          <div>· Segmentation: <code style="font-family:'SF Mono',monospace;color:#e6edf3">facebook/sam3</code> (text-prompted video tracker)</div>
+          <div>· Orchestrator: Claude on frame 0 (scene description + subject selection)</div>
+          <div>· Ear angle: PCA on ear mask; midline from nose &rarr; ear-midpoint when nose detected, vertical fallback otherwise</div>
+          <div>· Thresholds: <a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC6523241/" style="color:#58a6ff">McLennan &amp; Mahmoud 2019 (SPFES)</a>, <span style="color:#8b949e">Reefmann et al. 2009</span>, <span style="color:#8b949e">Boissy et al. 2011</span></div>
+          <div>· Feasibility study (N=5 sheep, one homestead) — see <a href="https://github.com/antonemking/SamSeesSheep/blob/main/VALIDATION.md" style="color:#58a6ff">VALIDATION.md</a> for claim boundaries</div>
+        </div>
+      </div>
+
     </div>
 
   </div>
@@ -493,6 +550,57 @@ function renderVideoTimeline(data){
     'L: '+fmt(s.left_mean_deg)+' &plusmn; '+fmt(s.left_std_deg)+
     '  &middot;  R: '+fmt(s.right_mean_deg)+' &plusmn; '+fmt(s.right_std_deg) +
     pres + alerts;
+
+  // Dashboard metadata header
+  renderDashMeta(data);
+  // Alert cards
+  renderAlertCards(alertRegions, perFrame);
+}
+
+function renderDashMeta(data){
+  const s=data.summary||{};
+  const ts=new Date().toLocaleString(undefined, {year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+  const parts=[
+    ts,
+    (data.n_frames || 0) + ' frames sampled',
+    'processed in ' + Math.round(data.elapsed_s || 0) + 's',
+  ];
+  if(s.frames_gap){ parts.push(s.frames_gap + ' frames out of view'); }
+  $('dash-meta').textContent = parts.join(' · ');
+}
+
+function renderAlertCards(regions, perFrame){
+  const host=$('dash-alerts');
+  if(!regions || regions.length===0){
+    host.innerHTML='<div class="dash-no-alerts">No sustained patterns crossed the configured thresholds in this clip.</div>';
+    return;
+  }
+  const html=regions.map(r=>{
+    const duration = (r.end_frame - r.start_frame + 1);
+    const earLabel = r.ear==='left' ? 'left ear' : r.ear==='right' ? 'right ear' : 'both ears';
+    let title, detail, cite, cls='';
+    if(r.type==='down'){
+      title = earLabel.charAt(0).toUpperCase()+earLabel.slice(1)+' held back';
+      detail = 'Smoothed angle stayed below &minus;10&deg; for '+duration+' consecutive frames. Peak: '+r.peak_deg.toFixed(1)+'&deg;.';
+      cite = 'Reefmann et al. (2009) associate backward/low ear posture with negative valence; McLennan &amp; Mahmoud (2019) include ear posture as an SPFES action unit.';
+    } else if(r.type==='asym'){
+      title = 'Sustained bilateral asymmetry';
+      detail = '|Left &minus; Right| exceeded 25&deg; for '+duration+' consecutive frames. Peak: '+r.peak_deg.toFixed(1)+'&deg;.';
+      cite = 'Boissy et al. (2011) describe asymmetric ear posture as an emotional-valence indicator in sheep.';
+      cls=' asym';
+    } else {
+      title = r.type;
+      detail = 'Frames '+r.start_frame+'-'+r.end_frame+'.';
+      cite = '';
+    }
+    const badge = r.type==='down' ? 'DOWN' : r.type==='asym' ? 'ASYMMETRY' : r.type.toUpperCase();
+    return '<div class="alert-card'+cls+'">'+
+      '<div class="alert-title"><span class="alert-badge">'+badge+'</span>'+title+'</div>'+
+      '<div class="alert-detail">'+detail+' &nbsp;·&nbsp; frames '+r.start_frame+'&ndash;'+r.end_frame+'</div>'+
+      (cite ? '<div class="alert-cite">'+cite+'</div>' : '')+
+    '</div>';
+  }).join('');
+  host.innerHTML=html;
 }
 
 function runSelectedModel(){
