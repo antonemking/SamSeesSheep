@@ -2,6 +2,13 @@
 
 from pathlib import Path
 
+# Load .env if present (for ANTHROPIC_API_KEY and any other secrets)
+try:
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).parent.parent / ".env")
+except ImportError:
+    pass
+
 # Register HEIC support globally
 try:
     from pillow_heif import register_heif_opener

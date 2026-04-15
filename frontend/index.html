@@ -65,11 +65,41 @@ h1{font-family:'SF Mono',monospace;color:#3fb950;font-size:1.4rem}
   </div>
   <div style="margin-bottom:.75rem;font-size:.75rem;color:#8b949e">
     Model:
-    <label style="margin-left:.5rem"><input type="radio" name="model" value="sam3" checked> SAM 3 (auto)</label>
+    <label style="margin-left:.5rem"><input type="radio" name="model" value="orchestrated" checked> Claude + SAM 3 (orchestrated)</label>
+    <label style="margin-left:.75rem"><input type="radio" name="model" value="sam3"> SAM 3 (auto)</label>
     <label style="margin-left:.75rem"><input type="radio" name="model" value="sam21"> SAM 2.1 (3 clicks)</label>
   </div>
   <div class="click-photo" id="click-photo"><img id="click-img"></div>
   <div id="click-hint" style="font-size:.75rem;color:#3fb950;margin-top:.3rem"></div>
+</div>
+
+<!-- 2b. Claude orchestrator scene analysis -->
+<div id="orchestrator" class="hidden" style="margin:1.5rem 0;padding:1rem;border:1px solid #30363d;border-radius:6px;background:#161b22">
+  <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.5rem">
+    <div style="font-size:.65rem;color:#3fb950;text-transform:uppercase;letter-spacing:.1em;font-weight:700">Claude orchestrator</div>
+    <div id="orch-model" style="font-size:.6rem;color:#484f58"></div>
+  </div>
+  <div id="orch-summary" style="font-size:.95rem;color:#e6edf3;margin-bottom:.75rem;line-height:1.5"></div>
+
+  <div id="orch-subjects-wrap" class="hidden" style="margin-bottom:.75rem">
+    <div style="font-size:.6rem;color:#484f58;text-transform:uppercase;letter-spacing:.1em;margin-bottom:.25rem">Subjects detected</div>
+    <div id="orch-subjects" style="font-size:.8rem;color:#8b949e"></div>
+  </div>
+
+  <div id="orch-welfare-wrap" class="hidden" style="margin-bottom:.75rem">
+    <div style="font-size:.6rem;color:#484f58;text-transform:uppercase;letter-spacing:.1em;margin-bottom:.25rem">Welfare observations</div>
+    <ul id="orch-welfare" style="font-size:.8rem;color:#8b949e;padding-left:1.25rem;margin:0"></ul>
+  </div>
+
+  <div id="orch-prompts-wrap" class="hidden" style="margin-bottom:.5rem">
+    <div style="font-size:.6rem;color:#484f58;text-transform:uppercase;letter-spacing:.1em;margin-bottom:.25rem">SAM 3 prompts chosen</div>
+    <div id="orch-prompts" style="font-size:.7rem;color:#8b949e;font-family:'SF Mono',monospace"></div>
+  </div>
+
+  <div id="orch-confidence-wrap" class="hidden" style="border-top:1px solid #30363d;padding-top:.5rem">
+    <div style="font-size:.6rem;color:#484f58;text-transform:uppercase;letter-spacing:.1em;margin-bottom:.25rem">Confidence notes</div>
+    <div id="orch-confidence" style="font-size:.75rem;color:#8b949e;font-style:italic"></div>
+  </div>
 </div>
 
 <!-- 3. Segmentation results -->
@@ -221,6 +251,7 @@ async function upload(files){
       $('measurements').classList.add('hidden');
       $('turntable-section').classList.add('hidden');
       $('video-section').classList.add('hidden');
+      $('orchestrator').classList.add('hidden');
       runSelectedModel();
     }
   }catch(e){$('status').textContent='Upload failed.';}
@@ -367,10 +398,79 @@ function renderVideoTimeline(data){
 
 function runSelectedModel(){
   const model = document.querySelector('input[name="model"]:checked').value;
+  $('orchestrator').classList.add('hidden');
   if(model === 'sam21'){
     startClickFlow();
+  } else if(model === 'orchestrated'){
+    orchestratedSegment();
   } else {
     autoSegment();
+  }
+}
+
+async function orchestratedSegment(){
+  $('click-hint').innerHTML='<span class="spinner"></span> Claude is reading the scene...';
+  $('click-hint').style.color='#8b949e';
+  $('status').textContent='';
+  try{
+    const r=await fetch('/api/analyze/orchestrated',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({photo_id:currentPhotoId})
+    });
+    if(!r.ok){ throw new Error((await r.json()).detail || r.statusText); }
+    const d=await r.json();
+    renderOrchestrator(d.scene);
+    const photo=d.analysis||{};
+    if(photo.segmentation?.masks){
+      const m=photo.segmentation.masks;
+      if(m._extraction) $('img-extraction').src='data:image/jpeg;base64,'+m._extraction;
+      if(m._ear_overlay) $('img-ears').src='data:image/jpeg;base64,'+m._ear_overlay;
+      $('seg-row').classList.remove('hidden');
+    }
+    if(photo.ear_angles){
+      const la=photo.ear_angles.left_ear_angle_deg, ra=photo.ear_angles.right_ear_angle_deg;
+      $('click-hint').textContent='Orchestrated by Claude, segmented by SAM 3';
+      $('click-hint').style.color='#3fb950';
+      showMeasurements(la, ra, photo.segmentation?.confidence_scores);
+    }
+    $('status').textContent='Done.';
+    generateMesh();
+  }catch(e){
+    $('click-hint').textContent='Orchestrator failed: '+(e.message||e);
+    $('click-hint').style.color='#f85149';
+  }
+}
+
+function renderOrchestrator(scene){
+  if(!scene) return;
+  $('orchestrator').classList.remove('hidden');
+  $('orch-model').textContent=scene.model_used ? '· '+scene.model_used : '';
+  $('orch-summary').textContent=scene.scene_summary || '';
+
+  const subjects=scene.subjects||[];
+  if(subjects.length){
+    $('orch-subjects-wrap').classList.remove('hidden');
+    $('orch-subjects').innerHTML=subjects.map(s=>{
+      const parts=[s.label, s.color, s.position, s.facing].filter(x=>x);
+      return '· '+parts.join(' — ');
+    }).join('<br>');
+  }
+
+  const obs=scene.welfare_observations||[];
+  if(obs.length){
+    $('orch-welfare-wrap').classList.remove('hidden');
+    $('orch-welfare').innerHTML=obs.map(o=>'<li>'+o.replace(/</g,'&lt;')+'</li>').join('');
+  }
+
+  const prompts=scene.segmentation_prompts||[];
+  if(prompts.length){
+    $('orch-prompts-wrap').classList.remove('hidden');
+    $('orch-prompts').textContent=prompts.join(' · ');
+  }
+
+  if(scene.confidence_notes){
+    $('orch-confidence-wrap').classList.remove('hidden');
+    $('orch-confidence').textContent=scene.confidence_notes;
   }
 }
 

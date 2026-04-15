@@ -184,6 +184,66 @@ async def analyze_video_endpoint(req: VideoAnalyzeRequest) -> dict:
     return result
 
 
+class OrchestratedRequest(PydanticBaseModel):
+    photo_id: str
+
+
+@router.post("/analyze/orchestrated")
+async def analyze_orchestrated(req: OrchestratedRequest) -> dict:
+    """Claude vision describes the scene and decides what SAM 3 should segment."""
+    matches = list(UPLOAD_DIR.glob(f"{req.photo_id}.*"))
+    if not matches:
+        matches = list(SAMPLE_DIR.glob(f"{req.photo_id}.*"))
+    if not matches:
+        raise HTTPException(status_code=404, detail=f"Photo {req.photo_id} not found")
+
+    photo_path = matches[0]
+    image = cv2.imread(str(photo_path))
+    if image is None:
+        raise HTTPException(status_code=400, detail="Could not read image")
+
+    h, w = image.shape[:2]
+
+    # Step 1: Claude looks at the scene
+    from backend.pipeline.orchestrator import orchestrate_scene
+    scene = orchestrate_scene(photo_path)
+    if scene is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Orchestrator unavailable. Set ANTHROPIC_API_KEY in env.",
+        )
+
+    # Step 2: Use the first subject's label as the SAM 3 subject prompt
+    subjects = scene.get("subjects", [])
+    if subjects:
+        subject_label = subjects[0].get("label", "sheep")
+    else:
+        subject_label = "sheep"
+
+    # Step 3: Run SAM 3 with the orchestrator's chosen subject
+    seg_result = segment_sheep_sam3(image, req.photo_id, subject=subject_label)
+    ear_result = extract_ear_angles(seg_result)
+
+    analysis = PhotoAnalysis(
+        photo_id=req.photo_id,
+        filename=photo_path.name,
+        image_width=w,
+        image_height=h,
+        image_url=f"/uploads/{photo_path.name}" if "uploads" in str(photo_path) else f"/sample/{photo_path.name}",
+        segmentation=seg_result,
+        ear_angles=ear_result,
+    )
+
+    _session.photos = [p for p in _session.photos if p.photo_id != req.photo_id]
+    _session.photos.append(analysis)
+    _session.eup = compute_eup(_session.photos)
+
+    return {
+        "scene": scene,
+        "analysis": analysis.model_dump(mode="json"),
+    }
+
+
 class AutoSegmentRequest(PydanticBaseModel):
     photo_id: str
     subject: str = "sheep"  # or "goat"
