@@ -1,130 +1,23 @@
-"""Analysis routes — run the segmentation + ear angle pipeline."""
+"""Video analysis routes — SAM 3 Video tracking and ear angles."""
 
 from __future__ import annotations
 
 import logging
 
-import cv2
-import numpy as np
 from fastapi import APIRouter, HTTPException
-
 from pydantic import BaseModel as PydanticBaseModel
 
-from backend.config import RESULTS_DIR, SAMPLE_DIR, UPLOAD_DIR
-from backend.models import EUPResult, NarrativeResult, PhotoAnalysis, SessionState
-from fastapi.responses import Response
-
-from backend.pipeline.ear_angle import extract_ear_angles, _decode_mask
-from backend.pipeline.eup import compute_eup
-from backend.pipeline.narrative import generate_narrative
-from backend.pipeline.segment import segment_sheep_at_point, segment_sheep, segment_sheep_multipoint, segment_sheep_sam3
+from backend.config import UPLOAD_DIR
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["analyze"])
 
-# In-memory session state (single-user demo)
-_session = SessionState()
-
-
-def get_session() -> SessionState:
-    """Get the current session state."""
-    return _session
-
-
-def reset_session():
-    """Reset session state."""
-    global _session
-    _session = SessionState()
-
-
-@router.post("/analyze/batch")
-async def analyze_batch() -> SessionState:
-    """Run the full pipeline on all uploaded photos."""
-    photo_files = sorted(UPLOAD_DIR.glob("*"))
-    photo_files = [f for f in photo_files if f.suffix.lower() in {".jpg", ".jpeg", ".png", ".heic"}]
-
-    if not photo_files:
-        raise HTTPException(status_code=404, detail="No photos uploaded")
-
-    reset_session()
-
-    for photo_path in photo_files:
-        image = cv2.imread(str(photo_path))
-        if image is None:
-            continue
-
-        h, w = image.shape[:2]
-        photo_id = photo_path.stem
-
-        seg_result = segment_sheep(image, photo_id)
-        ear_result = extract_ear_angles(seg_result)
-
-        analysis = PhotoAnalysis(
-            photo_id=photo_id,
-            filename=photo_path.name,
-            image_width=w,
-            image_height=h,
-            segmentation=seg_result,
-            ear_angles=ear_result,
-        )
-        _session.photos.append(analysis)
-
-    _session.eup = compute_eup(_session.photos)
-    return _session
-
-
-class ClickRequest(PydanticBaseModel):
-    photo_id: str
-    x: float  # 0-1 normalized
-    y: float  # 0-1 normalized
-
-
-@router.post("/analyze/click")
-async def analyze_click(req: ClickRequest) -> PhotoAnalysis:
-    """Run SAM with a user-clicked point on the animal's face."""
-    # Look in uploads first, then sample/
-    matches = list(UPLOAD_DIR.glob(f"{req.photo_id}.*"))
-    if not matches:
-        matches = list(SAMPLE_DIR.glob(f"{req.photo_id}.*"))
-    if not matches:
-        raise HTTPException(status_code=404, detail=f"Photo {req.photo_id} not found")
-
-    photo_path = matches[0]
-    image = cv2.imread(str(photo_path))
-    if image is None:
-        raise HTTPException(status_code=400, detail="Could not read image")
-
-    h, w = image.shape[:2]
-    px = int(req.x * w)
-    py = int(req.y * h)
-
-    seg_result = segment_sheep_at_point(image, req.photo_id, px, py)
-    ear_result = extract_ear_angles(seg_result)
-
-    analysis = PhotoAnalysis(
-        photo_id=req.photo_id,
-        filename=photo_path.name,
-        image_width=w,
-        image_height=h,
-        image_url=f"/uploads/{photo_path.name}" if "uploads" in str(photo_path) else f"/sample/{photo_path.name}",
-        segmentation=seg_result,
-        ear_angles=ear_result,
-    )
-
-    _session.photos = [p for p in _session.photos if p.photo_id != req.photo_id]
-    _session.photos.append(analysis)
-    _session.eup = compute_eup(_session.photos)
-
-    return analysis
-
 
 class VideoAnalyzeRequest(PydanticBaseModel):
     video_id: str
     subject: str = "sheep"
-    # Phase 2: longer clips. Default 30, OOM retry drops to 15 / 6 if needed.
     max_frames: int = 30
-    # Click point (normalized 0-1) to select which animal to track
     click_x: float | None = None
     click_y: float | None = None
 
@@ -132,7 +25,6 @@ class VideoAnalyzeRequest(PydanticBaseModel):
 @router.post("/analyze/video")
 async def analyze_video_endpoint(req: VideoAnalyzeRequest) -> dict:
     """Run SAM 3 Video tracking across a clip to get per-frame ear angles."""
-    # Match the video file, skipping the extracted first-frame JPEG
     all_matches = list(UPLOAD_DIR.glob(f"{req.video_id}.*"))
     matches = [
         p for p in all_matches
@@ -181,182 +73,3 @@ async def analyze_video_endpoint(req: VideoAnalyzeRequest) -> dict:
     result["video_id"] = req.video_id
     result["video_url"] = f"/uploads/{video_path.name}"
     return result
-
-
-class AutoSegmentRequest(PydanticBaseModel):
-    photo_id: str
-    subject: str = "sheep"  # or "goat"
-
-
-@router.post("/analyze/auto")
-async def analyze_auto(req: AutoSegmentRequest) -> PhotoAnalysis:
-    """Auto-segment using SAM 3 with text prompts — no clicks needed."""
-    matches = list(UPLOAD_DIR.glob(f"{req.photo_id}.*"))
-    if not matches:
-        matches = list(SAMPLE_DIR.glob(f"{req.photo_id}.*"))
-    if not matches:
-        raise HTTPException(status_code=404, detail=f"Photo {req.photo_id} not found")
-
-    photo_path = matches[0]
-    image = cv2.imread(str(photo_path))
-    if image is None:
-        raise HTTPException(status_code=400, detail="Could not read image")
-
-    h, w = image.shape[:2]
-    seg_result = segment_sheep_sam3(image, req.photo_id, subject=req.subject)
-    ear_result = extract_ear_angles(seg_result)
-
-    analysis = PhotoAnalysis(
-        photo_id=req.photo_id,
-        filename=photo_path.name,
-        image_width=w,
-        image_height=h,
-        image_url=f"/uploads/{photo_path.name}" if "uploads" in str(photo_path) else f"/sample/{photo_path.name}",
-        segmentation=seg_result,
-        ear_angles=ear_result,
-    )
-
-    _session.photos = [p for p in _session.photos if p.photo_id != req.photo_id]
-    _session.photos.append(analysis)
-    _session.eup = compute_eup(_session.photos)
-
-    return analysis
-
-
-class PointLabel(PydanticBaseModel):
-    x: float  # 0-1 normalized
-    y: float
-    label: str  # "face", "left_ear", "right_ear"
-
-
-class MultiClickRequest(PydanticBaseModel):
-    photo_id: str
-    points: list[PointLabel]
-
-
-@router.post("/analyze/multiclick")
-async def analyze_multiclick(req: MultiClickRequest) -> PhotoAnalysis:
-    """Run SAM with face center + ear tip points for precise segmentation."""
-    matches = list(UPLOAD_DIR.glob(f"{req.photo_id}.*"))
-    if not matches:
-        matches = list(SAMPLE_DIR.glob(f"{req.photo_id}.*"))
-    if not matches:
-        raise HTTPException(status_code=404, detail=f"Photo {req.photo_id} not found")
-
-    photo_path = matches[0]
-    image = cv2.imread(str(photo_path))
-    if image is None:
-        raise HTTPException(status_code=400, detail="Could not read image")
-
-    h, w = image.shape[:2]
-
-    face_pt = None
-    ear_pts = []
-    eye_pts = []
-    nose_pt = None
-
-    for p in req.points:
-        px, py = int(p.x * w), int(p.y * h)
-        if p.label == "face":
-            face_pt = (px, py)
-        elif p.label in ("left_ear", "right_ear", "ear1", "ear2"):
-            ear_pts.append((px, py))
-        elif p.label in ("left_eye", "right_eye", "eye1", "eye2"):
-            eye_pts.append((px, py))
-        elif p.label == "nose":
-            nose_pt = (px, py)
-
-    if face_pt is None:
-        raise HTTPException(status_code=400, detail="Face point is required")
-
-    # Auto-assign left/right by x-position (smaller x = viewer's left)
-    left_ear_pt = None
-    right_ear_pt = None
-    if len(ear_pts) >= 2:
-        ear_pts.sort(key=lambda pt: pt[0])
-        left_ear_pt = ear_pts[0]
-        right_ear_pt = ear_pts[1]
-    elif len(ear_pts) == 1:
-        if ear_pts[0][0] < face_pt[0]:
-            left_ear_pt = ear_pts[0]
-        else:
-            right_ear_pt = ear_pts[0]
-
-    left_eye_pt = None
-    right_eye_pt = None
-    if len(eye_pts) >= 2:
-        eye_pts.sort(key=lambda pt: pt[0])
-        left_eye_pt = eye_pts[0]
-        right_eye_pt = eye_pts[1]
-    elif len(eye_pts) == 1:
-        if eye_pts[0][0] < face_pt[0]:
-            left_eye_pt = eye_pts[0]
-        else:
-            right_eye_pt = eye_pts[0]
-
-    seg_result = segment_sheep_multipoint(
-        image, req.photo_id, face_pt,
-        left_ear_pt, right_ear_pt,
-        left_eye_pt, right_eye_pt,
-        nose_pt,
-    )
-    ear_result = extract_ear_angles(seg_result)
-
-    analysis = PhotoAnalysis(
-        photo_id=req.photo_id,
-        filename=photo_path.name,
-        image_width=w,
-        image_height=h,
-        image_url=f"/uploads/{photo_path.name}" if "uploads" in str(photo_path) else f"/sample/{photo_path.name}",
-        segmentation=seg_result,
-        ear_angles=ear_result,
-    )
-
-    _session.photos = [p for p in _session.photos if p.photo_id != req.photo_id]
-    _session.photos.append(analysis)
-    _session.eup = compute_eup(_session.photos)
-
-    return analysis
-
-
-@router.post("/analyze/{photo_id}")
-async def analyze_photo(photo_id: str) -> PhotoAnalysis:
-    """Run segmentation + ear angle extraction on a single photo."""
-    matches = list(UPLOAD_DIR.glob(f"{photo_id}.*"))
-    if not matches:
-        raise HTTPException(status_code=404, detail=f"Photo {photo_id} not found")
-
-    photo_path = matches[0]
-    image = cv2.imread(str(photo_path))
-    if image is None:
-        raise HTTPException(status_code=400, detail=f"Could not read image")
-
-    h, w = image.shape[:2]
-    seg_result = segment_sheep(image, photo_id)
-    ear_result = extract_ear_angles(seg_result)
-
-    analysis = PhotoAnalysis(
-        photo_id=photo_id,
-        filename=photo_path.name,
-        image_width=w,
-        image_height=h,
-        segmentation=seg_result,
-        ear_angles=ear_result,
-    )
-
-    _session.photos = [p for p in _session.photos if p.photo_id != photo_id]
-    _session.photos.append(analysis)
-    _session.eup = compute_eup(_session.photos)
-
-    return analysis
-
-
-@router.post("/narrative")
-async def generate_narrative_endpoint(context: str = "") -> NarrativeResult:
-    """Generate a Claude API narrative from current session results."""
-    if _session.eup is None:
-        raise HTTPException(status_code=400, detail="No analysis results. Run /analyze/batch first.")
-
-    narrative = generate_narrative(_session.eup, additional_context=context)
-    _session.narrative = narrative
-    return narrative

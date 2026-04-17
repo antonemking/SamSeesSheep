@@ -18,38 +18,17 @@ h1{font-family:'SF Mono',monospace;color:#3fb950;font-size:1.4rem}
 .status{font-size:.8rem;color:#8b949e;margin:.5rem 0}
 .spinner{display:inline-block;width:14px;height:14px;border:2px solid #30363d;border-top-color:#3fb950;border-radius:50%;animation:spin .7s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
-.btn{padding:.5rem 1.2rem;border-radius:5px;font-size:.85rem;font-weight:600;border:1px solid #3fb950;cursor:pointer;background:#161b22;color:#3fb950;transition:background .15s}
-.btn:hover{background:#21262d}
-.btn:disabled{opacity:.35;cursor:default}
 
-/* Preview with click dots */
+/* Click-to-select dot on frame 0 */
 .click-photo{position:relative;cursor:crosshair;display:inline-block}
-.click-photo img{max-width:100%;max-height:350px;border-radius:6px;border:1px solid #30363d;display:block;object-fit:contain}
 .click-dot{position:absolute;width:18px;height:18px;border-radius:50%;border:2px solid #3fb950;background:rgba(63,185,80,.3);transform:translate(-50%,-50%);pointer-events:none;font-size:9px;font-weight:700;color:#fff;display:flex;align-items:center;justify-content:center;text-shadow:0 1px 2px #000}
-.click-dot.ear{border-color:#f0883e;background:rgba(240,136,62,.3)}
 
-/* Segmentation results */
-.seg-row{display:flex;gap:1rem;margin:1.5rem 0;flex-wrap:wrap;justify-content:center}
-.seg-row>div{flex:1;min-width:200px;text-align:center}
-.seg-row img{width:100%;max-width:340px;border-radius:6px;border:1px solid #30363d}
-.seg-row .cap{font-size:.7rem;color:#484f58;margin-top:.3rem}
-
-/* Dashboard sections for video analysis report */
+/* Dashboard sections */
 .dash-section{margin-bottom:1.25rem}
 .dash-h{font-size:.6rem;color:#3fb950;text-transform:uppercase;letter-spacing:.12em;font-weight:700;margin-bottom:.35rem}
 .dash-cap{font-size:.65rem;color:#8b949e;font-style:italic}
-.alert-card{border-left:3px solid #f85149;background:#161b22;padding:.6rem .75rem;border-radius:0 4px 4px 0;margin-bottom:.5rem}
-.alert-card.asym{border-left-color:#d29922}
-.alert-card .alert-title{font-size:.8rem;color:#e6edf3;font-weight:600;margin-bottom:.15rem;display:flex;gap:.5rem;align-items:baseline}
-.alert-card .alert-badge{font-size:.55rem;text-transform:uppercase;letter-spacing:.1em;padding:.1rem .35rem;border-radius:3px;background:rgba(248,81,73,.2);color:#f85149;font-weight:700}
-.alert-card.asym .alert-badge{background:rgba(210,153,34,.2);color:#d29922}
-.alert-card .alert-detail{font-size:.7rem;color:#8b949e;line-height:1.5}
-.alert-card .alert-cite{font-size:.6rem;color:#484f58;margin-top:.2rem;font-style:italic}
-.dash-no-alerts{font-size:.75rem;color:#8b949e;font-style:italic;padding:.5rem 0}
-
 
 .footer{margin-top:2.5rem;padding-top:1.5rem;border-top:1px solid #30363d;font-size:.75rem;color:#484f58}
-.footer p{margin-bottom:.3rem}
 </style>
 </head>
 <body>
@@ -59,86 +38,35 @@ h1{font-family:'SF Mono',monospace;color:#3fb950;font-size:1.4rem}
 
 <!-- 1. Upload -->
 <div class="upload" id="upload-zone">
-  <p><strong>Drop a sheep photo or video</strong> or click to browse</p>
-  <input type="file" id="file-input" accept="image/*,video/*,.heic,.heif,.mp4,.mov,.webm" style="display:none">
+  <p><strong>Drop a sheep video</strong> or click to browse</p>
+  <input type="file" id="file-input" accept="video/*,.mp4,.mov,.webm" style="display:none">
 </div>
 
-<!-- 2. Subject type + model toggle + preview -->
-<div id="click-section" class="hidden" style="margin:1.5rem 0;text-align:center">
-  <div style="margin-bottom:.5rem;font-size:.75rem;color:#8b949e">
-    Subject:
-    <label style="margin-left:.5rem"><input type="radio" name="subject" value="sheep" checked> sheep</label>
-    <label style="margin-left:.75rem"><input type="radio" name="subject" value="goat"> goat</label>
-  </div>
-  <div style="margin-bottom:.75rem;font-size:.75rem;color:#8b949e">
-    Model:
-    <label style="margin-left:.5rem"><input type="radio" name="model" value="sam3" checked> SAM 3 (auto)</label>
-    <label style="margin-left:.75rem"><input type="radio" name="model" value="sam21"> SAM 2.1 (3 clicks)</label>
-  </div>
-  <div class="click-photo" id="click-photo"><img id="click-img"></div>
-  <div id="click-hint" style="font-size:.75rem;color:#3fb950;margin-top:.3rem"></div>
-</div>
-
-<!-- 3. Segmentation results -->
-<div class="seg-row hidden" id="seg-row">
-  <div><img id="img-extraction" style="background:#000"><div class="cap">Face extraction</div></div>
-  <div><img id="img-ears"><div class="cap">Ear segmentation</div></div>
-</div>
-
-<!-- 4. Ear angle measurements -->
-<div id="measurements" class="hidden">
-  <div style="display:flex;gap:1.5rem;justify-content:center;margin:1.5rem 0 .75rem">
-    <div style="text-align:center">
-      <div style="font-size:.65rem;color:#484f58;margin-bottom:.25rem">Left Ear</div>
-      <div id="m-left" style="font-size:2rem;font-weight:800;font-family:'SF Mono',monospace">--</div>
-      <div id="m-left-label" style="font-size:.7rem;margin-top:.15rem">--</div>
-      <div id="m-left-conf" style="font-size:.6rem;color:#484f58;margin-top:.1rem">--</div>
-    </div>
-    <div style="text-align:center">
-      <div style="font-size:.65rem;color:#484f58;margin-bottom:.25rem">Right Ear</div>
-      <div id="m-right" style="font-size:2rem;font-weight:800;font-family:'SF Mono',monospace">--</div>
-      <div id="m-right-label" style="font-size:.7rem;margin-top:.15rem">--</div>
-      <div id="m-right-conf" style="font-size:.6rem;color:#484f58;margin-top:.1rem">--</div>
-    </div>
-  </div>
-  <div style="text-align:center;font-size:.6rem;color:#484f58;margin-bottom:.3rem">
-    Thresholds: <span style="color:#3fb950">&gt;30&deg; up</span> &middot;
-    <span style="color:#d29922">-10&deg;&ndash;30&deg; neutral</span> &middot;
-    <span style="color:#f85149">&lt;-10&deg; down</span>
-    &mdash; <a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC6523241/" style="color:#484f58">McLennan 2019</a>
-  </div>
-  <div style="text-align:center;font-size:.6rem;color:#484f58;font-style:italic">
-    Single-frame reading &mdash; trust deltas over time, not absolutes. See <a href="https://github.com/antonemking/SamSeesSheep/blob/main/VALIDATION.md" style="color:#484f58">VALIDATION.md</a>.
-  </div>
-</div>
-
-<!-- 4b. Video: click-to-select, annotated tracking + timeline -->
+<!-- 2. Video: click-to-select, annotated tracking + timeline -->
 <div id="video-section" class="hidden" style="margin:1.5rem 0">
   <div style="border:1px solid #30363d;border-radius:6px;padding:1rem;background:#0d1117">
 
     <!-- Selector: user clicks the animal to track -->
     <div id="video-selector" class="hidden" style="text-align:center;margin-bottom:1rem">
-      <div style="font-size:.75rem;color:#3fb950;margin-bottom:.5rem">Click on the animal you want to track</div>
+      <div style="font-size:.75rem;color:#3fb950;margin-bottom:.5rem">Click on the sheep you want to track</div>
       <div class="click-photo" id="video-frame-photo" style="display:inline-block;max-width:100%">
         <img id="video-frame0" style="max-width:100%;max-height:360px;border-radius:6px;border:1px solid #30363d;display:block">
       </div>
     </div>
 
     <!-- Results: research-grade dashboard layout -->
-    <div id="video-results" class="hidden" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
+    <div id="video-results" class="hidden">
 
-      <!-- Dashboard header with dataset metadata -->
       <div style="border-bottom:1px solid #30363d;padding-bottom:.75rem;margin-bottom:1rem">
         <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:.5rem">
           <div>
             <div style="font-size:.6rem;color:#3fb950;text-transform:uppercase;letter-spacing:.12em;font-weight:700">Analysis Report</div>
-            <div style="font-size:1rem;color:#e6edf3;font-weight:600;margin-top:.15rem" id="dash-title">Ear-position tracking · single subject</div>
+            <div style="font-size:1rem;color:#e6edf3;font-weight:600;margin-top:.15rem">Ear-position tracking · single subject</div>
           </div>
           <div id="dash-meta" style="font-size:.7rem;color:#8b949e;font-family:'SF Mono',monospace;text-align:right"></div>
         </div>
       </div>
 
-      <!-- Section: Footage -->
       <div class="dash-section">
         <div class="dash-h">Footage</div>
         <div style="display:flex;gap:1rem;flex-wrap:wrap;align-items:start">
@@ -147,13 +75,12 @@ h1{font-family:'SF Mono',monospace;color:#3fb950;font-size:1.4rem}
             <video id="video-preview" controls style="width:100%;border-radius:4px"></video>
           </div>
           <div style="flex:1;min-width:240px;max-width:360px">
-            <div class="dash-cap">SAM 3 tracked · head · ears · nose</div>
+            <div class="dash-cap">SAM 3 tracked · head · ears</div>
             <img id="video-annotated" style="width:100%;border-radius:4px;background:#0d1117;display:block">
           </div>
         </div>
       </div>
 
-      <!-- Section: Timeline -->
       <div class="dash-section">
         <div class="dash-h">Ear angle timeline</div>
         <div class="dash-cap">Smoothed line = 3-frame rolling median · Dots = raw per-frame</div>
@@ -161,23 +88,11 @@ h1{font-family:'SF Mono',monospace;color:#3fb950;font-size:1.4rem}
         <div id="video-stats" style="font-size:.7rem;color:#8b949e;margin-top:.5rem;font-family:'SF Mono',monospace"></div>
       </div>
 
-      <!-- Section: Alerts -->
-      <div class="dash-section" id="dash-alerts-wrap">
-        <div class="dash-h">Sustained patterns detected</div>
-        <div class="dash-cap">
-          Patterns are observational only — not a clinical diagnosis.
-          Each alert requires &ge;3 consecutive smoothed frames past a threshold.
-        </div>
-        <div id="dash-alerts" style="margin-top:.5rem"></div>
-      </div>
-
-      <!-- Section: Methodology -->
       <div class="dash-section" style="border-top:1px solid #30363d;padding-top:.75rem;margin-top:1rem">
         <div class="dash-h" style="color:#484f58">Methodology</div>
-        <div style="font-size:.7rem;color:#8b949e;line-height:1.7;font-family:-apple-system,sans-serif">
-          <div>· Segmentation: <code style="font-family:'SF Mono',monospace;color:#e6edf3">facebook/sam3</code> (text-prompted video tracker)</div>
-          <div>· Orchestrator: Claude on frame 0 (scene description + subject selection)</div>
-          <div>· Ear angle: PCA on ear mask; midline from nose &rarr; ear-midpoint when nose detected, vertical fallback otherwise</div>
+        <div style="font-size:.7rem;color:#8b949e;line-height:1.7">
+          <div>· Segmentation: <code style="font-family:'SF Mono',monospace;color:#e6edf3">facebook/sam3</code> (text-prompted video tracker, "sheep head" + "sheep ear")</div>
+          <div>· Ear angle: PCA on head mask for the dorsal axis; ear direction from base&rarr;tip</div>
           <div>· Thresholds: <a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC6523241/" style="color:#58a6ff">McLennan &amp; Mahmoud 2019 (SPFES)</a>, <span style="color:#8b949e">Reefmann et al. 2009</span>, <span style="color:#8b949e">Boissy et al. 2011</span></div>
           <div>· Feasibility study (N=5 sheep, one homestead) — see <a href="https://github.com/antonemking/SamSeesSheep/blob/main/VALIDATION.md" style="color:#58a6ff">VALIDATION.md</a> for claim boundaries</div>
         </div>
@@ -198,47 +113,18 @@ h1{font-family:'SF Mono',monospace;color:#3fb950;font-size:1.4rem}
 
 <script>
 const $=id=>document.getElementById(id);
-let currentPhotoId=null;
+let currentVideoId=null;
 
 /* ── Upload ── */
 const zone=$('upload-zone'), input=$('file-input');
 zone.addEventListener('dragover',e=>{e.preventDefault();zone.style.borderColor='#3fb950'});
 zone.addEventListener('dragleave',()=>zone.style.borderColor='#30363d');
-zone.addEventListener('drop',e=>{e.preventDefault();zone.style.borderColor='#30363d';if(e.dataTransfer.files.length)upload(e.dataTransfer.files)});
+zone.addEventListener('drop',e=>{e.preventDefault();zone.style.borderColor='#30363d';if(e.dataTransfer.files.length)uploadVideo(e.dataTransfer.files[0])});
 zone.addEventListener('click',()=>input.click());
-input.addEventListener('change',e=>{if(e.target.files.length)upload(e.target.files)});
-
-async function upload(files){
-  const f = files[0];
-  const isVideo = f.type.startsWith('video/') || /\.(mp4|mov|webm|m4v)$/i.test(f.name);
-  if (isVideo) return uploadVideo(f);
-
-  $('status').innerHTML='<span class="spinner"></span> Uploading...';
-  const fd=new FormData();
-  fd.append('files',f);
-  try{
-    const r=await fetch('/api/upload',{method:'POST',body:fd});
-    const photos=await r.json();
-    if(photos.length){
-      currentPhotoId=photos[0].photo_id;
-      $('click-img').src='/uploads/'+photos[0].filename;
-      $('click-section').classList.remove('hidden');
-      $('seg-row').classList.add('hidden');
-      $('measurements').classList.add('hidden');
-      $('video-section').classList.add('hidden');
-      runSelectedModel();
-    }
-  }catch(e){$('status').textContent='Upload failed.';}
-}
-
-let currentVideoId=null;
+input.addEventListener('change',e=>{if(e.target.files.length)uploadVideo(e.target.files[0])});
 
 async function uploadVideo(file){
   $('status').innerHTML='<span class="spinner"></span> Uploading video...';
-  $('click-section').classList.add('hidden');
-  $('seg-row').classList.add('hidden');
-  $('measurements').classList.add('hidden');
-  $('turntable-section').classList.add('hidden');
   $('video-results').classList.add('hidden');
   $('video-selector').classList.add('hidden');
   const fd=new FormData();
@@ -249,24 +135,21 @@ async function uploadVideo(file){
     currentVideoId=info.video_id;
     $('video-preview').src='/uploads/'+info.filename;
     $('video-section').classList.remove('hidden');
-    // Show first frame for click-to-select
     if(info.first_frame_url){
       $('video-frame0').src=info.first_frame_url;
       $('video-selector').classList.remove('hidden');
-      $('status').textContent='Click the animal you want to track.';
+      $('status').textContent='Click the sheep you want to track.';
     } else {
       analyzeVideo(currentVideoId, null, null);
     }
   }catch(e){$('status').textContent='Video upload failed.';}
 }
 
-// Click handler on the first frame
 $('video-frame-photo').addEventListener('click', e=>{
   if(!currentVideoId) return;
   const img=$('video-frame0'), rect=img.getBoundingClientRect();
   const x=(e.clientX-rect.left)/rect.width;
   const y=(e.clientY-rect.top)/rect.height;
-  // Mark the click
   img.parentNode.querySelectorAll('.click-dot').forEach(d=>d.remove());
   const dot=document.createElement('div');
   dot.className='click-dot';
@@ -277,10 +160,9 @@ $('video-frame-photo').addEventListener('click', e=>{
 });
 
 async function analyzeVideo(videoId, clickX, clickY){
-  const subject=document.querySelector('input[name="subject"]:checked').value;
-  $('status').innerHTML='<span class="spinner"></span> SAM 3 tracking '+subject+' across frames (~1-3 min)...';
+  $('status').innerHTML='<span class="spinner"></span> SAM 3 tracking sheep across frames (~1-3 min)...';
   try{
-    const body={video_id:videoId, subject:subject, max_frames:15};
+    const body={video_id:videoId, subject:'sheep', max_frames:15};
     if(clickX!=null && clickY!=null){ body.click_x=clickX; body.click_y=clickY; }
     const r=await fetch('/api/analyze/video',{
       method:'POST',headers:{'Content-Type':'application/json'},
@@ -302,18 +184,15 @@ async function analyzeVideo(videoId, clickX, clickY){
 
 function renderVideoTimeline(data){
   const perFrame=data.per_frame||[];
-  const alertRegions=data.alert_regions||[];
   const cv=$('video-chart'); const ctx=cv.getContext('2d');
-  // Handle DPR for crisp rendering
   const rect=cv.getBoundingClientRect();
-  const CH_H=260;  // chart height — added 20px for presence bar
+  const CH_H=260;
   cv.width=rect.width*devicePixelRatio;
   cv.height=CH_H*devicePixelRatio;
   ctx.scale(devicePixelRatio, devicePixelRatio);
   const W=rect.width, H=CH_H;
   ctx.fillStyle='#0d1117'; ctx.fillRect(0,0,W,H);
 
-  // Axes. Reserve the bottom 20px for a presence bar.
   const PAD_L=40, PAD_R=10, PAD_T=15, PAD_B=45;
   const PRESENCE_H=12;
   const plotW=W-PAD_L-PAD_R, plotH=H-PAD_T-PAD_B;
@@ -321,24 +200,12 @@ function renderVideoTimeline(data){
   const yToPx=y=>PAD_T+plotH*(1-(y-yMin)/(yMax-yMin));
   const xToPx=i=>PAD_L+plotW*(i/(perFrame.length-1||1));
 
-  // Threshold bands
+  // Threshold bands (up / neutral / down)
   ctx.fillStyle='rgba(63,185,80,.10)';  ctx.fillRect(PAD_L, yToPx(60), plotW, yToPx(30)-yToPx(60));
   ctx.fillStyle='rgba(210,153,34,.10)'; ctx.fillRect(PAD_L, yToPx(30), plotW, yToPx(-10)-yToPx(30));
   ctx.fillStyle='rgba(248,81,73,.10)';  ctx.fillRect(PAD_L, yToPx(-10), plotW, yToPx(-60)-yToPx(-10));
 
-  // Alert regions — red-shaded vertical bands behind the line
-  alertRegions.forEach(r=>{
-    const x1=xToPx(r.start_frame), x2=xToPx(r.end_frame);
-    ctx.fillStyle='rgba(248,81,73,.18)';
-    ctx.fillRect(x1, PAD_T, Math.max(2, x2-x1), plotH);
-    // Tick at the top with alert type
-    ctx.fillStyle='#f85149';
-    ctx.font='9px SF Mono, monospace';
-    const label = r.type==='down' ? r.ear[0].toUpperCase()+' down' : 'asym';
-    ctx.fillText(label, x1+2, PAD_T+10);
-  });
-
-  // Tracking-gap shading — grey bands where animal left the frame
+  // Tracking-gap shading
   let gapStart=null;
   perFrame.forEach((f,i)=>{
     const isGap = f.tracking_gap === true;
@@ -354,7 +221,7 @@ function renderVideoTimeline(data){
     ctx.fillRect(xToPx(gapStart), PAD_T, xToPx(perFrame.length-1)-xToPx(gapStart), plotH);
   }
 
-  // Grid lines at 0, 30, -10
+  // Grid lines
   ctx.strokeStyle='#30363d'; ctx.lineWidth=1;
   ctx.font='10px SF Mono, monospace'; ctx.fillStyle='#484f58';
   [30, 0, -10, -60, 60].forEach(y=>{
@@ -363,7 +230,7 @@ function renderVideoTimeline(data){
     ctx.fillText(y+'\u00b0', 5, py+3);
   });
 
-  // Presence bar below the plot — green when tracked, grey when gap
+  // Presence bar
   const presY = PAD_T + plotH + 8;
   ctx.fillStyle='#484f58';
   ctx.fillText('presence:', 5, presY + PRESENCE_H - 3);
@@ -374,14 +241,11 @@ function renderVideoTimeline(data){
     ctx.fillRect(x1, presY, w, PRESENCE_H);
   });
 
-  // X axis label
   ctx.fillStyle='#484f58';
   ctx.fillText('frame', W/2-15, H-5);
 
-  // Plot smoothed line (thicker, primary signal) + raw dots (small, context)
   function plot(rawKey, color){
     const smoothKey = rawKey + '_smoothed';
-    // Smoothed line — the main signal
     ctx.strokeStyle=color; ctx.lineWidth=2.5; ctx.beginPath();
     let started=false;
     perFrame.forEach((f,i)=>{
@@ -391,7 +255,6 @@ function renderVideoTimeline(data){
       if(!started){ ctx.moveTo(px,py); started=true; } else { ctx.lineTo(px,py); }
     });
     ctx.stroke();
-    // Raw per-frame dots — honest about the noise underneath
     ctx.fillStyle=color; ctx.globalAlpha=0.35;
     perFrame.forEach((f,i)=>{
       const v=f[rawKey]; if(v==null) return;
@@ -403,28 +266,21 @@ function renderVideoTimeline(data){
   plot('left_ear_angle_deg', '#58a6ff');
   plot('right_ear_angle_deg', '#f0883e');
 
-  // Legend
   ctx.font='10px SF Mono, monospace';
   ctx.fillStyle='#58a6ff'; ctx.fillText('\u2014 left',  PAD_L+10, PAD_T+12);
   ctx.fillStyle='#f0883e'; ctx.fillText('\u2014 right', PAD_L+70, PAD_T+12);
   ctx.fillStyle='#484f58'; ctx.fillText('line = 3-frame median · dots = raw', PAD_L+140, PAD_T+12);
 
-  // Stats line
   const s=data.summary||{};
   const fmt=x=>x==null?'--':x.toFixed(1)+'\u00b0';
   const pres = s.frames_tracked!=null
     ? ' &middot; tracked '+s.frames_tracked+'/'+(s.frames_tracked+s.frames_gap)+' frames'
     : '';
-  const alerts = s.alert_count ? ' &middot; <span style="color:#f85149">'+s.alert_count+' alert'+(s.alert_count===1?'':'s')+'</span>' : '';
   $('video-stats').innerHTML =
     'L: '+fmt(s.left_mean_deg)+' &plusmn; '+fmt(s.left_std_deg)+
-    '  &middot;  R: '+fmt(s.right_mean_deg)+' &plusmn; '+fmt(s.right_std_deg) +
-    pres + alerts;
+    '  &middot;  R: '+fmt(s.right_mean_deg)+' &plusmn; '+fmt(s.right_std_deg) + pres;
 
-  // Dashboard metadata header
   renderDashMeta(data);
-  // Alert cards
-  renderAlertCards(alertRegions, perFrame);
 }
 
 function renderDashMeta(data){
@@ -438,187 +294,6 @@ function renderDashMeta(data){
   if(s.frames_gap){ parts.push(s.frames_gap + ' frames out of view'); }
   $('dash-meta').textContent = parts.join(' · ');
 }
-
-function renderAlertCards(regions, perFrame){
-  const host=$('dash-alerts');
-  if(!regions || regions.length===0){
-    host.innerHTML='<div class="dash-no-alerts">No sustained patterns crossed the configured thresholds in this clip.</div>';
-    return;
-  }
-  const html=regions.map(r=>{
-    const duration = (r.end_frame - r.start_frame + 1);
-    const earLabel = r.ear==='left' ? 'left ear' : r.ear==='right' ? 'right ear' : 'both ears';
-    let title, detail, cite, cls='';
-    if(r.type==='down'){
-      title = earLabel.charAt(0).toUpperCase()+earLabel.slice(1)+' held back';
-      detail = 'Smoothed angle stayed below &minus;10&deg; for '+duration+' consecutive frames. Peak: '+r.peak_deg.toFixed(1)+'&deg;.';
-      cite = 'Reefmann et al. (2009) associate backward/low ear posture with negative valence; McLennan &amp; Mahmoud (2019) include ear posture as an SPFES action unit.';
-    } else if(r.type==='asym'){
-      title = 'Sustained bilateral asymmetry';
-      detail = '|Left &minus; Right| exceeded 25&deg; for '+duration+' consecutive frames. Peak: '+r.peak_deg.toFixed(1)+'&deg;.';
-      cite = 'Boissy et al. (2011) describe asymmetric ear posture as an emotional-valence indicator in sheep.';
-      cls=' asym';
-    } else {
-      title = r.type;
-      detail = 'Frames '+r.start_frame+'-'+r.end_frame+'.';
-      cite = '';
-    }
-    const badge = r.type==='down' ? 'DOWN' : r.type==='asym' ? 'ASYMMETRY' : r.type.toUpperCase();
-    return '<div class="alert-card'+cls+'">'+
-      '<div class="alert-title"><span class="alert-badge">'+badge+'</span>'+title+'</div>'+
-      '<div class="alert-detail">'+detail+' &nbsp;·&nbsp; frames '+r.start_frame+'&ndash;'+r.end_frame+'</div>'+
-      (cite ? '<div class="alert-cite">'+cite+'</div>' : '')+
-    '</div>';
-  }).join('');
-  host.innerHTML=html;
-}
-
-function runSelectedModel(){
-  const model = document.querySelector('input[name="model"]:checked').value;
-  if(model === 'sam21'){
-    startClickFlow();
-  } else {
-    autoSegment();
-  }
-}
-
-async function autoSegment(){
-  const subject=document.querySelector('input[name="subject"]:checked').value;
-  $('click-hint').innerHTML='<span class="spinner"></span> SAM 3 auto-detecting '+subject+' features...';
-  $('click-hint').style.color='#8b949e';
-  $('status').textContent='';
-
-  try{
-    const r=await fetch('/api/analyze/auto',{
-      method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({photo_id:currentPhotoId, subject:subject})
-    });
-    const photo=await r.json();
-    if(photo.segmentation?.masks){
-      const m=photo.segmentation.masks;
-      if(m._extraction) $('img-extraction').src='data:image/jpeg;base64,'+m._extraction;
-      if(m._ear_overlay) $('img-ears').src='data:image/jpeg;base64,'+m._ear_overlay;
-      $('seg-row').classList.remove('hidden');
-    }
-    if(photo.ear_angles){
-      const la=photo.ear_angles.left_ear_angle_deg, ra=photo.ear_angles.right_ear_angle_deg;
-      $('click-hint').textContent='SAM 3 detected: head + '+([la,ra].filter(x=>x!=null).length)+' ears';
-      $('click-hint').style.color='#3fb950';
-      showMeasurements(la, ra, photo.segmentation?.confidence_scores);
-    } else {
-      $('click-hint').textContent='Segmented';
-      $('click-hint').style.color='#3fb950';
-    }
-    $('status').textContent='SAM 3 segmented in '+Math.round(photo.segmentation.segmentation_time_ms)+'ms.';
-  }catch(e){
-    $('click-hint').textContent='Auto-segment failed.';
-    $('click-hint').style.color='#f85149';
-    $('status').textContent=e.message||e;
-  }
-}
-
-// Re-run when subject or model changes
-document.querySelectorAll('input[name="subject"]').forEach(r=>{
-  r.addEventListener('change',()=>{ if(currentPhotoId) runSelectedModel(); });
-});
-document.querySelectorAll('input[name="model"]').forEach(r=>{
-  r.addEventListener('change',()=>{
-    if(currentPhotoId){
-      $('seg-row').classList.add('hidden');
-      $('measurements').classList.add('hidden');
-      runSelectedModel();
-    }
-  });
-});
-
-/* ── SAM 2.1: 3-click flow ── */
-const STEPS=[
-  {label:'face',dot:'',   dotLabel:'F', hint:'1/3: Click the center of the face', color:'#3fb950'},
-  {label:'ear1',dot:'ear',dotLabel:'1', hint:'2/3: Click the first ear tip',      color:'#f0883e'},
-  {label:'ear2',dot:'ear',dotLabel:'2', hint:'3/3: Click the other ear tip',      color:'#f0883e'},
-];
-let clickStep=0, clickPoints=[];
-
-function startClickFlow(){
-  clickStep=0; clickPoints=[];
-  $('click-photo').querySelectorAll('.click-dot').forEach(d=>d.remove());
-  $('click-hint').textContent=STEPS[0].hint;
-  $('click-hint').style.color=STEPS[0].color;
-  $('status').textContent='SAM 2.1 mode — click 3 points';
-}
-
-$('click-photo').addEventListener('click',async e=>{
-  const model = document.querySelector('input[name="model"]:checked').value;
-  if(model !== 'sam21' || !currentPhotoId || clickStep>=STEPS.length) return;
-  const img=$('click-img'), rect=img.getBoundingClientRect();
-  const x=(e.clientX-rect.left)/rect.width, y=(e.clientY-rect.top)/rect.height;
-  const step=STEPS[clickStep];
-
-  clickPoints.push({x,y,label:step.label});
-  const d=document.createElement('div');
-  d.className='click-dot'+(step.dot?' '+step.dot:'');
-  d.style.left=(x*100)+'%'; d.style.top=(y*100)+'%';
-  d.textContent=step.dotLabel;
-  $('click-photo').appendChild(d);
-  clickStep++;
-
-  if(clickStep<STEPS.length){
-    const next=STEPS[clickStep];
-    $('click-hint').textContent=next.hint;
-    $('click-hint').style.color=next.color;
-    return;
-  }
-
-  $('click-hint').innerHTML='<span class="spinner"></span> SAM 2.1 segmenting...';
-  $('click-hint').style.color='#8b949e';
-
-  try{
-    const r=await fetch('/api/analyze/multiclick',{
-      method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({photo_id:currentPhotoId,points:clickPoints})
-    });
-    const photo=await r.json();
-    if(photo.segmentation?.masks){
-      const m=photo.segmentation.masks;
-      if(m._extraction) $('img-extraction').src='data:image/jpeg;base64,'+m._extraction;
-      if(m._ear_overlay) $('img-ears').src='data:image/jpeg;base64,'+m._ear_overlay;
-      $('seg-row').classList.remove('hidden');
-    }
-    if(photo.ear_angles){
-      const la=photo.ear_angles.left_ear_angle_deg, ra=photo.ear_angles.right_ear_angle_deg;
-      $('click-hint').textContent='SAM 2.1 segmented';
-      $('click-hint').style.color='#3fb950';
-      showMeasurements(la, ra, photo.segmentation?.confidence_scores);
-    }
-    $('status').textContent='SAM 2.1 segmented in '+Math.round(photo.segmentation.segmentation_time_ms)+'ms.';
-  }catch(e){
-    $('click-hint').textContent='Failed.'; $('click-hint').style.color='#f85149';
-  }
-  clickStep=0; clickPoints=[];
-});
-
-/* ── Measurements ── */
-function angleColor(deg){ return deg>30?'#3fb950':deg<-10?'#f85149':'#d29922'; }
-function angleLabel(deg){ return deg>30?'up / alert':deg<-10?'down / back':'neutral'; }
-function showMeasurements(la, ra, conf){
-  $('measurements').classList.remove('hidden');
-  conf = conf || {};
-  if(la!=null){
-    $('m-left').textContent=la.toFixed(1)+'\u00b0';
-    $('m-left').style.color=angleColor(la);
-    $('m-left-label').textContent=angleLabel(la);
-    $('m-left-label').style.color=angleColor(la);
-    if(conf.left_ear!=null) $('m-left-conf').textContent='conf '+(conf.left_ear*100).toFixed(0)+'%';
-  }
-  if(ra!=null){
-    $('m-right').textContent=ra.toFixed(1)+'\u00b0';
-    $('m-right').style.color=angleColor(ra);
-    $('m-right-label').textContent=angleLabel(ra);
-    $('m-right-label').style.color=angleColor(ra);
-    if(conf.right_ear!=null) $('m-right-conf').textContent='conf '+(conf.right_ear*100).toFixed(0)+'%';
-  }
-}
-
 </script>
 </body>
 </html>
