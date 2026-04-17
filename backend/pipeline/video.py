@@ -225,6 +225,8 @@ def analyze_video(
         _compute_anatomical_midline,
         _compute_head_midline_pca,
         _compute_ear_direction,
+        _extract_ear_keypoints,
+        _mask_centroid,
         _normalize_angle,
         _classify_ear_position,
     )
@@ -572,6 +574,38 @@ def analyze_video(
             frame_data[f"{side}_ear_angle_deg"] = rel
             frame_data[f"{side}_ear_position"] = _classify_ear_position(rel).value
 
+        # Candidate keypoints for the YOLO-pose labeling pipeline.
+        # Schema: [nose, L-base, R-base, L-tip, R-tip], matching the
+        # flip_idx: [0, 2, 1, 4, 3] that training expects. Each slot is
+        # {"x": px, "y": py, "v": visibility} where visibility is:
+        #   0 = not derivable (mask missing)
+        #   1 = auto-derived from SAM 3 masks (awaiting human review)
+        #   2 = human-reviewed (set later by the labeling UI)
+        # Coordinates are in the resolution of the sampled frame, not the
+        # original video — the label export will normalize to [0, 1].
+        head_centroid_xy = _mask_centroid(head_mask > 127)
+        kps = [{"x": 0.0, "y": 0.0, "v": 0} for _ in range(5)]
+        if nose_mask_bool is not None:
+            nc = _mask_centroid(nose_mask_bool)
+            if nc is not None:
+                kps[0] = {"x": nc[0], "y": nc[1], "v": 1}
+        if head_centroid_xy is not None:
+            if lb is not None:
+                kp = _extract_ear_keypoints(lb, head_centroid_xy)
+                if kp is not None:
+                    (bx, by), (tx, ty) = kp
+                    kps[1] = {"x": bx, "y": by, "v": 1}  # L-base
+                    kps[3] = {"x": tx, "y": ty, "v": 1}  # L-tip
+            if rb is not None:
+                kp = _extract_ear_keypoints(rb, head_centroid_xy)
+                if kp is not None:
+                    (bx, by), (tx, ty) = kp
+                    kps[2] = {"x": bx, "y": by, "v": 1}  # R-base
+                    kps[4] = {"x": tx, "y": ty, "v": 1}  # R-tip
+        frame_data["candidate_keypoints"] = kps
+        frame_data["frame_width"] = frame_w
+        frame_data["frame_height"] = frame_h
+
         per_frame.append(frame_data)
 
     # Build an annotated GIF showing masks tracking across frames
@@ -582,6 +616,20 @@ def analyze_video(
 
     elapsed = time.time() - start
     logger.info("Video analysis: %d frames in %.1fs", len(pil_frames), elapsed)
+
+    # Keypoint coverage log — helps the labeler see how much auto-annotation
+    # is usable vs. will need manual placement.
+    kp_names = ["nose", "L_base", "R_base", "L_tip", "R_tip"]
+    kp_coverage = [0] * 5
+    for f in per_frame:
+        for k, kp in enumerate(f.get("candidate_keypoints") or []):
+            if kp.get("v", 0) > 0:
+                kp_coverage[k] += 1
+    logger.info(
+        "Keypoint auto-coverage over %d frames: %s",
+        len(per_frame),
+        ", ".join(f"{n}={c}" for n, c in zip(kp_names, kp_coverage)),
+    )
 
     # Smooth the per-frame angles with a 3-frame rolling median.
     # Median filter wins over averaging: single outlier frames (mask

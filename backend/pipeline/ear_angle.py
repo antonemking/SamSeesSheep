@@ -118,6 +118,33 @@ def _compute_head_midline_pca(
     return angle_deg, ear_mid
 
 
+def _extract_ear_keypoints(
+    ear_mask: np.ndarray, head_center: tuple[float, float]
+) -> Optional[tuple[tuple[float, float], tuple[float, float]]]:
+    """Return (base_xy, tip_xy) pixel coordinates on the ear mask.
+
+    base = point on the ear mask closest to head_center
+    tip  = point on the ear mask farthest from head_center
+
+    Matches the YOLO-pose keypoint derivation spec: pass the head-mask
+    centroid as head_center for the canonical ear-base/tip keypoints
+    (slots 1-4 in the [nose, L-base, R-base, L-tip, R-tip] schema).
+    """
+    coords = np.where(ear_mask)
+    if len(coords[0]) < 10:
+        return None
+    xs = coords[1].astype(np.float64)
+    ys = coords[0].astype(np.float64)
+    hx, hy = head_center
+    dists = np.sqrt((xs - hx) ** 2 + (ys - hy) ** 2)
+    base_idx = int(np.argmin(dists))
+    tip_idx = int(np.argmax(dists))
+    return (
+        (float(xs[base_idx]), float(ys[base_idx])),
+        (float(xs[tip_idx]),  float(ys[tip_idx])),
+    )
+
+
 def _compute_ear_direction(
     ear_mask: np.ndarray, head_center: tuple[float, float]
 ) -> Optional[tuple[float, float]]:
