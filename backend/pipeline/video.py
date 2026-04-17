@@ -94,8 +94,9 @@ def _extract_frames(
         target_count = max(target_count, min(max_frames, 8))  # at least 8 frames
 
     idxs = np.linspace(0, total - 1, target_count).astype(int)
-    # Downscale to keep VRAM usage bounded (SAM 3 internal res is small anyway)
-    MAX_DIM = 768
+    # Downscale to keep VRAM usage bounded (SAM 3 internal res is small anyway).
+    # 512 fits ~2x more frames on a 6GB GPU than 768 — worth it for chart density.
+    MAX_DIM = 512
     pil_frames = []
     for i in idxs:
         img = Image.fromarray(frames[i])
@@ -356,6 +357,11 @@ def analyze_video(
                 break
     logger.info("Locked ear IDs: %s", locked_ear_ids)
 
+    # Tracks the previous frame's head-up axis so we can flip PCA sign
+    # ambiguities temporally. Ears-based disambiguation fails when ears
+    # straddle the long axis; temporal continuity catches those.
+    prev_head_up_angle: Optional[float] = None
+
     for i in range(len(pil_frames)):
         frame_data = {"frame_idx": i}
         frame_w, frame_h = pil_frames[i].size
@@ -448,6 +454,19 @@ def analyze_video(
             per_frame.append(frame_data)
             continue
         head_up_angle, head_center = midline
+
+        # Temporal sign-flip guard. The PCA long axis is undirected, and
+        # ear-midpoint disambiguation is unreliable when ears sit near the
+        # axis. If this frame's head-up points >90° away from the last
+        # frame's, treat it as a flip and reverse it.
+        if prev_head_up_angle is not None:
+            diff = ((head_up_angle - prev_head_up_angle + 180) % 360) - 180
+            if abs(diff) > 90:
+                head_up_angle = (head_up_angle + 180) % 360
+                if head_up_angle > 180:
+                    head_up_angle -= 360
+                frame_data["midline_flipped"] = True
+        prev_head_up_angle = head_up_angle
 
         head_horizontal = head_up_angle - 90.0
         frame_data["head_midline_angle_deg"] = head_up_angle
