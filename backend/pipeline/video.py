@@ -28,6 +28,29 @@ _video_processor = None
 _device = None
 
 
+def unload_video_model():
+    """Drop the SAM 3 Video model from GPU and clear the allocator.
+
+    Call between failed analyze_video attempts so the next retry starts
+    with a clean allocator state rather than fragmented residue.
+    """
+    global _video_model, _video_processor
+    import gc
+    import torch
+    if _video_model is not None:
+        logger.info("Unloading SAM 3 Video model to reclaim VRAM...")
+        try:
+            _video_model.cpu()
+        except Exception:
+            pass
+        _video_model = None
+        _video_processor = None
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+
+
 def _load_video_model():
     """Load SAM 3 Video model from HuggingFace.
 
@@ -94,9 +117,10 @@ def _extract_frames(
         target_count = max(target_count, min(max_frames, 8))  # at least 8 frames
 
     idxs = np.linspace(0, total - 1, target_count).astype(int)
-    # Downscale to keep VRAM usage bounded (SAM 3 internal res is small anyway).
-    # 512 fits ~2x more frames on a 6GB GPU than 768 — worth it for chart density.
-    MAX_DIM = 512
+    # Downscale to keep VRAM usage bounded. SAM 3's internal resolution is
+    # smaller than 384 anyway, so this mostly costs mask edge crispness,
+    # not tracking quality — a worthwhile trade on a 6GB GPU.
+    MAX_DIM = 384
     pil_frames = []
     for i in idxs:
         img = Image.fromarray(frames[i])
@@ -240,13 +264,20 @@ def analyze_video(
         results_per_prompt[prompt_text] = per_frame_outputs
 
         logger.info(
-            "Tracked '%s' across %d frames in %.1fs",
+            "Tracked '%s' across %d frames in %.1fs · peak VRAM %.2f GB",
             prompt_text, len(pil_frames), time.time() - t0,
+            torch.cuda.max_memory_allocated() / 1024**3 if torch.cuda.is_available() else 0,
         )
-        # Free tracking state from this prompt before the next session
+        # Free tracking state from this prompt before the next session.
+        # empty_cache alone isn't enough — Python refs to mask tensors
+        # survive until gc runs, which can keep ~500MB alive on a 6GB GPU.
+        import gc as _gc
         session.reset_inference_session()
         del session
+        _gc.collect()
         torch.cuda.empty_cache()
+        if torch.cuda.is_available():
+            torch.cuda.reset_peak_memory_stats()
 
     per_frame = []
 

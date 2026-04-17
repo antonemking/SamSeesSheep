@@ -40,13 +40,17 @@ async def analyze_video_endpoint(req: VideoAnalyzeRequest) -> dict:
     if req.click_x is not None and req.click_y is not None:
         click_point = (req.click_x, req.click_y)
 
-    from backend.pipeline.video import analyze_video as _run
+    from backend.pipeline.video import analyze_video as _run, unload_video_model
     import gc, torch
 
-    # If OOM, clean up and retry with fewer frames
-    attempt_frames = [req.max_frames, max(6, req.max_frames // 2), 6]
+    # Retry cascade tuned for 6GB GPUs: ceiling low enough to fit cleanly,
+    # floor not so low the chart becomes useless.
+    attempt_frames = [min(req.max_frames, 20), 10, 5]
+    # Deduplicate while preserving order (req.max_frames=10 gives [10,10,5])
+    seen = set()
+    attempt_frames = [n for n in attempt_frames if not (n in seen or seen.add(n))]
     last_err = None
-    for n in attempt_frames:
+    for idx, n in enumerate(attempt_frames):
         try:
             result = _run(
                 video_path, subject=req.subject, max_frames=n,
@@ -56,7 +60,12 @@ async def analyze_video_endpoint(req: VideoAnalyzeRequest) -> dict:
                 result["retry_reduced_frames_from"] = req.max_frames
             break
         except torch.cuda.OutOfMemoryError as e:
-            logger.warning("Video OOM at max_frames=%d, cleaning up", n)
+            logger.warning(
+                "Video OOM at max_frames=%d — unloading model before next retry", n,
+            )
+            # Drop the model entirely — empty_cache can't undo allocator
+            # fragmentation left behind by the failed run.
+            unload_video_model()
             gc.collect()
             torch.cuda.empty_cache()
             torch.cuda.synchronize()

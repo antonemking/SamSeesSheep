@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+# Must set before torch is imported anywhere in the process — the CUDA
+# allocator config is read when the CUDA context initializes. Setting
+# it inside a lazy model loader is too late to take effect.
+import os
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+
 import logging
 from pathlib import Path
 
