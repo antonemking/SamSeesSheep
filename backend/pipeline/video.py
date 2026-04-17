@@ -401,6 +401,37 @@ def analyze_video(
                 break
     logger.info("Locked ear IDs: %s", locked_ear_ids)
 
+    # Assign each locked ear obj_id permanently to "left" or "right" so every
+    # frame's blue/orange traces follow the same physical ear. Without this,
+    # per-frame x-sorting was relabeling ears whenever they crossed in screen
+    # space (sheep turns head → labels flip → chart swaps mid-clip).
+    # Assignment uses screen-x at the first frame where both ears are visible.
+    locked_left_oid: Optional[int] = None
+    locked_right_oid: Optional[int] = None
+    if len(locked_ear_ids) == 2:
+        for i in range(len(pil_frames)):
+            fw, fh = pil_frames[i].size
+            centroids: dict[int, float] = {}
+            for oid in locked_ear_ids:
+                mt = results_per_prompt[ear_key][i]["obj_id_to_mask"].get(oid)
+                if mt is None:
+                    continue
+                m = _mask_from_logits(mt, target_size=(fh, fw))
+                if m.sum() < 50:
+                    continue
+                cs = np.where(m > 127)
+                centroids[oid] = float(cs[1].mean())
+            if len(centroids) == 2:
+                by_x = sorted(centroids.keys(), key=lambda o: centroids[o])
+                locked_left_oid, locked_right_oid = by_x[0], by_x[1]
+                logger.info(
+                    "Ear sides assigned at frame %d: left_oid=%s right_oid=%s",
+                    i, locked_left_oid, locked_right_oid,
+                )
+                break
+    elif len(locked_ear_ids) == 1:
+        locked_left_oid = next(iter(locked_ear_ids))
+
     # Tracks the previous frame's head-up axis so we can flip PCA sign
     # ambiguities temporally. Ears-based disambiguation fails when ears
     # straddle the long axis; temporal continuity catches those.
@@ -444,47 +475,35 @@ def analyze_video(
             coords[0].max(), coords[1].max(),
         )
 
-        # Ears: only keep those attached to the tracked head.
-        # Require ear centroid to sit inside the head mask, OR the ear mask
-        # to overlap the head mask by > 15%. This rejects ears belonging to
-        # other animals that happen to fall inside the head's bounding box.
-        head_bool = head_mask > 127
-        head_area = head_bool.sum()
+        # Ears: look up each locked obj_id directly, assigning to the same
+        # left/right trace every frame. The dilated-head attachment filter
+        # rejects the rare case where a locked ear drifts away from the
+        # tracked head.
         dilated_head = cv2.dilate(
             head_mask, np.ones((15, 15), np.uint8), iterations=1,
         ) > 127
-        ear_candidates = []
+        left_ear_mask = None
+        right_ear_mask = None
         for oid, mask_t in ear_out["obj_id_to_mask"].items():
-            # Only follow locked ear IDs (set in frame 0) — rejects flash
-            # detections from other animals
-            if locked_ear_ids and oid not in locked_ear_ids:
+            if oid not in locked_ear_ids:
                 continue
             m = _mask_from_logits(mask_t, target_size=(frame_h, frame_w))
             if m.sum() < 50:
                 continue
             ear_bool = m > 127
             coords = np.where(ear_bool)
-            cy, cx = coords[0].mean(), coords[1].mean()
-            # Safety net: even locked IDs must still be attached to the head
-            centroid_inside = dilated_head[int(cy), int(cx)]
-            overlap = (ear_bool & dilated_head).sum()
-            overlap_frac = overlap / ear_bool.sum()
+            cy, cx = int(coords[0].mean()), int(coords[1].mean())
+            centroid_inside = dilated_head[cy, cx]
+            overlap_frac = (ear_bool & dilated_head).sum() / ear_bool.sum()
             if not centroid_inside and overlap_frac < 0.15:
                 continue
-            ear_candidates.append(
-                (m, ear_out["obj_id_to_score"][oid], cx, oid)
-            )
-        ear_candidates.sort(key=lambda e: -e[1])  # by score desc
-        ear_candidates = ear_candidates[:2]
-        ear_candidates.sort(key=lambda e: e[2])   # then by x asc
-
-        left_ear_mask = ear_candidates[0][0] if len(ear_candidates) >= 1 else None
-        right_ear_mask = ear_candidates[1][0] if len(ear_candidates) >= 2 else None
-
-        if left_ear_mask is not None:
-            frame_data["left_ear_confidence"] = ear_candidates[0][1]
-        if right_ear_mask is not None:
-            frame_data["right_ear_confidence"] = ear_candidates[1][1]
+            score = ear_out["obj_id_to_score"].get(oid, 0)
+            if oid == locked_left_oid:
+                left_ear_mask = m
+                frame_data["left_ear_confidence"] = score
+            elif oid == locked_right_oid:
+                right_ear_mask = m
+                frame_data["right_ear_confidence"] = score
 
         lb = (left_ear_mask > 127) if left_ear_mask is not None else None
         rb = (right_ear_mask > 127) if right_ear_mask is not None else None
