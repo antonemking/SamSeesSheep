@@ -623,6 +623,12 @@ def analyze_video(
         primary_head, primary_nose, locked_ear_ids, prompt_list, video_path,
     )
 
+    # Persist raw sampled frames + a review.json for the keypoint labeler.
+    # Frames are always re-written (idempotent — same sampling → same frames).
+    # review.json is seeded ONLY if it doesn't exist, so re-running /analyze
+    # on a video that's already been labeled won't wipe human review state.
+    _persist_label_artifacts(pil_frames, per_frame, video_path)
+
     elapsed = time.time() - start
     logger.info("Video analysis: %d frames in %.1fs", len(pil_frames), elapsed)
 
@@ -668,6 +674,84 @@ def analyze_video(
             "right_std_deg": float(np.std(right_angles)) if right_angles else None,
         },
     }
+
+
+def _persist_label_artifacts(
+    pil_frames: list[Image.Image],
+    per_frame: list[dict],
+    video_path: Path,
+) -> None:
+    """Save raw sampled frames + seed a review.json for the keypoint labeler.
+
+    Layout produced:
+      data/labels/{video_id}/frames/frame0000.jpg ... frameNNNN.jpg
+      data/labels/{video_id}/review.json
+
+    review.json is seeded only if missing. Re-running /analyze on an already-
+    labeled video leaves the review state intact; only the frame files get
+    rewritten (deterministic — same sampling produces the same frames).
+    """
+    import json
+    from backend.config import LABELS_DIR
+
+    video_id = video_path.stem
+    label_dir = LABELS_DIR / video_id
+    frames_dir = label_dir / "frames"
+    frames_dir.mkdir(parents=True, exist_ok=True)
+
+    for i, pil in enumerate(pil_frames):
+        frame_path = frames_dir / f"frame{i:04d}.jpg"
+        pil.convert("RGB").save(frame_path, "JPEG", quality=92)
+
+    review_path = label_dir / "review.json"
+    if review_path.exists():
+        logger.info(
+            "Label dir %s already has review.json — leaving human state intact",
+            label_dir.name,
+        )
+        return
+
+    # Seed review.json with candidate state. Each keypoint carries two flags:
+    #   auto_v: what SAM 3 derived (0 missing, 1 derived) — immutable record
+    #   v:      current state in the review workflow (0, 1, or 2=reviewed)
+    # The exporter only trusts v=2; see LOG.md in sheep-yolo/sheep-seg-conversation
+    # for the YOLO-pose v-flag mapping.
+    frames_out = []
+    for i, f in enumerate(per_frame):
+        kps = f.get("candidate_keypoints") or []
+        review_kps = []
+        for kp in kps:
+            v = int(kp.get("v", 0))
+            review_kps.append({
+                "x": float(kp.get("x", 0.0)),
+                "y": float(kp.get("y", 0.0)),
+                "v": v,
+                "auto_v": v,
+            })
+        frames_out.append({
+            "frame_idx": i,
+            "frame_path": f"frames/frame{i:04d}.jpg",
+            "tracking_gap": bool(f.get("tracking_gap", True)),
+            "head_bbox": f.get("head_bbox"),
+            "frame_width": f.get("frame_width"),
+            "frame_height": f.get("frame_height"),
+            "keypoints": review_kps,
+        })
+
+    review_payload = {
+        "video_id": video_id,
+        "schema_version": 1,
+        "kpt_names": ["nose", "left_ear_base", "right_ear_base",
+                      "left_ear_tip", "right_ear_tip"],
+        "flip_idx": [0, 2, 1, 4, 3],
+        "n_frames": len(per_frame),
+        "frames": frames_out,
+    }
+    review_path.write_text(json.dumps(review_payload, indent=2))
+    logger.info(
+        "Seeded %s with %d frames of candidate keypoints",
+        review_path, len(per_frame),
+    )
 
 
 def _build_annotated_gif(

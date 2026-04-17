@@ -22,11 +22,13 @@ DATA_DIR = PROJECT_ROOT / "data"
 UPLOAD_DIR = DATA_DIR / "uploads"
 RESULTS_DIR = DATA_DIR / "results"
 SAMPLE_DIR = DATA_DIR / "sample"
+LABELS_DIR = DATA_DIR / "labels"
 WEIGHTS_DIR = PROJECT_ROOT / "weights"
 
 # Ensure directories exist
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+LABELS_DIR.mkdir(parents=True, exist_ok=True)
 WEIGHTS_DIR.mkdir(parents=True, exist_ok=True)
 
 # SAM model config
