@@ -17,8 +17,8 @@ from fastapi.staticfiles import StaticFiles
 
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.config import HOST, PORT, RESULTS_DIR, SAMPLE_DIR, UPLOAD_DIR
-from backend.routes import analyze, upload
+from backend.config import HOST, PORT, LABELS_DIR, RESULTS_DIR, SAMPLE_DIR, UPLOAD_DIR
+from backend.routes import analyze, label, upload
 
 logging.basicConfig(
     level=logging.INFO,
@@ -36,11 +36,13 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 # Include routers
 app.include_router(upload.router)
 app.include_router(analyze.router)
+app.include_router(label.router)
 
 # Serve uploaded images and sample images
 app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
 app.mount("/sample", StaticFiles(directory=str(SAMPLE_DIR)), name="sample")
 app.mount("/results", StaticFiles(directory=str(RESULTS_DIR)), name="results")
+app.mount("/labels", StaticFiles(directory=str(LABELS_DIR)), name="labels")
 
 # Serve frontend
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
@@ -55,6 +57,12 @@ if LIB_DIR.exists():
 async def serve_frontend():
     """Serve the dashboard HTML."""
     return FileResponse(FRONTEND_DIR / "index.html")
+
+
+@app.get("/label/{video_id}")
+async def serve_label_page(video_id: str):
+    """Serve the keypoint labeling UI for one video."""
+    return FileResponse(FRONTEND_DIR / "label.html")
 
 
 @app.get("/health")

@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SamSeesSheep — Keypoint labeler</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0d1117;color:#e6edf3;line-height:1.5;max-width:900px;margin:0 auto;padding:1.5rem}
+a{color:#58a6ff}
+h1{font-family:'SF Mono',monospace;color:#3fb950;font-size:1.1rem;margin-bottom:.15rem}
+.sub{color:#8b949e;font-size:.75rem;margin-bottom:1rem}
+.hidden{display:none!important}
+
+.stage{background:#161b22;border:1px solid #30363d;border-radius:6px;padding:1rem}
+.progress{font-size:.75rem;color:#8b949e;font-family:'SF Mono',monospace;margin-bottom:.75rem;display:flex;gap:1.5rem;flex-wrap:wrap}
+.progress-bar{flex:1;height:6px;background:#30363d;border-radius:3px;overflow:hidden;min-width:200px;align-self:center}
+.progress-bar-fill{height:100%;background:#3fb950;transition:width .25s}
+
+.frame-wrap{position:relative;display:inline-block;max-width:100%;background:#0d1117;border-radius:4px;user-select:none}
+.frame-wrap img{display:block;max-width:100%;border-radius:4px}
+.frame-wrap svg{position:absolute;top:0;left:0;width:100%;height:100%;overflow:visible}
+
+.kp-dot{cursor:grab;transition:r .1s}
+.kp-dot:hover{r:9}
+.kp-dot.dragging{cursor:grabbing;r:10}
+.kp-label{font-family:'SF Mono',monospace;font-size:9px;fill:#e6edf3;pointer-events:none;text-shadow:0 1px 2px #000}
+.kp-unplaced{opacity:.55;stroke-dasharray:3,2}
+
+.legend{display:flex;gap:.75rem;flex-wrap:wrap;font-size:.7rem;margin-top:.6rem;color:#8b949e}
+.legend-item{display:inline-flex;align-items:center;gap:.3rem}
+.legend-swatch{width:14px;height:14px;border-radius:50%;border:2px solid}
+
+.controls{margin-top:1rem;display:flex;gap:.5rem;flex-wrap:wrap;align-items:center}
+.btn{padding:.45rem 1rem;border-radius:4px;font-size:.8rem;font-weight:600;border:1px solid #30363d;cursor:pointer;background:#0d1117;color:#e6edf3;transition:border-color .15s}
+.btn:hover{border-color:#8b949e}
+.btn:disabled{opacity:.35;cursor:default}
+.btn.primary{border-color:#3fb950;color:#3fb950}
+.btn.primary:hover{background:#1a3020}
+.btn.warn{border-color:#d29922;color:#d29922}
+.btn.danger{border-color:#f85149;color:#f85149}
+.hint{font-size:.65rem;color:#484f58;margin-top:.4rem;font-family:'SF Mono',monospace}
+
+.status-line{font-size:.75rem;color:#8b949e;margin-top:.5rem;min-height:1em}
+.kp-status{display:flex;gap:.6rem;font-size:.7rem;color:#8b949e;margin-top:.3rem;font-family:'SF Mono',monospace;flex-wrap:wrap}
+.kp-status-item{padding:1px 6px;border-radius:3px;background:#21262d}
+.kp-status-item.reviewed{color:#3fb950;background:rgba(63,185,80,.12)}
+.kp-status-item.unplaced{color:#484f58}
+</style>
+</head>
+<body>
+<h1>Keypoint labeler</h1>
+<p class="sub">5 points per sheep head: nose, L-base, R-base, L-tip, R-tip. Drag a dot to place it (sets v=2). Unplaced (v=0) dots sit at the bbox center, dashed, until you drag them onto the anatomy.
+  <br><a href="/" style="font-size:.7rem">← dashboard</a></p>
+
+<div class="stage">
+  <div class="progress">
+    <span id="vid-label">loading…</span>
+    <span id="frame-label"></span>
+    <span id="reviewed-label"></span>
+    <div class="progress-bar"><div class="progress-bar-fill" id="progress-fill" style="width:0%"></div></div>
+  </div>
+
+  <div class="frame-wrap" id="stage-wrap">
+    <img id="frame-img">
+    <svg id="overlay" xmlns="http://www.w3.org/2000/svg"></svg>
+  </div>
+
+  <div class="legend" id="legend"></div>
+  <div class="kp-status" id="kp-status"></div>
+  <div class="status-line" id="status-line"></div>
+
+  <div class="controls">
+    <button class="btn" id="btn-prev">← Prev</button>
+    <button class="btn primary" id="btn-save-next">Save &amp; Next →</button>
+    <button class="btn warn" id="btn-skip">Skip (leave as-is)</button>
+    <button class="btn" id="btn-accept-all">Accept candidates as-is (v=2)</button>
+    <button class="btn danger" id="btn-reset">Reset to SAM auto</button>
+  </div>
+  <div class="hint">Keyboard: ← / → navigate · Enter = Save &amp; Next · S = Skip · A = Accept candidates · R = Reset</div>
+</div>
+
+<script>
+const KP_META = [
+  {idx: 0, name: 'nose',           color: '#e3b341'},  // yellow
+  {idx: 1, name: 'L-base',         color: '#58a6ff'},  // blue
+  {idx: 2, name: 'R-base',         color: '#f0883e'},  // orange
+  {idx: 3, name: 'L-tip',          color: '#79c0ff'},  // light blue
+  {idx: 4, name: 'R-tip',          color: '#ff7b72'},  // red
+];
+
+const $ = id => document.getElementById(id);
+const VIDEO_ID = location.pathname.split('/').pop();
+
+let state = null;     // the full review.json payload
+let frameIdx = 0;     // which frame we're on
+let currentKps = null; // mutable working copy for this frame (before save)
+let dragging = null;  // {i, dx, dy} while dragging
+let imgNaturalW = 0, imgNaturalH = 0;
+
+async function loadState() {
+  const r = await fetch(`/api/label/${VIDEO_ID}`);
+  if (!r.ok) {
+    $('status-line').textContent = `Failed to load state: ${r.status}`;
+    return;
+  }
+  state = await r.json();
+  $('vid-label').textContent = `video: ${state.video_id}`;
+  renderLegend();
+  // Start at first non-gap frame if possible
+  frameIdx = 0;
+  for (let i = 0; i < state.frames.length; i++) {
+    if (!state.frames[i].tracking_gap) { frameIdx = i; break; }
+  }
+  renderFrame();
+}
+
+function renderLegend() {
+  $('legend').innerHTML = KP_META.map(k =>
+    `<span class="legend-item"><span class="legend-swatch" style="border-color:${k.color}"></span>${k.idx}: ${k.name}</span>`
+  ).join('');
+}
+
+function renderFrame() {
+  const f = state.frames[frameIdx];
+  currentKps = f.keypoints.map(k => ({...k}));
+  $('frame-label').textContent = `frame ${frameIdx + 1} / ${state.n_frames}${f.tracking_gap ? ' (tracking gap)' : ''}`;
+  updateReviewedCounter();
+
+  const img = $('frame-img');
+  img.onload = () => {
+    imgNaturalW = img.naturalWidth;
+    imgNaturalH = img.naturalHeight;
+    renderOverlay();
+  };
+  img.src = `/labels/${state.video_id}/${f.frame_path}`;
+}
+
+function updateReviewedCounter() {
+  // A frame is "reviewed" if ANY keypoint has v=2 (user placed it).
+  const reviewed = state.frames.filter(fr =>
+    (fr.keypoints || []).some(k => k.v === 2)
+  ).length;
+  $('reviewed-label').textContent = `${reviewed} / ${state.n_frames} frames reviewed`;
+  $('progress-fill').style.width = (reviewed / state.n_frames * 100) + '%';
+}
+
+function renderOverlay() {
+  const f = state.frames[frameIdx];
+  const W = f.frame_width, H = f.frame_height;
+  const svg = $('overlay');
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.setAttribute('preserveAspectRatio', 'none');
+  svg.innerHTML = '';
+
+  // Head bbox
+  if (f.head_bbox) {
+    const b = f.head_bbox;
+    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    rect.setAttribute('x', b.x);
+    rect.setAttribute('y', b.y);
+    rect.setAttribute('width', b.w);
+    rect.setAttribute('height', b.h);
+    rect.setAttribute('fill', 'none');
+    rect.setAttribute('stroke', '#3fb950');
+    rect.setAttribute('stroke-width', '1');
+    rect.setAttribute('stroke-dasharray', '4,3');
+    rect.setAttribute('opacity', '0.6');
+    svg.appendChild(rect);
+  }
+
+  // Keypoints
+  currentKps.forEach((kp, i) => {
+    const meta = KP_META[i];
+    let {x, y, v} = kp;
+    // If unplaced (v=0), park at bbox center so it's draggable onto the anatomy.
+    if (v === 0 && f.head_bbox) {
+      x = f.head_bbox.x + f.head_bbox.w / 2;
+      y = f.head_bbox.y + f.head_bbox.h / 2;
+    }
+    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    g.setAttribute('data-kp-idx', i);
+
+    const circ = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    circ.setAttribute('cx', x);
+    circ.setAttribute('cy', y);
+    circ.setAttribute('r', 7);
+    circ.setAttribute('fill', meta.color);
+    circ.setAttribute('fill-opacity', '0.35');
+    circ.setAttribute('stroke', meta.color);
+    circ.setAttribute('stroke-width', 2);
+    circ.classList.add('kp-dot');
+    if (v === 0) circ.classList.add('kp-unplaced');
+    g.appendChild(circ);
+
+    const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    label.setAttribute('x', x + 10);
+    label.setAttribute('y', y + 4);
+    label.textContent = `${i}`;
+    label.classList.add('kp-label');
+    g.appendChild(label);
+
+    svg.appendChild(g);
+  });
+
+  renderKpStatus();
+}
+
+function renderKpStatus() {
+  const cells = KP_META.map((m, i) => {
+    const v = currentKps[i].v;
+    let cls = 'kp-status-item';
+    let label = `${i}:${m.name}`;
+    if (v === 2)      { cls += ' reviewed'; label += ' ✓'; }
+    else if (v === 0) { cls += ' unplaced'; label += ' ◯'; }
+    else              { label += ' ·'; }
+    return `<span class="${cls}">${label}</span>`;
+  }).join('');
+  $('kp-status').innerHTML = cells;
+}
+
+// Drag handling — SVG event coords → frame coords via viewBox math.
+function svgPoint(evt) {
+  const svg = $('overlay');
+  const rect = svg.getBoundingClientRect();
+  const f = state.frames[frameIdx];
+  const x = (evt.clientX - rect.left) / rect.width * f.frame_width;
+  const y = (evt.clientY - rect.top) / rect.height * f.frame_height;
+  return {x, y};
+}
+
+$('overlay').addEventListener('pointerdown', e => {
+  const g = e.target.closest('g[data-kp-idx]');
+  if (!g) return;
+  const i = parseInt(g.dataset.kpIdx, 10);
+  dragging = {i};
+  e.target.classList.add('dragging');
+  $('overlay').setPointerCapture(e.pointerId);
+});
+
+$('overlay').addEventListener('pointermove', e => {
+  if (!dragging) return;
+  const p = svgPoint(e);
+  currentKps[dragging.i].x = Math.round(p.x * 10) / 10;
+  currentKps[dragging.i].y = Math.round(p.y * 10) / 10;
+  currentKps[dragging.i].v = 2;  // drag = human-placed
+  renderOverlay();
+});
+
+$('overlay').addEventListener('pointerup', e => {
+  if (!dragging) return;
+  dragging = null;
+});
+
+// Buttons
+$('btn-prev').onclick = () => goto(frameIdx - 1);
+$('btn-save-next').onclick = async () => { await saveFrame(); goto(frameIdx + 1); };
+$('btn-skip').onclick = () => goto(frameIdx + 1);
+$('btn-accept-all').onclick = () => {
+  currentKps.forEach(kp => { if (kp.v >= 1) kp.v = 2; });
+  renderOverlay();
+};
+$('btn-reset').onclick = () => {
+  const f = state.frames[frameIdx];
+  currentKps = f.keypoints.map(k => ({...k, v: k.auto_v}));
+  renderOverlay();
+};
+
+async function saveFrame() {
+  const body = {keypoints: currentKps.map(k => ({x: k.x, y: k.y, v: k.v}))};
+  const r = await fetch(`/api/label/${VIDEO_ID}/frame/${frameIdx}`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) {
+    $('status-line').textContent = `Save failed: ${r.status} ${await r.text()}`;
+    return false;
+  }
+  // Write back into in-memory state so the counter updates.
+  state.frames[frameIdx].keypoints = currentKps.map(k => ({
+    x: k.x, y: k.y, v: k.v,
+    auto_v: state.frames[frameIdx].keypoints[k.idx ?? 0].auto_v ?? 0,
+  }));
+  // Simpler: reload only the changed frame's state from the current currentKps
+  // mirror, preserving auto_v from the in-memory copy.
+  state.frames[frameIdx].keypoints.forEach((k, i) => {
+    k.v = currentKps[i].v;
+    k.x = currentKps[i].x;
+    k.y = currentKps[i].y;
+  });
+  $('status-line').textContent = `Saved frame ${frameIdx}.`;
+  updateReviewedCounter();
+  return true;
+}
+
+function goto(nextIdx) {
+  if (nextIdx < 0 || nextIdx >= state.n_frames) return;
+  frameIdx = nextIdx;
+  renderFrame();
+}
+
+// Keyboard shortcuts
+window.addEventListener('keydown', async e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  if (e.key === 'ArrowLeft')  { e.preventDefault(); goto(frameIdx - 1); }
+  if (e.key === 'ArrowRight') { e.preventDefault(); goto(frameIdx + 1); }
+  if (e.key === 'Enter')      { e.preventDefault(); await saveFrame(); goto(frameIdx + 1); }
+  if (e.key.toLowerCase() === 's') { e.preventDefault(); goto(frameIdx + 1); }
+  if (e.key.toLowerCase() === 'a') { e.preventDefault(); $('btn-accept-all').click(); }
+  if (e.key.toLowerCase() === 'r') { e.preventDefault(); $('btn-reset').click(); }
+});
+
+loadState();
+</script>
+</body>
+</html>
