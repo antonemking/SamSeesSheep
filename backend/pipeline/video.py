@@ -590,8 +590,15 @@ def analyze_video(
         #   0 = not derivable (mask missing)
         #   1 = auto-derived from SAM 3 masks (awaiting human review)
         #   2 = human-reviewed (set later by the labeling UI)
-        # Coordinates are in the resolution of the sampled frame, not the
-        # original video — the label export will normalize to [0, 1].
+        #
+        # IMPORTANT — image-space L/R convention.
+        # YOLO-pose with flip_idx=[0, 2, 1, 4, 3] expects "left" to mean
+        # screen-left in the current image, not the animal's anatomical
+        # left. So per frame, we assign the leftmost ear (smallest x) to
+        # slots 1/3 and the rightmost ear to slots 2/4. This is DIFFERENT
+        # from the chart's left/right, which stays pinned to a specific
+        # obj_id across the clip so each trace follows the same physical
+        # ear. The two concerns diverge intentionally.
         head_centroid_xy = _mask_centroid(head_mask > 127)
         kps = [{"x": 0.0, "y": 0.0, "v": 0} for _ in range(5)]
         if nose_mask_bool is not None:
@@ -599,18 +606,29 @@ def analyze_video(
             if nc is not None:
                 kps[0] = {"x": nc[0], "y": nc[1], "v": 1}
         if head_centroid_xy is not None:
+            # Sort the two tracked ear masks by screen-x so image-space
+            # L/R is always correct for YOLO labels, regardless of how
+            # the sheep is rotated in this frame.
+            ear_masks_by_x = []
             if lb is not None:
-                kp = _extract_ear_keypoints(lb, head_centroid_xy)
-                if kp is not None:
-                    (bx, by), (tx, ty) = kp
-                    kps[1] = {"x": bx, "y": by, "v": 1}  # L-base
-                    kps[3] = {"x": tx, "y": ty, "v": 1}  # L-tip
+                ear_masks_by_x.append((float(np.where(lb)[1].mean()), lb))
             if rb is not None:
-                kp = _extract_ear_keypoints(rb, head_centroid_xy)
+                ear_masks_by_x.append((float(np.where(rb)[1].mean()), rb))
+            ear_masks_by_x.sort(key=lambda t: t[0])
+            screen_left_mask = ear_masks_by_x[0][1] if len(ear_masks_by_x) >= 1 else None
+            screen_right_mask = ear_masks_by_x[1][1] if len(ear_masks_by_x) >= 2 else None
+            if screen_left_mask is not None:
+                kp = _extract_ear_keypoints(screen_left_mask, head_centroid_xy)
                 if kp is not None:
                     (bx, by), (tx, ty) = kp
-                    kps[2] = {"x": bx, "y": by, "v": 1}  # R-base
-                    kps[4] = {"x": tx, "y": ty, "v": 1}  # R-tip
+                    kps[1] = {"x": bx, "y": by, "v": 1}  # L-base (screen-left)
+                    kps[3] = {"x": tx, "y": ty, "v": 1}  # L-tip  (screen-left)
+            if screen_right_mask is not None:
+                kp = _extract_ear_keypoints(screen_right_mask, head_centroid_xy)
+                if kp is not None:
+                    (bx, by), (tx, ty) = kp
+                    kps[2] = {"x": bx, "y": by, "v": 1}  # R-base (screen-right)
+                    kps[4] = {"x": tx, "y": ty, "v": 1}  # R-tip  (screen-right)
         frame_data["candidate_keypoints"] = kps
         frame_data["frame_width"] = frame_w
         frame_data["frame_height"] = frame_h
