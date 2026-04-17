@@ -1,6 +1,8 @@
 # SamSeesSheep
 
-**Live ear-angle visualization for sheep. Upload a clip, pick an animal, watch its left and right ear angles over time against published welfare thresholds.**
+**A computer vision pipeline for measuring ear posture in small-flock sheep. Built and validated against a single Katahdin flock in Middletown, DE. Generalization to other breeds and conditions is future work.**
+
+Upload a clip, pick an animal, watch its left and right ear angles over time against published welfare thresholds.
 
 > Part of an ongoing series applying AI to small-flock animal welfare.
 
@@ -79,6 +81,7 @@ Open `http://localhost:8000`. Drop a sheep video. Click the animal you want to t
 
 ## Roadmap / future work
 
+- **SAM 3 → YOLO keypoint distillation.** Current pipeline runs SAM 3 Video per clip (~3 GB VRAM, ~1–3 min per 20-frame clip). Next architectural step is to use SAM 3 masks as pseudo-labels for a small YOLO keypoint model (head + ear tips), so inference runs at video framerate on edge hardware. SAM 3 stays the annotation backbone; YOLO becomes the deployment backbone.
 - **Validation against documented stress events** (hoof trim, tagging, separation, startle). This is the welfare-instrument project — a separate undertaking with a capture protocol and a kill criterion.
 - **Continuous monitoring** at water troughs, feeders, and the handling chute.
 - **Real-time mode.** Current pipeline is batch; a streaming variant would need a causal tracker (ByteTrack on top of SAM 3 obj_ids) — deferred until the offline artifact proves out.
