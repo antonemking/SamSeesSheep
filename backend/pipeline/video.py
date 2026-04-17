@@ -470,12 +470,21 @@ def analyze_video(
 
         frame_data["tracking_gap"] = False
 
-        # Head bbox
+        # Head bbox (y_min, x_min, y_max, x_max in pixel coords)
         coords = np.where(head_mask > 127)
         head_bbox = (
             coords[0].min(), coords[1].min(),
             coords[0].max(), coords[1].max(),
         )
+        # Emit as {x, y, w, h} top-left + size in pixel coords so the
+        # review UI can render it directly and the export endpoint can
+        # normalize to YOLO-pose center-xywh at write time.
+        frame_data["head_bbox"] = {
+            "x": int(head_bbox[1]),
+            "y": int(head_bbox[0]),
+            "w": int(head_bbox[3] - head_bbox[1]),
+            "h": int(head_bbox[2] - head_bbox[0]),
+        }
 
         # Ears: look up each locked obj_id directly, assigning to the same
         # left/right trace every frame. The dilated-head attachment filter
