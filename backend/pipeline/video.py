@@ -349,12 +349,15 @@ def analyze_video(
     logger.info("Selected primary_head=%s", primary_head)
 
     # Lock to specific ear object IDs.
-    # Scan early frames to find up to 2 ears that are clearly attached to
-    # our tracked head. Only those 2 IDs are followed across the rest of
-    # the video — this rejects "flash" detections from other animals.
+    # Scan frames in order to find up to 2 ears that are clearly attached
+    # to our tracked head. Only those 2 IDs are followed across the rest
+    # of the video — the dilated-head attachment filter rejects "flash"
+    # detections from other animals. Scans ALL frames (not just the first
+    # 5), because profile-view starts can hide the far ear for ~10 frames
+    # before the sheep turns and exposes it.
     locked_ear_ids: set = set()
     if primary_head is not None:
-        for i in range(min(5, len(pil_frames))):
+        for i in range(len(pil_frames)):
             fw, fh = pil_frames[i].size
             head_t = results_per_prompt[head_key][i]["obj_id_to_mask"].get(primary_head)
             if head_t is None:
