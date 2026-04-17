@@ -14,8 +14,6 @@ from backend.config import RESULTS_DIR, SAMPLE_DIR, UPLOAD_DIR
 from backend.models import EUPResult, NarrativeResult, PhotoAnalysis, SessionState
 from fastapi.responses import Response
 
-from backend.pipeline.depth import build_mesh_from_photo
-from backend.pipeline.mesh3d import render_mesh_views, render_turntable
 from backend.pipeline.ear_angle import extract_ear_angles, _decode_mask
 from backend.pipeline.eup import compute_eup
 from backend.pipeline.narrative import generate_narrative
@@ -319,65 +317,6 @@ async def analyze_multiclick(req: MultiClickRequest) -> PhotoAnalysis:
     _session.eup = compute_eup(_session.photos)
 
     return analysis
-
-
-class MeshRequest(PydanticBaseModel):
-    photo_id: str
-
-
-@router.post("/analyze/mesh")
-async def generate_mesh(req: MeshRequest):
-    """Generate a 3D GLB mesh from depth estimation + SAM mask."""
-    # Find the photo
-    matches = list(UPLOAD_DIR.glob(f"{req.photo_id}.*"))
-    if not matches:
-        matches = list(SAMPLE_DIR.glob(f"{req.photo_id}.*"))
-    if not matches:
-        raise HTTPException(status_code=404, detail=f"Photo {req.photo_id} not found")
-
-    photo_path = matches[0]
-    image = cv2.imread(str(photo_path))
-    if image is None:
-        raise HTTPException(status_code=400, detail="Could not read image")
-
-    # Get head mask from session
-    photo_analysis = next((p for p in _session.photos if p.photo_id == req.photo_id), None)
-    if photo_analysis is None or photo_analysis.segmentation is None:
-        raise HTTPException(status_code=400, detail="Run segmentation first (click on face)")
-
-    # Prefer the tight face mask (built from landmarks) over the full head mask
-    head_mask_b64 = (
-        photo_analysis.segmentation.masks.get("face")
-        or photo_analysis.segmentation.masks.get("head")
-    )
-    if not head_mask_b64:
-        raise HTTPException(status_code=400, detail="No head mask found")
-
-    head_mask = _decode_mask(head_mask_b64)
-    mask_uint8 = (head_mask.astype(np.uint8) * 255)
-
-    glb_bytes = build_mesh_from_photo(image, mask_uint8)
-    if glb_bytes is None:
-        raise HTTPException(status_code=500, detail="Depth mesh generation failed")
-
-    # Save GLB to results directory for Three.js to load
-    glb_filename = f"{req.photo_id}_mesh.glb"
-    glb_path = RESULTS_DIR / glb_filename
-    glb_path.write_bytes(glb_bytes)
-    glb_url = f"/results/{glb_filename}"
-
-    # Render turntable animation (24 frames, works without WebGL)
-    turntable = render_turntable(glb_bytes)
-
-    # Static views as additional fallback
-    views = render_mesh_views(glb_bytes)
-
-    return {
-        "turntable": turntable,
-        "views": views,
-        "glb_url": glb_url,
-        "photo_id": req.photo_id,
-    }
 
 
 @router.post("/analyze/{photo_id}")

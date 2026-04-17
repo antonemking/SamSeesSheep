@@ -34,7 +34,6 @@ h1{font-family:'SF Mono',monospace;color:#3fb950;font-size:1.4rem}
 .seg-row img{width:100%;max-width:340px;border-radius:6px;border:1px solid #30363d}
 .seg-row .cap{font-size:.7rem;color:#484f58;margin-top:.3rem}
 
-/* Turntable */
 /* Dashboard sections for video analysis report */
 .dash-section{margin-bottom:1.25rem}
 .dash-h{font-size:.6rem;color:#3fb950;text-transform:uppercase;letter-spacing:.12em;font-weight:700;margin-bottom:.35rem}
@@ -48,11 +47,6 @@ h1{font-family:'SF Mono',monospace;color:#3fb950;font-size:1.4rem}
 .alert-card .alert-cite{font-size:.6rem;color:#484f58;margin-top:.2rem;font-style:italic}
 .dash-no-alerts{font-size:.75rem;color:#8b949e;font-style:italic;padding:.5rem 0}
 
-.turntable-wrap{position:relative;width:100%;border-radius:6px;overflow:hidden;background:#0d1117;margin:1.5rem 0;cursor:grab;user-select:none}
-.turntable-wrap:active{cursor:grabbing}
-.turntable-wrap img{display:block;width:100%}
-.turntable-overlay{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#8b949e;font-size:.85rem;pointer-events:none;text-align:center}
-.turntable-hint{position:absolute;bottom:8px;right:12px;font-size:.65rem;color:#484f58;pointer-events:none;transition:opacity 2s}
 
 .footer{margin-top:2.5rem;padding-top:1.5rem;border-top:1px solid #30363d;font-size:.75rem;color:#484f58}
 .footer p{margin-bottom:.3rem}
@@ -60,7 +54,7 @@ h1{font-family:'SF Mono',monospace;color:#3fb950;font-size:1.4rem}
 </head>
 <body>
 <h1>SamSeesSheep</h1>
-<p class="sub">SAM segmentation + depth mesh for sheep facial welfare monitoring. Based on <a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC6523241/">McLennan &amp; Mahmoud 2019 (SPFES)</a>.
+<p class="sub">Live ear-angle visualization with SPFES-referenced thresholds (<a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC6523241/">McLennan &amp; Mahmoud 2019</a>). Validation against stress events: future work.
   <a href="https://github.com/antonemking/SamSeesSheep/blob/main/VALIDATION.md">VALIDATION.md</a></p>
 
 <!-- 1. Upload -->
@@ -194,16 +188,6 @@ h1{font-family:'SF Mono',monospace;color:#3fb950;font-size:1.4rem}
   </div>
 </div>
 
-<!-- 5. Turntable -->
-<div id="turntable-section" class="hidden">
-  <div style="font-size:.7rem;color:#484f58;margin-bottom:4px">Depth relief</div>
-  <div class="turntable-wrap" id="turntable-container">
-    <img id="turntable-img" draggable="false">
-    <div class="turntable-overlay hidden" id="turntable-loading"><span class="spinner"></span><br>Building depth mesh...</div>
-    <div class="turntable-hint" id="turntable-hint">drag to rotate</div>
-  </div>
-</div>
-
 <div class="status" id="status"></div>
 
 <div class="footer" style="text-align:center;border:none;padding-top:2rem">
@@ -215,41 +199,6 @@ h1{font-family:'SF Mono',monospace;color:#3fb950;font-size:1.4rem}
 <script>
 const $=id=>document.getElementById(id);
 let currentPhotoId=null;
-
-/* ── Turntable ── */
-let ttFrames=[], ttIndex=0, ttAuto=true, ttRafId=null, ttLastTime=0;
-function startTurntable(frames){
-  ttFrames=frames.map(f=>'data:image/jpeg;base64,'+f);
-  ttIndex=0; ttAuto=true; ttLastTime=0;
-  $('turntable-img').src=ttFrames[0];
-  $('turntable-hint').style.opacity='1';
-  if(ttRafId) cancelAnimationFrame(ttRafId);
-  (function tick(t){
-    ttRafId=requestAnimationFrame(tick);
-    if(!ttAuto||!ttFrames.length) return;
-    if(t-ttLastTime>1000/12){
-      ttIndex=(ttIndex+1)%ttFrames.length;
-      $('turntable-img').src=ttFrames[ttIndex];
-      ttLastTime=t;
-    }
-  })(0);
-}
-(function(){
-  const el=$('turntable-container');
-  let dragging=false, startX=0, startIdx=0;
-  el.addEventListener('pointerdown',e=>{
-    dragging=true; ttAuto=false; startX=e.clientX; startIdx=ttIndex;
-    el.setPointerCapture(e.pointerId);
-    $('turntable-hint').style.opacity='0';
-  });
-  el.addEventListener('pointermove',e=>{
-    if(!dragging||!ttFrames.length) return;
-    const steps=Math.round((e.clientX-startX)/15);
-    ttIndex=((startIdx+steps)%ttFrames.length+ttFrames.length)%ttFrames.length;
-    $('turntable-img').src=ttFrames[ttIndex];
-  });
-  el.addEventListener('pointerup',()=>{ dragging=false; ttAuto=true; });
-})();
 
 /* ── Upload ── */
 const zone=$('upload-zone'), input=$('file-input');
@@ -276,7 +225,6 @@ async function upload(files){
       $('click-section').classList.remove('hidden');
       $('seg-row').classList.add('hidden');
       $('measurements').classList.add('hidden');
-      $('turntable-section').classList.add('hidden');
       $('video-section').classList.add('hidden');
       runSelectedModel();
     }
@@ -562,7 +510,6 @@ async function autoSegment(){
       $('click-hint').style.color='#3fb950';
     }
     $('status').textContent='SAM 3 segmented in '+Math.round(photo.segmentation.segmentation_time_ms)+'ms.';
-    generateMesh();
   }catch(e){
     $('click-hint').textContent='Auto-segment failed.';
     $('click-hint').style.color='#f85149';
@@ -579,7 +526,6 @@ document.querySelectorAll('input[name="model"]').forEach(r=>{
     if(currentPhotoId){
       $('seg-row').classList.add('hidden');
       $('measurements').classList.add('hidden');
-      $('turntable-section').classList.add('hidden');
       runSelectedModel();
     }
   });
@@ -645,7 +591,6 @@ $('click-photo').addEventListener('click',async e=>{
       showMeasurements(la, ra, photo.segmentation?.confidence_scores);
     }
     $('status').textContent='SAM 2.1 segmented in '+Math.round(photo.segmentation.segmentation_time_ms)+'ms.';
-    generateMesh();
   }catch(e){
     $('click-hint').textContent='Failed.'; $('click-hint').style.color='#f85149';
   }
@@ -674,26 +619,6 @@ function showMeasurements(la, ra, conf){
   }
 }
 
-/* ── Mesh (auto-triggered after segmentation) ── */
-async function generateMesh(){
-  if(!currentPhotoId) return;
-  $('turntable-section').classList.remove('hidden');
-  $('turntable-loading').classList.remove('hidden');
-  $('status').innerHTML='<span class="spinner"></span> Building depth mesh (~15s)...';
-  try{
-    const res=await fetch('/api/analyze/mesh',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({photo_id:currentPhotoId})});
-    if(!res.ok) throw new Error((await res.json()).detail||res.statusText);
-    const d=await res.json();
-    if(d.turntable?.length){
-      startTurntable(d.turntable);
-      $('turntable-loading').classList.add('hidden');
-      $('status').textContent='Depth mesh ready. Drag to rotate.';
-    }
-  }catch(e){
-    $('turntable-loading').classList.add('hidden');
-    $('status').textContent='Mesh failed: '+(e.message||e);
-  }
-}
 </script>
 </body>
 </html>

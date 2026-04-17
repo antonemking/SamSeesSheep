@@ -21,7 +21,7 @@ logging.basicConfig(
 
 app = FastAPI(
     title="SamSeesSheep",
-    description="SAM segmentation + depth mesh for sheep facial welfare monitoring",
+    description="Live ear-angle visualization for sheep — SAM 3 + SPFES-referenced thresholds",
     version="0.1.0",
 )
 
