@@ -58,8 +58,8 @@ h1{font-family:'SF Mono',monospace;color:#3fb950;font-size:1.1rem;margin-bottom:
     <span id="vid-label">loading…</span>
     <span id="frame-label"></span>
     <span id="reviewed-label"></span>
-    <div class="progress-bar"><div class="progress-bar-fill" id="progress-fill" style="width:0%"></div></div>
   </div>
+  <div id="frame-strip" style="display:flex;gap:2px;margin-bottom:.75rem;height:14px"></div>
 
   <div class="frame-wrap" id="stage-wrap">
     <img id="frame-img">
@@ -107,11 +107,23 @@ async function loadState() {
   state = await r.json();
   $('vid-label').textContent = `video: ${state.video_id}`;
   renderLegend();
-  // Start at first non-gap frame if possible
+
+  // Land on the first frame that's (a) not a tracking gap AND (b) has no
+  // v=2 keypoints yet — i.e., the next frame that needs review. If every
+  // frame is already reviewed, fall back to the first non-gap frame so
+  // the user can still inspect their work.
   frameIdx = 0;
+  let firstUnreviewed = -1, firstNonGap = -1;
   for (let i = 0; i < state.frames.length; i++) {
-    if (!state.frames[i].tracking_gap) { frameIdx = i; break; }
+    const f = state.frames[i];
+    if (f.tracking_gap) continue;
+    if (firstNonGap < 0) firstNonGap = i;
+    const reviewed = (f.keypoints || []).some(k => k.v === 2);
+    if (!reviewed) { firstUnreviewed = i; break; }
   }
+  frameIdx = firstUnreviewed >= 0 ? firstUnreviewed
+           : firstNonGap >= 0    ? firstNonGap
+           : 0;
   renderFrame();
 }
 
@@ -126,6 +138,7 @@ function renderFrame() {
   currentKps = f.keypoints.map(k => ({...k}));
   $('frame-label').textContent = `frame ${frameIdx + 1} / ${state.n_frames}${f.tracking_gap ? ' (tracking gap)' : ''}`;
   updateReviewedCounter();
+  renderFrameStrip();
 
   const img = $('frame-img');
   img.onload = () => {
@@ -142,7 +155,26 @@ function updateReviewedCounter() {
     (fr.keypoints || []).some(k => k.v === 2)
   ).length;
   $('reviewed-label').textContent = `${reviewed} / ${state.n_frames} frames reviewed`;
-  $('progress-fill').style.width = (reviewed / state.n_frames * 100) + '%';
+  renderFrameStrip();
+}
+
+function renderFrameStrip() {
+  const strip = $('frame-strip');
+  strip.innerHTML = '';
+  state.frames.forEach((f, i) => {
+    const cell = document.createElement('div');
+    cell.style.flex = '1';
+    cell.style.borderRadius = '2px';
+    cell.style.cursor = 'pointer';
+    cell.style.border = (i === frameIdx) ? '1px solid #e6edf3' : '1px solid transparent';
+    const reviewed = (f.keypoints || []).some(k => k.v === 2);
+    if (f.tracking_gap)    cell.style.background = '#484f58';  // grey — tracking gap
+    else if (reviewed)     cell.style.background = '#3fb950';  // green — reviewed
+    else                   cell.style.background = '#21262d';  // dark — pending
+    cell.title = `frame ${i + 1}${f.tracking_gap ? ' (gap)' : reviewed ? ' (reviewed)' : ' (pending)'}`;
+    cell.onclick = () => goto(i);
+    strip.appendChild(cell);
+  });
 }
 
 function renderOverlay() {
@@ -277,19 +309,16 @@ async function saveFrame() {
     $('status-line').textContent = `Save failed: ${r.status} ${await r.text()}`;
     return false;
   }
-  // Write back into in-memory state so the counter updates.
-  state.frames[frameIdx].keypoints = currentKps.map(k => ({
-    x: k.x, y: k.y, v: k.v,
-    auto_v: state.frames[frameIdx].keypoints[k.idx ?? 0].auto_v ?? 0,
-  }));
-  // Simpler: reload only the changed frame's state from the current currentKps
-  // mirror, preserving auto_v from the in-memory copy.
-  state.frames[frameIdx].keypoints.forEach((k, i) => {
-    k.v = currentKps[i].v;
-    k.x = currentKps[i].x;
-    k.y = currentKps[i].y;
+  // Mirror the save into in-memory state so the counter + progress bar
+  // update without a full reload. auto_v is immutable so we leave it alone.
+  const stored = state.frames[frameIdx].keypoints;
+  currentKps.forEach((k, i) => {
+    stored[i].x = k.x;
+    stored[i].y = k.y;
+    stored[i].v = k.v;
+    // auto_v is preserved by the server; don't touch it here.
   });
-  $('status-line').textContent = `Saved frame ${frameIdx}.`;
+  $('status-line').textContent = `Saved frame ${frameIdx + 1}.`;
   updateReviewedCounter();
   return true;
 }
