@@ -49,6 +49,8 @@ data/video/
 *.png
 *.mp4
 *.mov
+*.MOV
+*.webm
 *.heic
 !docs/**/*.png
 !docs/**/*.jpg

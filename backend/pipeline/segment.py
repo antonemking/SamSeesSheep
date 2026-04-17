@@ -46,32 +46,14 @@ def _free_sam3_video_model():
         torch.cuda.synchronize()
 
 
-def _free_local_vlm():
-    """Unload the local Gemma VLM to free VRAM for SAM 3."""
-    import gc
-    from backend.pipeline import local_orchestrator as _lo
-    if _lo._model is not None:
-        logger.info("Unloading local Gemma VLM to free VRAM...")
-        try:
-            _lo._model.cpu()
-        except Exception:
-            pass
-        _lo._model = None
-        _lo._processor = None
-        gc.collect()
-        torch.cuda.empty_cache()
-        torch.cuda.synchronize()
-
-
 def _load_sam3_model():
     """Load SAM 3 model from HuggingFace. Downloads ~3 GB on first run."""
     global _sam3_model, _sam3_processor, _device
     try:
         from transformers import Sam3Model, Sam3Processor
 
-        # Free other big models first — we only have 6GB to share
+        # Free the video model first — they don't both fit on 6GB
         _free_sam3_video_model()
-        _free_local_vlm()
 
         _device = "cuda" if torch.cuda.is_available() else "cpu"
         logger.info("Loading SAM 3 on %s...", _device)
