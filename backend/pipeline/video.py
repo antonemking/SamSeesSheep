@@ -117,10 +117,10 @@ def _extract_frames(
         target_count = max(target_count, min(max_frames, 8))  # at least 8 frames
 
     idxs = np.linspace(0, total - 1, target_count).astype(int)
-    # Downscale to keep VRAM usage bounded. SAM 3's internal resolution is
-    # smaller than 384 anyway, so this mostly costs mask edge crispness,
-    # not tracking quality — a worthwhile trade on a 6GB GPU.
-    MAX_DIM = 384
+    # 512 was visibly crisper than 384 on real clips — smaller sheep lost
+    # ear masks entirely at 384. The other VRAM levers (allocator config,
+    # gc between sessions, unload-on-OOM retry) now do the memory work.
+    MAX_DIM = 512
     pil_frames = []
     for i in idxs:
         img = Image.fromarray(frames[i])
