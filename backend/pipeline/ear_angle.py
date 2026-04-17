@@ -164,6 +164,59 @@ def _compute_anatomical_midline(
     return angle_deg, ear_mid
 
 
+def _compute_head_midline_pca(
+    head_mask: np.ndarray,
+    left_ear_mask: Optional[np.ndarray] = None,
+    right_ear_mask: Optional[np.ndarray] = None,
+) -> Optional[tuple[float, tuple[float, float]]]:
+    """Compute dorsal head axis from head mask alone (no nose required).
+
+    PCA on the head mask gives an undirected long axis. The ear-midpoint
+    position relative to the head centroid resolves which end of that axis
+    is "up" (the poll / dorsal side). Falls back to image-vertical "up"
+    when neither ear is available.
+
+    Returns (head_up_angle_deg, head_center) matching the shape of
+    _compute_anatomical_midline. head_center is the ear-midpoint (or, if
+    no ears, the head centroid) so _compute_ear_direction can resolve
+    base vs. tip the same way.
+    """
+    head_c = _mask_centroid(head_mask)
+    if head_c is None:
+        return None
+
+    coords = np.where(head_mask)
+    if len(coords[0]) < 20:
+        return None
+    points = np.column_stack((coords[1], coords[0])).astype(np.float64)
+    centered = points - points.mean(axis=0)
+    cov = np.cov(centered.T)
+    eigvals, eigvecs = np.linalg.eigh(cov)
+    major = eigvecs[:, -1]  # (dx, dy) in image coords, undirected
+
+    left_c = _mask_centroid(left_ear_mask) if left_ear_mask is not None else None
+    right_c = _mask_centroid(right_ear_mask) if right_ear_mask is not None else None
+    if left_c and right_c:
+        ear_mid = ((left_c[0] + right_c[0]) / 2, (left_c[1] + right_c[1]) / 2)
+    elif left_c:
+        ear_mid = left_c
+    elif right_c:
+        ear_mid = right_c
+    else:
+        # No ears to disambiguate — assume head-up = image-up
+        return 90.0, head_c
+
+    # Flip axis if it points away from the ears (ears mark the dorsal end)
+    ear_dx = ear_mid[0] - head_c[0]
+    ear_dy = ear_mid[1] - head_c[1]
+    if ear_dx * major[0] + ear_dy * major[1] < 0:
+        major = -major
+
+    # Image coords: y increases downward; flip for math convention
+    angle_deg = float(np.degrees(np.arctan2(-major[1], major[0])))
+    return angle_deg, ear_mid
+
+
 def _compute_ear_direction(
     ear_mask: np.ndarray, head_center: tuple[float, float]
 ) -> Optional[tuple[float, float]]:
