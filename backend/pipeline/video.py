@@ -152,59 +152,6 @@ def _pick_primary_object(
     return best_id
 
 
-def _detect_alert_regions(
-    per_frame: list[dict], min_run: int = 3
-) -> list[dict]:
-    """Find sustained periods where ear-angle patterns cross thresholds.
-
-    Returns a list of regions: {type, ear, start_frame, end_frame, peak}.
-    Patterns reflect published literature (never single-frame events):
-      - "down"   : ear smoothed < -10° (Reefmann 2009, McLennan 2019)
-      - "asym"   : |L - R| > 25° (Boissy 2011)
-    """
-    regions: list[dict] = []
-
-    def find_runs(values: list, predicate, peak_fn):
-        runs = []
-        start = None
-        for i, v in enumerate(values):
-            if v is not None and predicate(v):
-                if start is None:
-                    start = i
-            else:
-                if start is not None and i - start >= min_run:
-                    vals = [values[k] for k in range(start, i) if values[k] is not None]
-                    runs.append((start, i - 1, peak_fn(vals)))
-                start = None
-        if start is not None and len(values) - start >= min_run:
-            vals = [values[k] for k in range(start, len(values)) if values[k] is not None]
-            runs.append((start, len(values) - 1, peak_fn(vals)))
-        return runs
-
-    left_smoothed = [f.get("left_ear_angle_deg_smoothed") for f in per_frame]
-    right_smoothed = [f.get("right_ear_angle_deg_smoothed") for f in per_frame]
-
-    # Persistent down-back (either ear)
-    for start, end, peak in find_runs(left_smoothed, lambda v: v < -10, min):
-        regions.append({"type": "down", "ear": "left", "start_frame": start,
-                        "end_frame": end, "peak_deg": peak})
-    for start, end, peak in find_runs(right_smoothed, lambda v: v < -10, min):
-        regions.append({"type": "down", "ear": "right", "start_frame": start,
-                        "end_frame": end, "peak_deg": peak})
-
-    # Sustained asymmetry
-    asym = [
-        abs(l - r) if (l is not None and r is not None) else None
-        for l, r in zip(left_smoothed, right_smoothed)
-    ]
-    for start, end, peak in find_runs(asym, lambda v: v > 25, max):
-        regions.append({"type": "asym", "ear": "both", "start_frame": start,
-                        "end_frame": end, "peak_deg": peak})
-
-    regions.sort(key=lambda r: r["start_frame"])
-    return regions
-
-
 def _apply_median_smoothing(
     per_frame: list[dict], key: str, window: int = 3
 ) -> None:
@@ -268,7 +215,7 @@ def analyze_video(
 
     import torch
     from backend.pipeline.ear_angle import (
-        _compute_anatomical_midline,
+        _compute_head_midline_pca,
         _compute_ear_direction,
         _normalize_angle,
         _classify_ear_position,
@@ -281,12 +228,11 @@ def analyze_video(
 
     frame_w, frame_h = pil_frames[0].size
 
-    # Three separate sessions (one per prompt). Single-session multi-prompt
-    # hits OOM on 6GB GPUs because each additional prompt adds tracking state.
+    # Two separate sessions (head, ear). Single-session multi-prompt hits
+    # OOM on 6GB GPUs because each additional prompt adds tracking state.
     head_key = f"{subject} head"
     ear_key = f"{subject} ear"
-    nose_key = f"{subject} nose"
-    prompt_list = [head_key, ear_key, nose_key]
+    prompt_list = [head_key, ear_key]
 
     results_per_prompt: dict[str, list[dict]] = {}
     for prompt_text in prompt_list:
@@ -386,10 +332,7 @@ def analyze_video(
     primary_head = click_primary(results_per_prompt[head_key])
     if primary_head is None:
         primary_head = stable_primary(results_per_prompt[head_key])
-    primary_nose = click_primary(results_per_prompt[nose_key])
-    if primary_nose is None:
-        primary_nose = stable_primary(results_per_prompt[nose_key])
-    logger.info("Selected primary_head=%s, primary_nose=%s", primary_head, primary_nose)
+    logger.info("Selected primary_head=%s", primary_head)
 
     # Lock to specific ear object IDs.
     # Scan early frames to find up to 2 ears that are clearly attached to
@@ -437,7 +380,6 @@ def analyze_video(
 
         head_out = results_per_prompt[head_key][i]
         ear_out = results_per_prompt[ear_key][i]
-        nose_out = results_per_prompt[nose_key][i]
 
         # Head mask. If primary_head was removed/suppressed or its mask is
         # empty on this frame, we mark the frame as a tracking gap.
@@ -511,51 +453,19 @@ def analyze_video(
         if right_ear_mask is not None:
             frame_data["right_ear_confidence"] = ear_candidates[1][1]
 
-        # Nose mask
-        nose_mask = None
-        if primary_nose is not None and primary_nose in nose_out["obj_id_to_mask"]:
-            nm = _mask_from_logits(
-                nose_out["obj_id_to_mask"][primary_nose],
-                target_size=(frame_h, frame_w),
-            )
-            mc = np.where(nm > 127)
-            if len(mc[0]) > 20:
-                cy, cx = mc[0].mean(), mc[1].mean()
-                if (head_bbox[0] <= cy <= head_bbox[2] and
-                        head_bbox[1] <= cx <= head_bbox[3]):
-                    nose_mask = nm
-                    frame_data["nose_confidence"] = nose_out["obj_id_to_score"].get(primary_nose)
-
-        # Compute ear angles (anatomical midline if we have nose + ears)
-        # Convert masks to boolean for the ear_angle helpers
+        # Compute ear angles with a head-PCA midline (no nose prompt).
         lb = (left_ear_mask > 127) if left_ear_mask is not None else None
         rb = (right_ear_mask > 127) if right_ear_mask is not None else None
-        nb = (nose_mask > 127) if nose_mask is not None else None
+        hb = head_mask > 127
 
-        anatomical = _compute_anatomical_midline(nb, lb, rb)
-        if anatomical is not None:
-            head_up_angle, head_center = anatomical
-        elif lb is not None or rb is not None:
-            # Fallback: assume head is upright (head-up = image-up = 90°),
-            # use ear midpoint as head center
-            head_up_angle = 90.0
-            pts = []
-            for m in (lb, rb):
-                if m is None:
-                    continue
-                coords = np.where(m)
-                if len(coords[0]):
-                    pts.append((coords[1].mean(), coords[0].mean()))
-            if not pts:
-                per_frame.append(frame_data)
-                continue
-            cx_mean = sum(p[0] for p in pts) / len(pts)
-            cy_mean = sum(p[1] for p in pts) / len(pts)
-            head_center = (cx_mean, cy_mean)
-            frame_data["midline_fallback"] = "vertical"
-        else:
+        if lb is None and rb is None:
             per_frame.append(frame_data)
             continue
+        midline = _compute_head_midline_pca(hb, lb, rb)
+        if midline is None:
+            per_frame.append(frame_data)
+            continue
+        head_up_angle, head_center = midline
 
         head_horizontal = head_up_angle - 90.0
         frame_data["head_midline_angle_deg"] = head_up_angle
@@ -579,7 +489,7 @@ def analyze_video(
     # Build an annotated GIF showing masks tracking across frames
     gif_url = _build_annotated_gif(
         pil_frames, per_frame, results_per_prompt,
-        primary_head, primary_nose, locked_ear_ids, prompt_list, video_path,
+        primary_head, locked_ear_ids, prompt_list, video_path,
     )
 
     elapsed = time.time() - start
@@ -591,10 +501,6 @@ def analyze_video(
     _apply_median_smoothing(per_frame, "left_ear_angle_deg", window=3)
     _apply_median_smoothing(per_frame, "right_ear_angle_deg", window=3)
 
-    # Detect pattern-based alert regions per VALIDATION.md rules —
-    # sustained runs (>= min_run frames), never single-frame events.
-    alert_regions = _detect_alert_regions(per_frame, min_run=3)
-
     left_angles = [f["left_ear_angle_deg_smoothed"] for f in per_frame if "left_ear_angle_deg_smoothed" in f]
     right_angles = [f["right_ear_angle_deg_smoothed"] for f in per_frame if "right_ear_angle_deg_smoothed" in f]
 
@@ -604,7 +510,6 @@ def analyze_video(
         "elapsed_s": elapsed,
         "per_frame": per_frame,
         "annotated_gif_url": gif_url,
-        "alert_regions": alert_regions,
         "summary": {
             "frames_with_measurement": sum(
                 1 for f in per_frame
@@ -616,7 +521,6 @@ def analyze_video(
             "left_std_deg": float(np.std(left_angles)) if left_angles else None,
             "right_mean_deg": float(np.mean(right_angles)) if right_angles else None,
             "right_std_deg": float(np.std(right_angles)) if right_angles else None,
-            "alert_count": len(alert_regions),
         },
     }
 
@@ -626,14 +530,13 @@ def _build_annotated_gif(
     per_frame: list[dict],
     results_per_prompt: dict,
     primary_head: Optional[int],
-    primary_nose: Optional[int],
     locked_ear_ids: set,
     prompt_list: list[str],
     video_path: Path,
 ) -> Optional[str]:
     """Composite SAM 3 masks onto each frame and save as a looping GIF.
 
-    Head = green fill, ears = orange contours, nose = yellow dot.
+    Head = green fill, ears = orange contours.
     """
     try:
         import imageio.v3 as iio
@@ -641,7 +544,7 @@ def _build_annotated_gif(
         return None
 
     from backend.config import RESULTS_DIR
-    head_key, ear_key, nose_key = prompt_list
+    head_key, ear_key = prompt_list
 
     annotated = []
     for i, pil in enumerate(pil_frames):
@@ -685,19 +588,6 @@ def _build_annotated_gif(
                     continue
             contours, _ = cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             cv2.drawContours(frame, contours, -1, (240, 136, 62), 3)
-
-        # Nose: yellow filled region (only the tracked nose)
-        nose_out = results_per_prompt[nose_key][i]
-        if primary_nose is not None and primary_nose in nose_out["obj_id_to_mask"]:
-            m = _mask_from_logits(
-                nose_out["obj_id_to_mask"][primary_nose], target_size=(h, w),
-            )
-            if m.sum() >= 20:
-                bool_m = m > 127
-                frame[bool_m] = (
-                    frame[bool_m].astype(np.float32) * 0.4 +
-                    np.array([227, 179, 65], dtype=np.float32) * 0.6
-                ).astype(np.uint8)
 
         # Overlay ear angle readings in corner
         fd = per_frame[i]
