@@ -6,6 +6,24 @@ This document will be updated as evidence accumulates. It will not be updated to
 
 ---
 
+## Scope reset (2026-04)
+
+v0 has been descoped from *welfare instrument* to *visualization artifact*. The current shipping scope is:
+
+- SAM 3 Video segments sheep head + ears across a short clip.
+- Per-frame ear angles are computed, smoothed, and rendered against SPFES-referenced threshold bands.
+- Click-to-track picks one subject; other animals in frame are rejected from the measurement.
+
+**What's explicitly out of this scope (moved to Roadmap in `README.md`):**
+
+- Validation against documented stress events.
+- EUP% as a pass/fail metric against the kill criterion below.
+- Any welfare or pain claim.
+
+The kill criterion still stands — but it applies to the welfare-instrument follow-up project, not to the visualization artifact you can run today.
+
+---
+
 ## TL;DR
 
 | Aspect | Trustworthy? |
@@ -125,6 +143,8 @@ This project commits, structurally, to the following anti-overclaim norms. Each 
 ---
 
 ## Document version
+
+**v0.2.0** — Scope reset. Pipeline simplified to SAM 3 Video (head + ear) with head-PCA midline and SPFES threshold bands. Photo flow, SAM 2.1, depth/mesh, VLM orchestrators, and narrative generation have been removed from the critical path (see `CHANGELOG.md`). Validation against documented stress events is now an explicit future-work item, not a v0 deliverable.
 
 **v0.1.0** — Pipeline built. SAM 2.1 hiera-small segmentation + Depth Anything V2 depth mesh operational. Ear angle extraction via PCA with McLennan SPFES thresholds. No systematic measurements yet — claim space is set, measurement begins Weekend 3.
 
