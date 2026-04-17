@@ -222,6 +222,7 @@ def analyze_video(
 
     import torch
     from backend.pipeline.ear_angle import (
+        _compute_anatomical_midline,
         _compute_head_midline_pca,
         _compute_ear_direction,
         _normalize_angle,
@@ -235,11 +236,15 @@ def analyze_video(
 
     frame_w, frame_h = pil_frames[0].size
 
-    # Two separate sessions (head, ear). Single-session multi-prompt hits
-    # OOM on 6GB GPUs because each additional prompt adds tracking state.
+    # Three separate sessions (head, ear, nose). Single-session multi-prompt
+    # hits OOM on 6GB GPUs because each additional prompt adds tracking state.
+    # The nose session anchors the dorsal midline via nose→ear-midpoint — an
+    # unambiguous reference that doesn't wobble with head-mask shape noise
+    # the way a head-PCA midline does. Worth the extra pass for chart stability.
     head_key = f"{subject} head"
     ear_key = f"{subject} ear"
-    prompt_list = [head_key, ear_key]
+    nose_key = f"{subject} nose"
+    prompt_list = [head_key, ear_key, nose_key]
 
     results_per_prompt: dict[str, list[dict]] = {}
     for prompt_text in prompt_list:
@@ -346,7 +351,12 @@ def analyze_video(
     primary_head = click_primary(results_per_prompt[head_key])
     if primary_head is None:
         primary_head = stable_primary(results_per_prompt[head_key])
-    logger.info("Selected primary_head=%s", primary_head)
+    primary_nose = click_primary(results_per_prompt[nose_key])
+    if primary_nose is None:
+        primary_nose = stable_primary(results_per_prompt[nose_key])
+    logger.info(
+        "Selected primary_head=%s, primary_nose=%s", primary_head, primary_nose,
+    )
 
     # Lock to specific ear object IDs.
     # Scan frames in order to find up to 2 ears that are clearly attached
@@ -402,6 +412,7 @@ def analyze_video(
 
         head_out = results_per_prompt[head_key][i]
         ear_out = results_per_prompt[ear_key][i]
+        nose_out = results_per_prompt[nose_key][i]
 
         # Head mask. If primary_head was removed/suppressed or its mask is
         # empty on this frame, we mark the frame as a tracking gap.
@@ -475,25 +486,48 @@ def analyze_video(
         if right_ear_mask is not None:
             frame_data["right_ear_confidence"] = ear_candidates[1][1]
 
-        # Compute ear angles with a head-PCA midline (no nose prompt).
         lb = (left_ear_mask > 127) if left_ear_mask is not None else None
         rb = (right_ear_mask > 127) if right_ear_mask is not None else None
         hb = head_mask > 127
 
+        # Nose mask for anatomical midline — preferred over head-PCA.
+        nose_mask_bool = None
+        if primary_nose is not None and primary_nose in nose_out["obj_id_to_mask"]:
+            nm = _mask_from_logits(
+                nose_out["obj_id_to_mask"][primary_nose],
+                target_size=(frame_h, frame_w),
+            )
+            mc = np.where(nm > 127)
+            if len(mc[0]) > 20:
+                cy, cx = mc[0].mean(), mc[1].mean()
+                if (head_bbox[0] <= cy <= head_bbox[2]
+                        and head_bbox[1] <= cx <= head_bbox[3]):
+                    nose_mask_bool = nm > 127
+                    frame_data["nose_confidence"] = nose_out["obj_id_to_score"].get(primary_nose)
+
         if lb is None and rb is None:
             per_frame.append(frame_data)
             continue
-        midline = _compute_head_midline_pca(hb, lb, rb)
+
+        # Prefer nose-anchored midline (unambiguous, stable). Fall back to
+        # head-PCA midline when nose isn't detected on this frame.
+        midline_source = None
+        midline = _compute_anatomical_midline(nose_mask_bool, lb, rb)
+        if midline is not None:
+            midline_source = "nose"
+        else:
+            midline = _compute_head_midline_pca(hb, lb, rb)
+            midline_source = "head_pca" if midline is not None else None
         if midline is None:
             per_frame.append(frame_data)
             continue
         head_up_angle, head_center = midline
+        frame_data["midline_source"] = midline_source
 
-        # Temporal sign-flip guard. The PCA long axis is undirected, and
-        # ear-midpoint disambiguation is unreliable when ears sit near the
-        # axis. If this frame's head-up points >90° away from the last
-        # frame's, treat it as a flip and reverse it.
-        if prev_head_up_angle is not None:
+        # Sign-flip guard only applies to the PCA fallback — anatomical is
+        # already unambiguous. Prevents the wobble-then-flip we used to see
+        # when ears straddled the head's long axis.
+        if midline_source == "head_pca" and prev_head_up_angle is not None:
             diff = ((head_up_angle - prev_head_up_angle + 180) % 360) - 180
             if abs(diff) > 90:
                 head_up_angle = (head_up_angle + 180) % 360
@@ -524,7 +558,7 @@ def analyze_video(
     # Build an annotated GIF showing masks tracking across frames
     gif_url = _build_annotated_gif(
         pil_frames, per_frame, results_per_prompt,
-        primary_head, locked_ear_ids, prompt_list, video_path,
+        primary_head, primary_nose, locked_ear_ids, prompt_list, video_path,
     )
 
     elapsed = time.time() - start
@@ -565,13 +599,14 @@ def _build_annotated_gif(
     per_frame: list[dict],
     results_per_prompt: dict,
     primary_head: Optional[int],
+    primary_nose: Optional[int],
     locked_ear_ids: set,
     prompt_list: list[str],
     video_path: Path,
 ) -> Optional[str]:
     """Composite SAM 3 masks onto each frame and save as a looping GIF.
 
-    Head = green fill, ears = orange contours.
+    Head = green fill, ears = orange contours, nose = yellow fill.
     """
     try:
         import imageio.v3 as iio
@@ -579,7 +614,7 @@ def _build_annotated_gif(
         return None
 
     from backend.config import RESULTS_DIR
-    head_key, ear_key = prompt_list
+    head_key, ear_key, nose_key = prompt_list
 
     annotated = []
     for i, pil in enumerate(pil_frames):
@@ -623,6 +658,19 @@ def _build_annotated_gif(
                     continue
             contours, _ = cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             cv2.drawContours(frame, contours, -1, (240, 136, 62), 3)
+
+        # Nose: yellow filled region (only the tracked nose)
+        nose_out = results_per_prompt[nose_key][i]
+        if primary_nose is not None and primary_nose in nose_out["obj_id_to_mask"]:
+            m = _mask_from_logits(
+                nose_out["obj_id_to_mask"][primary_nose], target_size=(h, w),
+            )
+            if m.sum() >= 20:
+                bool_m = m > 127
+                frame[bool_m] = (
+                    frame[bool_m].astype(np.float32) * 0.4 +
+                    np.array([227, 179, 65], dtype=np.float32) * 0.6
+                ).astype(np.uint8)
 
         # Overlay ear angle readings in corner
         fd = per_frame[i]

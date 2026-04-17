@@ -30,6 +30,41 @@ def _mask_centroid(mask: np.ndarray) -> Optional[tuple[float, float]]:
     return float(coords[1].mean()), float(coords[0].mean())
 
 
+def _compute_anatomical_midline(
+    nose_mask: Optional[np.ndarray],
+    left_ear_mask: Optional[np.ndarray],
+    right_ear_mask: Optional[np.ndarray],
+) -> Optional[tuple[float, tuple[float, float]]]:
+    """Compute the dorsal head axis from nose + ear landmarks.
+
+    Returns (angle_deg, head_center) where angle is the direction from
+    the nose toward the ear-midpoint — the "head up" direction. Unlike
+    the head-mask PCA version, this is unambiguous (no sign flip) and
+    doesn't wobble frame-to-frame with mask shape noise, because both
+    endpoints are anatomical landmarks. Preferred when nose is detected.
+    """
+    nose_c = _mask_centroid(nose_mask) if nose_mask is not None else None
+    if nose_c is None:
+        return None
+
+    left_c = _mask_centroid(left_ear_mask) if left_ear_mask is not None else None
+    right_c = _mask_centroid(right_ear_mask) if right_ear_mask is not None else None
+    if left_c and right_c:
+        ear_mid = ((left_c[0] + right_c[0]) / 2, (left_c[1] + right_c[1]) / 2)
+    elif left_c:
+        ear_mid = left_c
+    elif right_c:
+        ear_mid = right_c
+    else:
+        return None
+
+    dx = ear_mid[0] - nose_c[0]
+    dy = ear_mid[1] - nose_c[1]
+    # Image coords: y increases downward; flip for math convention
+    angle_deg = float(np.degrees(np.arctan2(-dy, dx)))
+    return angle_deg, ear_mid
+
+
 def _compute_head_midline_pca(
     head_mask: np.ndarray,
     left_ear_mask: Optional[np.ndarray] = None,
