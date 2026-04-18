@@ -48,6 +48,40 @@ def _write_review(video_id: str, payload: dict) -> None:
     p.write_text(json.dumps(payload, indent=2))
 
 
+@router.get("/labels")
+async def list_labeled_videos() -> dict:
+    """List all videos with a review.json, with review progress per video.
+
+    Powers the 'Resume labeling' list on the dashboard so reviewers can
+    jump back into an existing session without remembering the video_id.
+    """
+    results = []
+    for video_dir in sorted(LABELS_DIR.iterdir()):
+        if not video_dir.is_dir() or video_dir.name == "exports":
+            continue
+        review_file = video_dir / "review.json"
+        if not review_file.exists():
+            continue
+        try:
+            data = json.loads(review_file.read_text())
+        except json.JSONDecodeError:
+            continue
+        frames = data.get("frames", [])
+        reviewed = sum(
+            1 for f in frames
+            if any(k.get("v") == 2 for k in (f.get("keypoints") or []))
+        )
+        results.append({
+            "video_id": data.get("video_id", video_dir.name),
+            "n_frames": len(frames),
+            "n_reviewed": reviewed,
+            "updated_at": review_file.stat().st_mtime,
+        })
+    # Most recently updated first
+    results.sort(key=lambda r: -r["updated_at"])
+    return {"videos": results}
+
+
 @router.get("/label/{video_id}")
 async def get_review_state(video_id: str) -> dict:
     """Return the full review.json for the labeling UI to render."""

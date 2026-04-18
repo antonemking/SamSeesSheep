@@ -44,6 +44,12 @@ h1{font-family:'SF Mono',monospace;color:#3fb950;font-size:1.4rem}
   <input type="file" id="file-input" accept="video/*,.mp4,.mov,.webm" style="display:none">
 </div>
 
+<!-- 1b. Resume labeling (existing review sessions) -->
+<div id="resume-labeling" class="hidden" style="margin:.5rem 0 1.5rem 0;padding:.75rem 1rem;border:1px solid #30363d;border-radius:6px;background:#161b22">
+  <div style="font-size:.6rem;color:#3fb950;text-transform:uppercase;letter-spacing:.12em;font-weight:700;margin-bottom:.4rem">Resume labeling</div>
+  <div id="resume-list" style="font-size:.75rem;color:#8b949e"></div>
+</div>
+
 <!-- 2. Video: click-to-select, annotated tracking + timeline -->
 <div id="video-section" class="hidden" style="margin:1.5rem 0">
   <div style="border:1px solid #30363d;border-radius:6px;padding:1rem;background:#0d1117">
@@ -66,6 +72,10 @@ h1{font-family:'SF Mono',monospace;color:#3fb950;font-size:1.4rem}
             <div style="font-size:1rem;color:#e6edf3;font-weight:600;margin-top:.15rem">Ear-position tracking · single subject</div>
           </div>
           <div id="dash-meta" style="font-size:.7rem;color:#8b949e;font-family:'SF Mono',monospace;text-align:right"></div>
+        </div>
+        <div style="margin-top:.75rem">
+          <a id="open-labeler-link" href="#" target="_blank" style="display:inline-block;padding:.5rem .9rem;border:1px solid #3fb950;border-radius:4px;color:#3fb950;text-decoration:none;font-size:.8rem;font-weight:600;background:#0d1117">→ Open keypoint labeler</a>
+          <span style="font-size:.7rem;color:#8b949e;margin-left:.75rem">Review SAM's candidate keypoints to build the YOLO-pose training set.</span>
         </div>
       </div>
 
@@ -117,6 +127,31 @@ h1{font-family:'SF Mono',monospace;color:#3fb950;font-size:1.4rem}
 <script>
 const $=id=>document.getElementById(id);
 let currentVideoId=null;
+
+async function loadResumeList() {
+  try {
+    const r = await fetch('/api/labels');
+    if (!r.ok) return;
+    const d = await r.json();
+    const vids = d.videos || [];
+    if (!vids.length) return;
+    const host = $('resume-labeling');
+    const list = $('resume-list');
+    list.innerHTML = vids.map(v => {
+      const ratio = v.n_frames ? Math.round(100 * v.n_reviewed / v.n_frames) : 0;
+      const done = v.n_reviewed === v.n_frames && v.n_frames > 0;
+      const pill = done
+        ? '<span style="color:#3fb950">✓ complete</span>'
+        : `<span>${v.n_reviewed} / ${v.n_frames} reviewed · ${ratio}%</span>`;
+      return `<div style="display:flex;gap:.75rem;align-items:center;padding:.3rem 0;border-bottom:1px dashed #21262d">
+        <a href="/label/${v.video_id}" style="font-family:'SF Mono',monospace;color:#58a6ff">${v.video_id}</a>
+        <span style="flex:1;font-family:'SF Mono',monospace;font-size:.7rem">${pill}</span>
+      </div>`;
+    }).join('');
+    host.classList.remove('hidden');
+  } catch (e) { /* silent — nothing to resume */ }
+}
+loadResumeList();
 
 /* ── Upload ── */
 const zone=$('upload-zone'), input=$('file-input');
@@ -176,6 +211,7 @@ async function analyzeVideo(videoId, clickX, clickY){
       $('video-annotated').src=d.annotated_gif_url;
     }
     $('video-results').classList.remove('hidden');
+    $('open-labeler-link').href = `/label/${videoId}`;
     renderVideoTimeline(d);
     const s=d.summary||{};
     $('status').textContent='Tracked '+d.n_frames+' frames in '+Math.round(d.elapsed_s)+'s. '+s.frames_with_measurement+' with ear measurements.';
