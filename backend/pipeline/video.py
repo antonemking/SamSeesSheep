@@ -117,10 +117,15 @@ def _extract_frames(
         target_count = max(target_count, min(max_frames, 8))  # at least 8 frames
 
     idxs = np.linspace(0, total - 1, target_count).astype(int)
-    # 512 was visibly crisper than 384 on real clips — smaller sheep lost
-    # ear masks entirely at 384. The other VRAM levers (allocator config,
-    # gc between sessions, unload-on-OOM retry) now do the memory work.
-    MAX_DIM = 512
+    # 384 because clips with multiple sheep and busy scenes push a single
+    # SAM 3 Video session past 4.8 GB at 512 px, leaving no headroom for
+    # ear and nose sessions on a 6 GB GPU. We're in labeling mode now —
+    # the reviewer drags dots anyway, so SAM's auto-placement precision
+    # at 384 vs 512 is marginal. YOLO training runs at imgsz=640 with the
+    # HUMAN keypoint labels, not SAM-derived ones, so mask crispness
+    # doesn't transfer to the trained model. Revert to 512 if moving to
+    # A100 or if OOMs stop being a thing on 6 GB.
+    MAX_DIM = 384
     pil_frames = []
     for i in idxs:
         img = Image.fromarray(frames[i])
