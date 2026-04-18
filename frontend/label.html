@@ -51,6 +51,8 @@ h1{font-family:'SF Mono',monospace;color:#3fb950;font-size:1.1rem;margin-bottom:
 <body>
 <h1>Keypoint labeler</h1>
 <p class="sub">5 points per sheep head. Drag a dot onto the anatomy (sets v=2). If a keypoint is occluded or out-of-frame, <strong>leave it dashed at bbox center (v=0)</strong> — the exporter will skip it and training learns from the visible keypoints only. Do not guess positions for invisible keypoints.
+  <br><strong>Nose:</strong> drop it on the <em>tip of the muzzle</em> — the most forward-projecting point, where the nostrils are. Not the top of the muzzle, not the nostril center.
+  <br><strong>Ear base:</strong> where the ear meets the skull. <strong>Ear tip:</strong> the distal-most point of the ear.
   <br><strong>L / R are image-space:</strong> "L-base" = the ear on the <em>left side of the screen</em> in this frame, not the animal's anatomical left. When the sheep turns around, the physical ear behind each slot changes — that's correct.
   <br><a href="/" style="font-size:.7rem">← dashboard</a></p>
 
