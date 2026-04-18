@@ -686,7 +686,7 @@ def analyze_video(
     right_angles = [f["right_ear_angle_deg_smoothed"] for f in per_frame if "right_ear_angle_deg_smoothed" in f]
 
     gaps = sum(1 for f in per_frame if f.get("tracking_gap"))
-    return {
+    result = {
         "n_frames": len(pil_frames),
         "elapsed_s": elapsed,
         "per_frame": per_frame,
@@ -704,6 +704,26 @@ def analyze_video(
             "right_std_deg": float(np.std(right_angles)) if right_angles else None,
         },
     }
+
+    # Drop references to the accumulated per-prompt mask tensors BEFORE the
+    # final cache flush so empty_cache can actually reclaim what they held.
+    # Without this, running several analyses back-to-back fragments the
+    # allocator until even a 5-frame retry OOMs — precisely the failure
+    # mode reported 2026-04-18. results_per_prompt was keeping ~1-2GB alive
+    # across successful calls because Python's gc hadn't fired between them.
+    import gc
+    del results_per_prompt
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+        logger.info(
+            "Post-analysis VRAM: %.2f GB allocated, %.2f GB reserved",
+            torch.cuda.memory_allocated() / 1024**3,
+            torch.cuda.memory_reserved() / 1024**3,
+        )
+
+    return result
 
 
 def _persist_label_artifacts(
