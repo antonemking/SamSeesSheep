@@ -243,18 +243,29 @@ def analyze_video(
 
     frame_w, frame_h = pil_frames[0].size
 
-    # Three separate sessions (head, ear, nose). Single-session multi-prompt
-    # hits OOM on 6GB GPUs because each additional prompt adds tracking state.
-    # The nose session anchors the dorsal midline via nose→ear-midpoint — an
-    # unambiguous reference that doesn't wobble with head-mask shape noise
-    # the way a head-PCA midline does. Worth the extra pass for chart stability.
+    # Two-session mode (head + ear) — dropped the nose session because each
+    # SAM 3 Video session peaks at ~4.8GB on a 6GB GPU for busier clips,
+    # leaving no headroom for subsequent sessions even after cleanup. Chart
+    # falls back to head-PCA midline when nose is absent (already wired).
+    # Labeling side: nose keypoints become manual-only (reviewer drags from
+    # dashed v=0) — which the reviewer was doing for most frames anyway
+    # since SAM's text-prompted nose detection is unreliable on our footage.
     head_key = f"{subject} head"
     ear_key = f"{subject} ear"
-    nose_key = f"{subject} nose"
-    prompt_list = [head_key, ear_key, nose_key]
+    nose_key = f"{subject} nose"  # Still defined for naming, but NOT in prompt_list.
+    prompt_list = [head_key, ear_key]
 
     results_per_prompt: dict[str, list[dict]] = {}
-    for prompt_text in prompt_list:
+    for prompt_idx, prompt_text in enumerate(prompt_list):
+        # If the model was unloaded after the prior session (see below),
+        # reload it for this one. Adds ~15s per session but guarantees a
+        # clean allocator — empirically the only way to fit two back-to-back
+        # sessions on 6GB for busier clips.
+        if _video_model is None:
+            _load_video_model()
+            if _video_model is None:
+                raise RuntimeError("SAM 3 Video model failed to reload between sessions")
+
         t0 = time.time()
         session = _video_processor.init_video_session(
             video=pil_frames, inference_device=_device
@@ -280,9 +291,7 @@ def analyze_video(
             prompt_text, len(pil_frames), time.time() - t0,
             torch.cuda.max_memory_allocated() / 1024**3 if torch.cuda.is_available() else 0,
         )
-        # Free tracking state from this prompt before the next session.
-        # empty_cache alone isn't enough — Python refs to mask tensors
-        # survive until gc runs, which can keep ~500MB alive on a 6GB GPU.
+        # Free tracking state from this prompt.
         import gc as _gc
         session.reset_inference_session()
         del session
@@ -290,6 +299,13 @@ def analyze_video(
         torch.cuda.empty_cache()
         if torch.cuda.is_available():
             torch.cuda.reset_peak_memory_stats()
+
+        # Force-unload the model if there's another session to run. empty_cache
+        # alone doesn't defrag enough on 6GB to fit a second 4.8GB-peak session
+        # back-to-back. Reloading for the next session costs ~15s but is the
+        # only reliable path on this hardware.
+        if prompt_idx < len(prompt_list) - 1:
+            unload_video_model()
 
     per_frame = []
 
@@ -358,9 +374,13 @@ def analyze_video(
     primary_head = click_primary(results_per_prompt[head_key])
     if primary_head is None:
         primary_head = stable_primary(results_per_prompt[head_key])
-    primary_nose = click_primary(results_per_prompt[nose_key])
-    if primary_nose is None:
-        primary_nose = stable_primary(results_per_prompt[nose_key])
+    # Nose session is disabled for 6GB reliability — primary_nose stays None
+    # and every frame's nose_mask_bool stays None (head-PCA midline fallback).
+    primary_nose = None
+    if nose_key in results_per_prompt:
+        primary_nose = click_primary(results_per_prompt[nose_key])
+        if primary_nose is None:
+            primary_nose = stable_primary(results_per_prompt[nose_key])
     logger.info(
         "Selected primary_head=%s, primary_nose=%s", primary_head, primary_nose,
     )
@@ -450,7 +470,11 @@ def analyze_video(
 
         head_out = results_per_prompt[head_key][i]
         ear_out = results_per_prompt[ear_key][i]
-        nose_out = results_per_prompt[nose_key][i]
+        nose_out = (
+            results_per_prompt[nose_key][i]
+            if nose_key in results_per_prompt
+            else None
+        )
 
         # Head mask. If primary_head was removed/suppressed or its mask is
         # empty on this frame, we mark the frame as a tracking gap.
@@ -527,7 +551,9 @@ def analyze_video(
 
         # Nose mask for anatomical midline — preferred over head-PCA.
         nose_mask_bool = None
-        if primary_nose is not None and primary_nose in nose_out["obj_id_to_mask"]:
+        if (primary_nose is not None
+                and nose_out is not None
+                and primary_nose in nose_out["obj_id_to_mask"]):
             nm = _mask_from_logits(
                 nose_out["obj_id_to_mask"][primary_nose],
                 target_size=(frame_h, frame_w),
@@ -829,7 +855,9 @@ def _build_annotated_gif(
         return None
 
     from backend.config import RESULTS_DIR
-    head_key, ear_key, nose_key = prompt_list
+    head_key, ear_key = prompt_list[0], prompt_list[1]
+    # prompt_list may be [head, ear] (2-session VRAM mode) or [head, ear, nose].
+    nose_key = prompt_list[2] if len(prompt_list) >= 3 else None
 
     annotated = []
     for i, pil in enumerate(pil_frames):
@@ -874,9 +902,16 @@ def _build_annotated_gif(
             contours, _ = cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             cv2.drawContours(frame, contours, -1, (240, 136, 62), 3)
 
-        # Nose: yellow filled region (only the tracked nose)
-        nose_out = results_per_prompt[nose_key][i]
-        if primary_nose is not None and primary_nose in nose_out["obj_id_to_mask"]:
+        # Nose: yellow filled region (only the tracked nose). Skipped when
+        # the nose session wasn't run (2-session VRAM mode).
+        nose_out = (
+            results_per_prompt[nose_key][i]
+            if nose_key is not None and nose_key in results_per_prompt
+            else None
+        )
+        if (primary_nose is not None
+                and nose_out is not None
+                and primary_nose in nose_out["obj_id_to_mask"]):
             m = _mask_from_logits(
                 nose_out["obj_id_to_mask"][primary_nose], target_size=(h, w),
             )
