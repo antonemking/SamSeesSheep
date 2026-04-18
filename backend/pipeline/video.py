@@ -10,6 +10,7 @@ Output: per-frame ear angles over time.
 from __future__ import annotations
 
 import base64
+import contextlib
 import io
 import logging
 import time
@@ -276,24 +277,36 @@ def analyze_video(
                 raise RuntimeError("SAM 3 Video model failed to reload between sessions")
 
         t0 = time.time()
-        session = _video_processor.init_video_session(
-            video=pil_frames, inference_device=_device
+        # autocast wraps both the session-init image encoder pass and the
+        # per-frame propagate step. Without this, FP16 model weights vs FP32
+        # preprocessor tensors raise "Input type (float) and bias type
+        # (c10::Half) should be the same". Autocast casts the FP32 activations
+        # to FP16 on entry to every op, matching the model's dtype.
+        use_autocast = (_device == "cuda"
+                        and next(_video_model.parameters()).dtype == torch.float16)
+        ctx = (
+            torch.autocast(device_type="cuda", dtype=torch.float16)
+            if use_autocast else contextlib.nullcontext()
         )
-        _video_processor.add_text_prompt(session, prompt_text)
-
-        per_frame_outputs = []
-        for i, output in enumerate(
-            _video_model.propagate_in_video_iterator(
-                session, show_progress_bar=False
+        with ctx:
+            session = _video_processor.init_video_session(
+                video=pil_frames, inference_device=_device
             )
-        ):
-            per_frame_outputs.append({
-                "obj_id_to_mask": {k: v.cpu() for k, v in output.obj_id_to_mask.items()},
-                "obj_id_to_score": dict(output.obj_id_to_score),
-                "object_ids": list(output.object_ids),
-                "removed_obj_ids": set(output.removed_obj_ids or []),
-            })
-        results_per_prompt[prompt_text] = per_frame_outputs
+            _video_processor.add_text_prompt(session, prompt_text)
+
+            per_frame_outputs = []
+            for i, output in enumerate(
+                _video_model.propagate_in_video_iterator(
+                    session, show_progress_bar=False
+                )
+            ):
+                per_frame_outputs.append({
+                    "obj_id_to_mask": {k: v.cpu() for k, v in output.obj_id_to_mask.items()},
+                    "obj_id_to_score": dict(output.obj_id_to_score),
+                    "object_ids": list(output.object_ids),
+                    "removed_obj_ids": set(output.removed_obj_ids or []),
+                })
+            results_per_prompt[prompt_text] = per_frame_outputs
 
         logger.info(
             "Tracked '%s' across %d frames in %.1fs · peak VRAM %.2f GB",
