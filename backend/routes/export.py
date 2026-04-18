@@ -37,15 +37,34 @@ router = APIRouter(prefix="/api", tags=["export"])
 EXPORTS_DIR = LABELS_DIR / "exports"
 
 
-def _hash_split(video_id: str, frame_idx: int, val_ratio: float) -> str:
-    """Deterministic train/val assignment from (video_id, frame_idx).
-
-    Same frame lands in the same split across re-runs, so re-exporting
-    an updated review doesn't silently move training samples to val.
-    """
+def _hash_bucket(video_id: str, frame_idx: int) -> float:
+    """Deterministic [0.0, 1.0) bucket for (video_id, frame_idx)."""
     h = hashlib.md5(f"{video_id}:{frame_idx}".encode()).hexdigest()
-    bucket = int(h[:8], 16) % 10000 / 10000.0
-    return "val" if bucket < val_ratio else "train"
+    return int(h[:8], 16) % 10000 / 10000.0
+
+
+def _split_frames(
+    video_id: str, frame_indices: list[int], val_ratio: float,
+) -> tuple[set[int], set[int]]:
+    """Split frame indices into (train, val) sets deterministically.
+
+    Uses hash bucketing per frame. Guarantees val is non-empty when
+    there are at least 2 frames and val_ratio > 0 — previously, small
+    label sets could randomly all bucket to train and leave val empty,
+    which crashes Ultralytics at train time (the YOLO team's "empty
+    val/images crashes loader" callout on 2026-04-18).
+    """
+    buckets = [(i, _hash_bucket(video_id, i)) for i in frame_indices]
+    train = {i for i, b in buckets if b >= val_ratio}
+    val = {i for i, b in buckets if b < val_ratio}
+
+    if val_ratio > 0 and not val and len(frame_indices) >= 2:
+        # Promote the single highest-bucket train frame to val. Deterministic
+        # because buckets are fixed; keeps the promotion reproducible.
+        promote = max(buckets, key=lambda t: t[1])[0]
+        train.discard(promote)
+        val.add(promote)
+    return train, val
 
 
 def _yolo_label_line(
@@ -89,17 +108,22 @@ def _yolo_label_line(
     ])
 
 
-def _write_data_yaml(dataset_dir: Path) -> None:
+def _write_data_yaml(dataset_dir: Path, val_has_data: bool) -> None:
     """Write the 6-field data.yaml the YOLO team specified.
 
     path: absolute, so Ultralytics can find train/ and val/ regardless
     of what working directory the trainer runs from. Override if
     training happens on a different filesystem.
+
+    When val is empty (e.g., val_split=0 or only one exported frame),
+    point `val:` at train/images to keep the loader happy. At this
+    scale v0.1 σ-benchmark doesn't use held-out val anyway.
     """
+    val_path = "val/images" if val_has_data else "train/images"
     yaml_text = (
         f"path: {dataset_dir.resolve()}\n"
         f"train: train/images\n"
-        f"val: val/images\n"
+        f"val: {val_path}\n"
         f"nc: 1\n"
         f"names: ['sheep_head']\n"
         f"kpt_shape: [5, 3]\n"
@@ -149,7 +173,11 @@ async def export_keypoints(
         (dataset_dir / split / "labels").mkdir(parents=True, exist_ok=True)
 
     frames_src = LABELS_DIR / video_id / "frames"
-    exported = {"train": 0, "val": 0}
+
+    # First pass: figure out which frames ARE exportable (have a labeled
+    # keypoint + bbox + source image). This lets us split them as a set
+    # and guarantee val ≥ 1 when possible.
+    exportable: dict[int, dict] = {}
     skipped_no_labels = 0
     skipped_no_bbox = 0
     skipped_missing_image = 0
@@ -164,29 +192,57 @@ async def export_keypoints(
         if bbox is None or frame_w is None or frame_h is None:
             skipped_no_bbox += 1
             continue
-
         label_line = _yolo_label_line(
             bbox, keypoints, frame_w, frame_h, pseudo=pseudo,
         )
         if label_line is None:
             skipped_no_labels += 1
             continue
-
-        split = _hash_split(video_id, idx, val_split)
-        stem = f"{video_id}_{idx:04d}"
         img_src = frames_src / f"frame{idx:04d}.jpg"
         if not img_src.exists():
             skipped_missing_image += 1
             continue
 
+        exportable[idx] = {"label_line": label_line, "img_src": img_src}
+
+    if not exportable:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "No exportable frames for this video. Review at least one "
+                "frame in /label/{video_id} (drag a keypoint to set v=2)."
+            ),
+        )
+
+    # Second pass: deterministic split with min-1-val guarantee when possible.
+    train_idxs, val_idxs = _split_frames(
+        video_id, list(exportable.keys()), val_ratio=val_split,
+    )
+
+    # Clean stale files from any previous export of THIS video_id so a re-run
+    # (e.g., after more review work) rebalances cleanly instead of leaving
+    # orphans in the opposite split.
+    for split in ("train", "val"):
+        for sub in ("images", "labels"):
+            for p in (dataset_dir / split / sub).glob(f"{video_id}_*"):
+                p.unlink()
+
+    exported = {"train": 0, "val": 0}
+    for idx, payload in exportable.items():
+        split = "val" if idx in val_idxs else "train"
+        stem = f"{video_id}_{idx:04d}"
         img_dst = dataset_dir / split / "images" / f"{stem}.jpg"
         lbl_dst = dataset_dir / split / "labels" / f"{stem}.txt"
-        shutil.copyfile(img_src, img_dst)
-        lbl_dst.write_text(label_line + "\n")
+        shutil.copyfile(payload["img_src"], img_dst)
+        lbl_dst.write_text(payload["label_line"] + "\n")
         exported[split] += 1
 
-    # Always (re)write data.yaml so path stays current if the directory moves.
-    _write_data_yaml(dataset_dir)
+    # data.yaml points val at train when val is empty (prevents Ultralytics
+    # loader crash the YOLO team hit during smoke test).
+    dataset_val_has_data = any(
+        (dataset_dir / "val" / "images").glob("*.jpg")
+    )
+    _write_data_yaml(dataset_dir, val_has_data=dataset_val_has_data)
 
     result = {
         "ok": True,
