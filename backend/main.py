@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.config import HOST, PORT, LABELS_DIR, RESULTS_DIR, SAMPLE_DIR, UPLOAD_DIR
-from backend.routes import analyze, label, upload
+from backend.routes import analyze, export, label, upload
 
 logging.basicConfig(
     level=logging.INFO,
@@ -37,6 +37,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 app.include_router(upload.router)
 app.include_router(analyze.router)
 app.include_router(label.router)
+app.include_router(export.router)
 
 # Serve uploaded images and sample images
 app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
