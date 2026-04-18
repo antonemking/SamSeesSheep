@@ -606,17 +606,29 @@ def analyze_video(
             if nc is not None:
                 kps[0] = {"x": nc[0], "y": nc[1], "v": 1}
         if head_centroid_xy is not None:
-            # Sort the two tracked ear masks by screen-x so image-space
-            # L/R is always correct for YOLO labels, regardless of how
-            # the sheep is rotated in this frame.
-            ear_masks_by_x = []
-            if lb is not None:
-                ear_masks_by_x.append((float(np.where(lb)[1].mean()), lb))
-            if rb is not None:
-                ear_masks_by_x.append((float(np.where(rb)[1].mean()), rb))
-            ear_masks_by_x.sort(key=lambda t: t[0])
-            screen_left_mask = ear_masks_by_x[0][1] if len(ear_masks_by_x) >= 1 else None
-            screen_right_mask = ear_masks_by_x[1][1] if len(ear_masks_by_x) >= 2 else None
+            # Assign each detected ear mask to the L or R slot based on its
+            # centroid's x-position relative to the head centroid's x.
+            # With both ears visible, smaller-x = L, larger-x = R. With only
+            # one ear (profile view), compare to head_center_x: ear on the
+            # left half of the head → L slot, right half → R slot.
+            head_cx = head_centroid_xy[0]
+            detected = []
+            for mask in (lb, rb):
+                if mask is not None:
+                    cx = float(np.where(mask)[1].mean())
+                    detected.append((cx, mask))
+            screen_left_mask = None
+            screen_right_mask = None
+            if len(detected) == 2:
+                detected.sort(key=lambda t: t[0])
+                screen_left_mask = detected[0][1]
+                screen_right_mask = detected[1][1]
+            elif len(detected) == 1:
+                cx, mask = detected[0]
+                if cx < head_cx:
+                    screen_left_mask = mask
+                else:
+                    screen_right_mask = mask
             if screen_left_mask is not None:
                 kp = _extract_ear_keypoints(screen_left_mask, head_centroid_xy)
                 if kp is not None:
