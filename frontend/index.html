@@ -153,6 +153,21 @@ async function loadResumeList() {
 }
 loadResumeList();
 
+// Support ?video_id=xxxxxx in the URL to resume click-to-select on a
+// video that was imported via /api/import_video (scp workaround for
+// RunPod's HTTP/2 upload limit). Skips the upload step and jumps
+// straight to the click-to-select frame.
+(function tryLoadImportedVideo() {
+  const params = new URLSearchParams(location.search);
+  const vid = params.get('video_id');
+  if (!vid) return;
+  currentVideoId = vid;
+  $('video-frame0').src = `/uploads/${vid}_frame0.jpg`;
+  $('video-section').classList.remove('hidden');
+  $('video-selector').classList.remove('hidden');
+  $('status').textContent = `Loaded imported video ${vid}. Click the sheep you want to track.`;
+})();
+
 /* ── Upload ── */
 const zone=$('upload-zone'), input=$('file-input');
 zone.addEventListener('dragover',e=>{e.preventDefault();zone.style.borderColor='#3fb950'});
