@@ -16,12 +16,14 @@ dependencies = [
     # and subtle runtime mismatches. Stays here until we can bump torch to
     # >=2.3 (which is numpy-2-safe) without breaking the pod's NCCL.
     "numpy>=1.26,<2",
-    # Pin torch to 2.1.x — newer versions (torch 2.11+) bundle NCCL that
-    # requires pod system libs the runpod-torch-v21 template doesn't have,
-    # causing `undefined symbol: ncclCommWindowDeregister` at import time.
-    # torch 2.1.x + CUDA 11.8 works on RunPod RTX 4090 pods out of the box.
-    "torch>=2.1,<2.2",
-    "torchvision>=0.16,<0.17",
+    # Pin torch to 2.5.x — transformers 5.x requires torch>=2.4 for SAM 3,
+    # and torch 2.11+ bundles NCCL that's missing symbols on RunPod's
+    # runpod-torch-v21 template (undefined symbol: ncclCommWindowDeregister).
+    # torch 2.5.1 + cu121 hits the narrow window: new enough for SAM 3, old
+    # enough that its bundled NCCL works on the pod. Verified working on
+    # RTX 4090 with driver 570.x / CUDA 12.8.
+    "torch>=2.5,<2.6",
+    "torchvision>=0.20,<0.21",
     "transformers>=4.40",
     "imageio[pyav]>=2.34",
 ]
@@ -29,15 +31,15 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "httpx>=0.27"]
 
-# Pull torch from PyTorch's CUDA 11.8 index instead of PyPI default so the
-# bundled CUDA/NCCL libs match older pod templates. RunPod's default image
-# comes with CUDA 11.8 libs pre-installed; cu118 torch wheels link against
-# those and Just Work.
+# Pull torch from PyTorch's CUDA 12.1 index. cu121 wheels work on RunPod
+# RTX 4090 pods with CUDA 12.8 drivers (forward compat) and match the
+# transformers>=5 torch>=2.4 requirement. cu118 would also work for the
+# driver but torch 2.5+ cu118 is less common.
 [[tool.uv.index]]
-name = "pytorch-cu118"
-url = "https://download.pytorch.org/whl/cu118"
+name = "pytorch-cu121"
+url = "https://download.pytorch.org/whl/cu121"
 explicit = true
 
 [tool.uv.sources]
-torch = { index = "pytorch-cu118" }
-torchvision = { index = "pytorch-cu118" }
+torch = { index = "pytorch-cu121" }
+torchvision = { index = "pytorch-cu121" }
