@@ -98,8 +98,11 @@ def _load_video_model():
             "SAM 3 Video loaded. VRAM allocated: %.2f GB",
             torch.cuda.memory_allocated() / 1024 ** 3,
         )
-    except Exception as e:
-        logger.error("Failed to load SAM 3 Video: %s", e)
+    except Exception:
+        # logger.exception includes the full traceback — critical for
+        # diagnosing load failures (HF auth, CUDA mismatch, OOM, etc.)
+        # that the wrapper RuntimeError in analyze_video doesn't preserve.
+        logger.exception("Failed to load SAM 3 Video")
         _video_model = None
 
 
@@ -244,7 +247,11 @@ def analyze_video(
     if _video_model is None:
         _load_video_model()
     if _video_model is None:
-        raise RuntimeError("SAM 3 Video model failed to load")
+        raise RuntimeError(
+            "SAM 3 Video model failed to load. See the uvicorn log's "
+            "preceding traceback (tag 'Failed to load SAM 3 Video') for "
+            "the underlying cause."
+        )
 
     import torch
     from backend.pipeline.ear_angle import (
