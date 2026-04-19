@@ -111,9 +111,10 @@ def _yolo_label_line(
 def _write_data_yaml(dataset_dir: Path, val_has_data: bool) -> None:
     """Write the 6-field data.yaml the YOLO team specified.
 
-    path: absolute, so Ultralytics can find train/ and val/ regardless
-    of what working directory the trainer runs from. Override if
-    training happens on a different filesystem.
+    path: "." (relative) so the dataset is portable — same yaml works
+    on the pod, on the YOLO team's training machine, anywhere it gets
+    rsync'd. Ultralytics resolves train/val relative to the yaml's
+    own location when path is ".".
 
     When val is empty (e.g., val_split=0 or only one exported frame),
     point `val:` at train/images to keep the loader happy. At this
@@ -121,7 +122,7 @@ def _write_data_yaml(dataset_dir: Path, val_has_data: bool) -> None:
     """
     val_path = "val/images" if val_has_data else "train/images"
     yaml_text = (
-        f"path: {dataset_dir.resolve()}\n"
+        f"path: .\n"
         f"train: train/images\n"
         f"val: {val_path}\n"
         f"nc: 1\n"
@@ -132,42 +133,19 @@ def _write_data_yaml(dataset_dir: Path, val_has_data: bool) -> None:
     (dataset_dir / "data.yaml").write_text(yaml_text)
 
 
-@router.post("/export/keypoints")
-async def export_keypoints(
-    video_id: str = Query(..., description="Source review to export from"),
-    dataset: str = Query(
-        "sheep-pose-v0",
-        description="Output dataset directory name under data/labels/exports/",
-    ),
-    pseudo: bool = Query(
-        False,
-        description="Promote v=1 → YOLO v=2. Prototype-only; NOT for σ benchmarks.",
-    ),
-    val_split: float = Query(
-        0.2, ge=0.0, le=0.5,
-        description="Fraction of frames to hold out for validation.",
-    ),
+def _export_one_video(
+    video_id: str, dataset_dir: Path, pseudo: bool, val_split: float,
 ) -> dict:
-    """Write a YOLO-pose dataset slice from one video's review state.
-
-    Safe to call multiple times with different video_ids targeting the
-    same dataset name — each call appends its frames, and each frame
-    lands in a deterministic split based on hash(video_id + frame_idx).
-    """
-    # Path traversal guard — both inputs eventually hit the filesystem.
-    for name, val in (("video_id", video_id), ("dataset", dataset)):
-        if "/" in val or ".." in val or not val:
-            raise HTTPException(status_code=400, detail=f"Invalid {name}")
-
+    """Core per-video export routine, shared by the single and batch endpoints."""
     review_path = LABELS_DIR / video_id / "review.json"
     if not review_path.exists():
-        raise HTTPException(
-            status_code=404,
-            detail=f"No review state for video {video_id}. Run /api/analyze/video first.",
-        )
+        return {
+            "video_id": video_id,
+            "exported": {"train": 0, "val": 0},
+            "skipped_reason": "no review.json",
+        }
     review = json.loads(review_path.read_text())
 
-    dataset_dir = EXPORTS_DIR / dataset
     for split in ("train", "val"):
         (dataset_dir / split / "images").mkdir(parents=True, exist_ok=True)
         (dataset_dir / split / "labels").mkdir(parents=True, exist_ok=True)
@@ -206,13 +184,14 @@ async def export_keypoints(
         exportable[idx] = {"label_line": label_line, "img_src": img_src}
 
     if not exportable:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "No exportable frames for this video. Review at least one "
-                "frame in /label/{video_id} (drag a keypoint to set v=2)."
-            ),
-        )
+        return {
+            "video_id": video_id,
+            "exported": {"train": 0, "val": 0},
+            "skipped_no_labels": skipped_no_labels,
+            "skipped_no_bbox": skipped_no_bbox,
+            "skipped_missing_image": skipped_missing_image,
+            "skipped_reason": "no reviewed keypoints (v=2)",
+        }
 
     # Second pass: deterministic split with min-1-val guarantee when possible.
     train_idxs, val_idxs = _split_frames(
@@ -237,11 +216,50 @@ async def export_keypoints(
         lbl_dst.write_text(payload["label_line"] + "\n")
         exported[split] += 1
 
-    # data.yaml points val at train when val is empty (prevents Ultralytics
-    # loader crash the YOLO team hit during smoke test).
-    dataset_val_has_data = any(
-        (dataset_dir / "val" / "images").glob("*.jpg")
-    )
+    return {
+        "video_id": video_id,
+        "exported": exported,
+        "skipped_no_labels": skipped_no_labels,
+        "skipped_no_bbox": skipped_no_bbox,
+        "skipped_missing_image": skipped_missing_image,
+    }
+
+
+@router.post("/export/keypoints")
+async def export_keypoints(
+    video_id: str = Query(..., description="Source review to export from"),
+    dataset: str = Query(
+        "sheep-pose-v0",
+        description="Output dataset directory name under data/labels/exports/",
+    ),
+    pseudo: bool = Query(
+        False,
+        description="Promote v=1 → YOLO v=2. Prototype-only; NOT for σ benchmarks.",
+    ),
+    val_split: float = Query(
+        0.2, ge=0.0, le=0.5,
+        description="Fraction of frames to hold out for validation.",
+    ),
+) -> dict:
+    """Write a YOLO-pose dataset slice from one video's review state."""
+    for name, val in (("video_id", video_id), ("dataset", dataset)):
+        if "/" in val or ".." in val or not val:
+            raise HTTPException(status_code=400, detail=f"Invalid {name}")
+
+    dataset_dir = EXPORTS_DIR / dataset
+    per_video = _export_one_video(video_id, dataset_dir, pseudo, val_split)
+
+    if per_video["exported"]["train"] + per_video["exported"]["val"] == 0:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"No exportable frames for {video_id}: "
+                f"{per_video.get('skipped_reason', 'unknown')}. "
+                "Review at least one frame in /label/{video_id}."
+            ),
+        )
+
+    dataset_val_has_data = any((dataset_dir / "val" / "images").glob("*.jpg"))
     _write_data_yaml(dataset_dir, val_has_data=dataset_val_has_data)
 
     result = {
@@ -251,17 +269,75 @@ async def export_keypoints(
         "dataset_path": str(dataset_dir.resolve()),
         "pseudo": pseudo,
         "val_split": val_split,
-        "exported": exported,
+        "exported": per_video["exported"],
         "skipped": {
-            "no_labeled_keypoints": skipped_no_labels,
-            "missing_bbox_or_dims":  skipped_no_bbox,
-            "missing_source_image":  skipped_missing_image,
+            "no_labeled_keypoints": per_video.get("skipped_no_labels", 0),
+            "missing_bbox_or_dims":  per_video.get("skipped_no_bbox", 0),
+            "missing_source_image":  per_video.get("skipped_missing_image", 0),
         },
     }
     logger.info(
-        "Export video=%s dataset=%s pseudo=%s → train=%d val=%d "
-        "skipped_no_labels=%d skipped_no_bbox=%d skipped_missing_img=%d",
-        video_id, dataset, pseudo, exported["train"], exported["val"],
-        skipped_no_labels, skipped_no_bbox, skipped_missing_image,
+        "Export video=%s dataset=%s pseudo=%s → train=%d val=%d",
+        video_id, dataset, pseudo,
+        per_video["exported"]["train"], per_video["exported"]["val"],
     )
     return result
+
+
+@router.post("/export/keypoints/all")
+async def export_all_keypoints(
+    dataset: str = Query(
+        "sheep-pose-v0",
+        description="Output dataset directory name under data/labels/exports/",
+    ),
+    pseudo: bool = Query(
+        False,
+        description="Promote v=1 → YOLO v=2. Prototype-only; NOT for σ benchmarks.",
+    ),
+    val_split: float = Query(
+        0.2, ge=0.0, le=0.5,
+        description="Fraction of frames to hold out for validation.",
+    ),
+) -> dict:
+    """Batch-export every labeled video into the dataset in one call.
+
+    Walks data/labels/ for every review.json, runs the per-video exporter
+    on each, aggregates results. Saves the hand-off a round-trip per video.
+
+    Call from the laptop/YOLO side:
+        curl -X POST 'http://pod:8000/api/export/keypoints/all?dataset=sheep-pose-v0'
+    """
+    if "/" in dataset or ".." in dataset or not dataset:
+        raise HTTPException(status_code=400, detail="Invalid dataset")
+
+    dataset_dir = EXPORTS_DIR / dataset
+    per_video_results = []
+    total = {"train": 0, "val": 0}
+
+    for video_dir in sorted(LABELS_DIR.iterdir()):
+        if not video_dir.is_dir() or video_dir.name == "exports":
+            continue
+        if not (video_dir / "review.json").exists():
+            continue
+        r = _export_one_video(video_dir.name, dataset_dir, pseudo, val_split)
+        per_video_results.append(r)
+        total["train"] += r["exported"]["train"]
+        total["val"] += r["exported"]["val"]
+
+    dataset_val_has_data = any((dataset_dir / "val" / "images").glob("*.jpg"))
+    _write_data_yaml(dataset_dir, val_has_data=dataset_val_has_data)
+
+    logger.info(
+        "Batch export dataset=%s → %d videos, train=%d val=%d",
+        dataset, len(per_video_results), total["train"], total["val"],
+    )
+
+    return {
+        "ok": True,
+        "dataset": dataset,
+        "dataset_path": str(dataset_dir.resolve()),
+        "pseudo": pseudo,
+        "val_split": val_split,
+        "total_exported": total,
+        "videos": per_video_results,
+    }
