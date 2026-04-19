@@ -26,6 +26,11 @@ dependencies = [
     "torchvision>=0.20,<0.21",
     "transformers>=4.40",
     "imageio[pyav]>=2.34",
+    # Ultralytics powers the on-pod YOLO-pose training step (scripts/train_on_pod.sh).
+    # Training happens on the pod's 4090 — the YOLO team SSHes in and runs `yolo train`
+    # against the exported dataset rather than shipping gigabytes of images to their
+    # 6 GB card. Only best.pt (~10 MB) crosses the wire.
+    "ultralytics>=8.3",
 ]
 
 [project.optional-dependencies]
