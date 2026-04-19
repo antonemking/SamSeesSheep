@@ -90,3 +90,4 @@ data/results/
 # DVC (if added later)
 /.dvc/cache
 /.dvc/tmp
+.env.pod
