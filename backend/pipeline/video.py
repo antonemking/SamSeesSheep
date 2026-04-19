@@ -68,18 +68,9 @@ def _load_video_model():
         from transformers import Sam3VideoModel, Sam3VideoProcessor
 
         _device = "cuda" if torch.cuda.is_available() else "cpu"
-        # FP16 on a 1660 Ti (Turing non-RTX): no tensor cores, so no compute
-        # speedup — but storage is half size, which drops the model's VRAM
-        # footprint from 3.53 GB to ~1.77 GB. That's the only lever left on
-        # 6 GB after dropping the nose session and unloading between sessions
-        # didn't give enough headroom on busier clips. If this produces NaN
-        # masks on some clip, revert to fp32 and accept the OOM risk.
-        dtype = torch.float16 if _device == "cuda" else torch.float32
-        logger.info("Loading SAM 3 Video on %s (dtype=%s)...", _device, dtype)
+        logger.info("Loading SAM 3 Video on %s...", _device)
         _video_processor = Sam3VideoProcessor.from_pretrained("facebook/sam3")
-        _video_model = Sam3VideoModel.from_pretrained(
-            "facebook/sam3", torch_dtype=dtype,
-        ).to(_device)
+        _video_model = Sam3VideoModel.from_pretrained("facebook/sam3").to(_device)
         _video_model.eval()
         logger.info(
             "SAM 3 Video loaded. VRAM allocated: %.2f GB",
