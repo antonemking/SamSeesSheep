@@ -28,6 +28,28 @@ _video_processor = None
 _device = None
 
 
+def _full_pipeline_enabled() -> bool:
+    """True on hardware with enough VRAM for the full 3-session pipeline.
+
+    Priority:
+    1. SHEEPSEG_FULL_PIPELINE=1 or =0 (explicit override).
+    2. Auto-detect: CUDA device with >=15 GB total VRAM (RTX 4090 / A100 /
+       anything bigger than a 6 GB card). 1660 Ti on a 6 GB laptop → survival.
+    """
+    import os
+    env = os.environ.get("SHEEPSEG_FULL_PIPELINE")
+    if env is not None:
+        return env == "1"
+    try:
+        import torch
+        if torch.cuda.is_available():
+            total_gb = torch.cuda.get_device_properties(0).total_memory / 1024**3
+            return total_gb >= 15.0
+    except Exception:
+        pass
+    return False
+
+
 def unload_video_model():
     """Drop the SAM 3 Video model from GPU and clear the allocator.
 
@@ -117,15 +139,14 @@ def _extract_frames(
         target_count = max(target_count, min(max_frames, 8))  # at least 8 frames
 
     idxs = np.linspace(0, total - 1, target_count).astype(int)
-    # 384 because clips with multiple sheep and busy scenes push a single
-    # SAM 3 Video session past 4.8 GB at 512 px, leaving no headroom for
-    # ear and nose sessions on a 6 GB GPU. We're in labeling mode now —
-    # the reviewer drags dots anyway, so SAM's auto-placement precision
-    # at 384 vs 512 is marginal. YOLO training runs at imgsz=640 with the
-    # HUMAN keypoint labels, not SAM-derived ones, so mask crispness
-    # doesn't transfer to the trained model. Revert to 512 if moving to
-    # A100 or if OOMs stop being a thing on 6 GB.
-    MAX_DIM = 384
+    # MAX_DIM adapts to hardware:
+    # - Full pipeline (24 GB+): 512 for crisper masks. SAM's auto-derived
+    #   ear base/tip lands closer to anatomy, reviewer drags less.
+    # - Survival (6 GB): 384 because at 512 a single SAM 3 Video session
+    #   peaks at ~4.8 GB, leaving no room for the ear session to run
+    #   afterward. Mask edge precision drops slightly but reviewers drag
+    #   anyway and YOLO training uses HUMAN labels, not SAM-derived ones.
+    MAX_DIM = 512 if _full_pipeline_enabled() else 384
     pil_frames = []
     for i in idxs:
         img = Image.fromarray(frames[i])
@@ -243,17 +264,22 @@ def analyze_video(
 
     frame_w, frame_h = pil_frames[0].size
 
-    # Two-session mode (head + ear) — dropped the nose session because each
-    # SAM 3 Video session peaks at ~4.8GB on a 6GB GPU for busier clips,
-    # leaving no headroom for subsequent sessions even after cleanup. Chart
-    # falls back to head-PCA midline when nose is absent (already wired).
-    # Labeling side: nose keypoints become manual-only (reviewer drags from
-    # dashed v=0) — which the reviewer was doing for most frames anyway
-    # since SAM's text-prompted nose detection is unreliable on our footage.
+    # Prompt list adapts to hardware:
+    # - Full pipeline (24 GB+): head + ear + nose — all three SAM 3 Video
+    #   sessions. Nose gives anatomical midline and auto-seeds nose keypoint.
+    # - Survival (6 GB): head + ear only. Nose is dropped because three
+    #   4.8GB-peak sessions can't fit back-to-back on a 6GB GPU. Nose
+    #   keypoints become manual placement in the labeler.
     head_key = f"{subject} head"
     ear_key = f"{subject} ear"
-    nose_key = f"{subject} nose"  # Still defined for naming, but NOT in prompt_list.
-    prompt_list = [head_key, ear_key]
+    nose_key = f"{subject} nose"
+    full_pipeline = _full_pipeline_enabled()
+    prompt_list = [head_key, ear_key, nose_key] if full_pipeline else [head_key, ear_key]
+    logger.info(
+        "Pipeline mode: %s (%d sessions)",
+        "full (head+ear+nose)" if full_pipeline else "survival (head+ear)",
+        len(prompt_list),
+    )
 
     results_per_prompt: dict[str, list[dict]] = {}
     for prompt_idx, prompt_text in enumerate(prompt_list):
@@ -300,11 +326,11 @@ def analyze_video(
         if torch.cuda.is_available():
             torch.cuda.reset_peak_memory_stats()
 
-        # Force-unload the model if there's another session to run. empty_cache
-        # alone doesn't defrag enough on 6GB to fit a second 4.8GB-peak session
-        # back-to-back. Reloading for the next session costs ~15s but is the
-        # only reliable path on this hardware.
-        if prompt_idx < len(prompt_list) - 1:
+        # Force-unload the model if there's another session to run AND we're
+        # in survival mode. empty_cache alone doesn't defrag enough on 6GB to
+        # fit a second 4.8GB-peak session back-to-back. Reload costs ~15s.
+        # On 24GB+ (full pipeline) there's plenty of headroom; no unload needed.
+        if not full_pipeline and prompt_idx < len(prompt_list) - 1:
             unload_video_model()
 
     per_frame = []

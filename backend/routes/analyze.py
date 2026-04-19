@@ -40,12 +40,22 @@ async def analyze_video_endpoint(req: VideoAnalyzeRequest) -> dict:
     if req.click_x is not None and req.click_y is not None:
         click_point = (req.click_x, req.click_y)
 
-    from backend.pipeline.video import analyze_video as _run, unload_video_model
+    from backend.pipeline.video import (
+        analyze_video as _run,
+        unload_video_model,
+        _full_pipeline_enabled,
+    )
     import gc, torch
 
-    # Retry cascade tuned for 6GB GPUs: ceiling low enough to fit cleanly,
-    # floor not so low the chart becomes useless.
-    attempt_frames = [min(req.max_frames, 20), 10, 5]
+    # Retry cascade adapts to hardware.
+    # - Full pipeline (24GB+): start at the requested count (up to 60),
+    #   step down to 30, 15. Fewer OOM expected, so cascade is wide.
+    # - Survival (6GB): start at 20, step down to 10, 5. Every clip is
+    #   close to the OOM ceiling so we need aggressive fallbacks.
+    if _full_pipeline_enabled():
+        attempt_frames = [min(req.max_frames, 60), 30, 15]
+    else:
+        attempt_frames = [min(req.max_frames, 20), 10, 5]
     # Deduplicate while preserving order (req.max_frames=10 gives [10,10,5])
     seen = set()
     attempt_frames = [n for n in attempt_frames if not (n in seen or seen.add(n))]
