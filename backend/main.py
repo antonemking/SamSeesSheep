@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.config import HOST, PORT, LABELS_DIR, RESULTS_DIR, SAMPLE_DIR, UPLOAD_DIR
+from backend.config import HOST, PORT, LABELS_DIR, RESULTS_DIR, UPLOAD_DIR
 from backend.routes import analyze, export, label, upload
 
 logging.basicConfig(
@@ -41,7 +41,6 @@ app.include_router(export.router)
 
 # Serve uploaded images and sample images
 app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
-app.mount("/sample", StaticFiles(directory=str(SAMPLE_DIR)), name="sample")
 app.mount("/results", StaticFiles(directory=str(RESULTS_DIR)), name="results")
 app.mount("/labels", StaticFiles(directory=str(LABELS_DIR)), name="labels")
 

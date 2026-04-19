@@ -21,7 +21,6 @@ PROJECT_ROOT = Path(__file__).parent.parent
 DATA_DIR = PROJECT_ROOT / "data"
 UPLOAD_DIR = DATA_DIR / "uploads"
 RESULTS_DIR = DATA_DIR / "results"
-SAMPLE_DIR = DATA_DIR / "sample"
 LABELS_DIR = DATA_DIR / "labels"
 WEIGHTS_DIR = PROJECT_ROOT / "weights"
 
