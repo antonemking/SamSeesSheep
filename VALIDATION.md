@@ -6,21 +6,32 @@ This document will be updated as evidence accumulates. It will not be updated to
 
 ---
 
-## Scope reset (2026-04)
+## Scope (updated 2026-04-20)
 
-v0 has been descoped from *welfare instrument* to *visualization artifact*. The current shipping scope is:
+The project went through two scope shifts since day 0. This section supersedes anything below it.
 
-- SAM 3 Video segments sheep head + ears across a short clip.
-- Per-frame ear angles are computed, smoothed, and rendered against SPFES-referenced threshold bands.
-- Click-to-track picks one subject; other animals in frame are rejected from the measurement.
+**What this repo now is:** a labeling + training pipeline for sheep head keypoints. SAM 3 Video auto-places candidate keypoints (nose, left/right ear bases, left/right ear tips) across every frame of a short clip. A human reviewer confirms or corrects them. Reviewed frames export to a YOLO-pose dataset. A small YOLO-pose model is trained against that dataset on a cloud GPU. The trained weights land in a separate repo (`sheep-yolo`) that owns inference and the σ-on-motionless-sheep benchmark.
 
-**What's explicitly out of this scope (moved to Roadmap in `README.md`):**
+**What this repo explicitly is not:**
 
-- Validation against documented stress events.
-- EUP% as a pass/fail metric against the kill criterion below.
-- Any welfare or pain claim.
+- A welfare instrument. Ear-angle thresholds are literature-grounded reference bands, not diagnostic cutoffs.
+- A pain detector. No claim here translates into "this sheep is in pain."
+- A validated dataset against stress events. That is the follow-up project, with its own capture protocol and kill criterion.
+- The inference path. `best.pt` leaves this repo and runs elsewhere.
 
-The kill criterion still stands — but it applies to the welfare-instrument follow-up project, not to the visualization artifact you can run today.
+**What's explicitly deferred:**
+
+- Validation against documented stress events (hoof trim, tagging, separation, startle).
+- EUP% as a pass/fail metric against the kill criterion below — that test gates on a trained YOLO-pose model producing stable measurements, which is downstream of this repo.
+- Any welfare, pain, or cross-flock claim.
+
+**How to read the kill criterion below.** It was written day 0 and still stands, but the subject of the test is now the YOLO-pose model trained on data produced here — not SAM 3's per-frame segmentations and not the ear-angle chart. The chart is a labeling-QA tool; it isn't the thing under evaluation.
+
+### Scope history
+
+- **v0 (day 0)** — Intended as a welfare-scoring pipeline against SPFES thresholds. Unrealistic at our evidence level.
+- **v0.1 (2026-04 simplify branch)** — Descoped to "visualization artifact": SAM 3 Video → per-frame ear angles → smoothed EKG chart. No welfare claim. Clean but narrow.
+- **v0.2 (2026-04 current)** — Re-scoped again after peer review. SAM 3 is the **annotation backbone** (not the inference backbone). The project's outputs are (a) a growing reviewed-keypoint dataset and (b) a trained YOLO-pose model small enough to run at the edge. The visualization chart persists as a labeling-QA view.
 
 ---
 
