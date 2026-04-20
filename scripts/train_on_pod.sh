@@ -90,6 +90,12 @@ set -e
 cd /workspace/SamSeesSheep
 source \$HOME/.local/bin/env 2>/dev/null || true
 
+# Pre-flight: validate the exported dataset before burning GPU time.
+# validate_dataset.py exits non-zero on structural/format errors; set -e
+# aborts the whole training run in that case.
+echo "[train] Validating dataset ${DATASET}..."
+uv run python scripts/validate_dataset.py --dataset ${DATASET}
+
 cd data/labels/exports/${DATASET}
 mkdir -p /workspace/runs/pose
 

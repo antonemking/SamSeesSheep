@@ -47,6 +47,7 @@ compute-heavy thing.
 | `train_on_pod.sh` | laptop | Trigger full training run on the 4090. Synchronous — logs stream to your terminal until training finishes (~10 min at current dataset scale). |
 | `sync_weights_from_pod.sh` | laptop | After training, pull `best.pt` + `last.pt` into `~/dev/lorewood-advisors/sheep-yolo/weights/`. |
 | `fetch_dataset.sh` | laptop | **Optional.** Pulls the dataset images to the laptop for eyeballing labels. Not part of the training loop — dataset never leaves the pod in normal use. |
+| `validate_dataset.py` | pod or laptop | Dataset health checks — paired image/label counts, 20-column label format, `[0,1]` coord ranges, per-slot v=2 coverage, train/val leakage. Run as a pre-flight inside `train_on_pod.sh`; can also be run standalone any time. Exit 1 on any critical error so bad data never silently feeds into training. |
 
 ## End-of-day loop
 
