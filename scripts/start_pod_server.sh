@@ -2,6 +2,7 @@
 # Run on the RunPod pod to bring the sheep-seg server up.
 #
 # Handles the pain points from the first setup day:
+#   - Ensures labels dir is symlinked to the durable Network Volume
 #   - Ensures uv is installed and on PATH
 #   - Ensures venv exists and is synced
 #   - Sets PYTORCH_CUDA_ALLOC_CONF + SHEEPSEG_FULL_PIPELINE
@@ -12,6 +13,65 @@
 set -e
 
 cd "$(dirname "$0")/.."
+
+# Load pod-side env (LABELS_VOLUME, etc.) if present
+if [ -f .env.pod ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . ./.env.pod
+  set +a
+fi
+
+# 0. Durable labels dir on the Network Volume.
+#
+# The dataset is the one piece of state that represents unrecoverable human
+# work. Container disk survives Stop/Resume but NOT Terminate or spot
+# preemption. A Network Volume (attached via RunPod UI at pod-deploy time)
+# survives both. We symlink data/labels → $LABELS_VOLUME so backend/config.py
+# keeps using the same LABELS_DIR path.
+#
+# Set LABELS_VOLUME_SKIP=1 to bypass (only for first-time pods where you
+# haven't attached a volume yet — labels will be on ephemeral container disk).
+LABELS_VOLUME="${LABELS_VOLUME:-/mnt/labels}"
+
+if [ "${LABELS_VOLUME_SKIP:-0}" = "1" ]; then
+  echo "[startup] WARNING: LABELS_VOLUME_SKIP=1 — labels will live on ephemeral container disk."
+  echo "[startup] Terminate or spot preemption will DESTROY labeling work. Attach a Network Volume ASAP."
+elif [ -L data/labels ] && [ -d data/labels ]; then
+  resolved=$(readlink -f data/labels)
+  echo "[startup] data/labels → $resolved (durable volume OK)"
+elif [ ! -d "$LABELS_VOLUME" ]; then
+  cat >&2 <<EOF
+[startup] FATAL: LABELS_VOLUME=$LABELS_VOLUME does not exist.
+
+The labels dir needs a durable RunPod Network Volume mounted at that path,
+otherwise a Terminate or spot preemption will wipe all labeling work.
+
+Fix (in the RunPod console):
+  1. Create a Network Volume (if you don't have one).
+  2. Edit the pod → attach the volume with mount path = $LABELS_VOLUME.
+  3. Stop + Resume the pod so the mount takes effect.
+  4. Re-run this script.
+
+Or, if you intentionally want labels on ephemeral container disk (first-time
+pod setup, no volume yet), re-run with:
+  LABELS_VOLUME_SKIP=1 bash scripts/start_pod_server.sh
+EOF
+  exit 1
+else
+  # Volume is mounted and data/labels isn't a symlink yet. Set it up.
+  if [ -d data/labels ] && [ -n "$(ls -A data/labels 2>/dev/null)" ]; then
+    echo "[startup] Migrating existing data/labels → $LABELS_VOLUME ..."
+    rsync -a data/labels/ "$LABELS_VOLUME/"
+    rm -rf data/labels
+  elif [ -d data/labels ]; then
+    rmdir data/labels
+  fi
+  mkdir -p "$LABELS_VOLUME"
+  mkdir -p data
+  ln -sfn "$LABELS_VOLUME" data/labels
+  echo "[startup] data/labels → $LABELS_VOLUME (symlink created)"
+fi
 
 # 1. Install uv if missing (fresh pods sometimes lose it after redeploy)
 if [ ! -x "$HOME/.local/bin/uv" ]; then

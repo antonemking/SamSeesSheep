@@ -47,6 +47,7 @@ compute-heavy thing.
 | `train_on_pod.sh` | laptop | Trigger full training run on the 4090. Synchronous — logs stream to your terminal until training finishes (~10 min at current dataset scale). |
 | `sync_weights_from_pod.sh` | laptop | After training, pull `best.pt` + `last.pt` into `~/dev/lorewood-advisors/sheep-yolo/weights/`. |
 | `fetch_dataset.sh` | laptop | **Optional.** Pulls the dataset images to the laptop for eyeballing labels. Not part of the training loop — dataset never leaves the pod in normal use. |
+| `backup_dataset.sh` | laptop | **Durability layer 2.** rsync mirror of the pod's `data/labels/` tree to `~/Backups/sheep-seg/labels/`. Covers in-progress JSON state, not just YOLO exports. Run manually (weekly is plenty); cron example in the script's docstring. |
 | `validate_dataset.py` | pod or laptop | Dataset health checks — paired image/label counts, 20-column label format, `[0,1]` coord ranges, per-slot v=2 coverage, train/val leakage. Run as a pre-flight inside `train_on_pod.sh`; can also be run standalone any time. Exit 1 on any critical error so bad data never silently feeds into training. |
 
 ## End-of-day loop
@@ -109,6 +110,28 @@ pointing at today.
 
 Disk on the pod is persistent across Stop→Resume, so all prior labels, cached
 model weights, and run artifacts survive. Only the network identity changes.
+
+## Durability — how the dataset stays alive
+
+The dataset is the one piece of state that represents unrecoverable human
+work. Two layers protect it:
+
+1. **RunPod Network Volume (on the pod).** `data/labels/` is a symlink to a
+   volume mounted at `LABELS_VOLUME` (default `/mnt/labels`). Network Volumes
+   survive Stop/Resume *and* Terminate and spot preemption — the container
+   disk doesn't. `start_pod_server.sh` sets up the symlink on first run and
+   refuses to boot if the expected mount path isn't there (so labels can't
+   silently land on ephemeral disk). Volume is attached via the RunPod UI at
+   pod-deploy time — see `docs/CLOUD.md` for the setup steps.
+2. **Laptop rsync mirror (off the pod).** `backup_dataset.sh` mirrors the
+   pod's full `data/labels/` tree to `~/Backups/sheep-seg/labels/` via rsync
+   `--delete-after`. Covers the RunPod outage / volume-delete / billing-lapse
+   scenarios the volume alone can't. Run weekly by hand; docstring has a
+   cron snippet if you want it automated.
+
+If you terminate a pod without a volume attached (or with
+`LABELS_VOLUME_SKIP=1`), assume labels are gone. The whole point of these
+scripts is so you never have to think about that outcome.
 
 ## Dataset versioning
 

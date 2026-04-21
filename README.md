@@ -100,6 +100,13 @@ bash scripts/start_pod_server.sh        # labeling server
 
 Only `best.pt` (~10 MB) crosses the network. The dataset stays on the pod.
 
+### Backup — where the dataset actually lives
+
+The labeling work is the single most irreplaceable thing in this project. It's protected in two layers:
+
+1. **RunPod Network Volume.** On the pod, `data/labels/` is a symlink to a Network Volume (mount path `/mnt/labels`, attached via the RunPod UI at pod-deploy time). Volumes survive Stop/Resume *and* Terminate / spot preemption; container disk does not. `scripts/start_pod_server.sh` refuses to boot if the mount is missing, so labels never silently land on ephemeral disk. Setup in [`docs/CLOUD.md`](./docs/CLOUD.md#1a-create-the-network-volume-durable-labels-storage).
+2. **Laptop rsync mirror.** `./scripts/backup_dataset.sh` pulls the full `data/labels/` tree to `~/Backups/sheep-seg/labels/`. Manual, weekly. Covers RunPod-outage / volume-delete / billing-lapse scenarios the volume alone can't.
+
 ## Reading the ear-angle chart (observability only)
 
 While reviewing a clip in the labeler, the dashboard shows a per-frame ear-angle timeline. It's not a measurement instrument — the chart exists so I can spot obviously-wrong keypoint placements at a glance.
