@@ -91,3 +91,4 @@ data/results/
 /.dvc/cache
 /.dvc/tmp
 .env.pod
+.pushed_clips.tsv
