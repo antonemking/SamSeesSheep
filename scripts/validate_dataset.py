@@ -164,7 +164,7 @@ def validate_dataset(dataset_dir: Path, report: Report) -> None:
     split_counts: dict[str, tuple[int, int]] = {}
     stem_locations: dict[str, list[str]] = defaultdict(list)
     kp_coverage: Counter[int] = Counter()
-    total_frames = 0
+    total_instances = 0  # one per label line; N per frame in multi-subject
 
     for split in ("train", "val"):
         img_dir = dataset_dir / split / "images"
@@ -196,17 +196,15 @@ def validate_dataset(dataset_dir: Path, report: Report) -> None:
             if not lines:
                 report.error(f"{split}/{lbl_path.name}: empty label file")
                 continue
-            if len(lines) > 1:
-                report.warn(
-                    f"{split}/{lbl_path.name}: {len(lines)} instances "
-                    f"(expected 1 per single-subject convention)"
+            # Multi-subject: N lines per frame is expected, one per instance.
+            # Each line is independently validated for 20-column compliance.
+            for line_idx, line in enumerate(lines):
+                tag = f"{split}/{lbl_path.name}" + (
+                    f":inst{line_idx}" if len(lines) > 1 else ""
                 )
-            for line in lines:
-                placed = _validate_label_line(
-                    line, report, f"{split}/{lbl_path.name}"
-                )
+                placed = _validate_label_line(line, report, tag)
                 if placed is not None:
-                    total_frames += 1
+                    total_instances += 1
                     for k in placed:
                         kp_coverage[k] += 1
 
@@ -214,22 +212,25 @@ def validate_dataset(dataset_dir: Path, report: Report) -> None:
         marker = "✓ paired" if imgs == lbls else "✗ mismatch"
         report.note(f"  {split}: {imgs} images, {lbls} labels  {marker}")
 
-    if total_frames == 0:
-        report.error("dataset contains zero valid training frames")
+    if total_instances == 0:
+        report.error("dataset contains zero valid training instances")
         return
 
+    report.note(f"  instance-rows across all label files: {total_instances}")
     report.note("  v=2 coverage per keypoint slot:")
     for k, name in enumerate(KP_NAMES):
         count = kp_coverage[k]
-        pct = int(100 * count / total_frames)
+        pct = int(100 * count / total_instances)
         marker = ""
         if pct < 50:
             marker = " ← low"
             report.warn(
-                f"{name} coverage only {pct}% of frames — reviewer may be "
-                f"under-placing this keypoint"
+                f"{name} coverage only {pct}% of instances — reviewer may "
+                f"be under-placing this keypoint"
             )
-        report.note(f"    {name:<8s} {count:>4d}/{total_frames}  ({pct}%){marker}")
+        report.note(
+            f"    {name:<8s} {count:>4d}/{total_instances}  ({pct}%){marker}"
+        )
 
     # Leakage: a frame stem appearing in both train and val is split drift.
     dupes = {s: sp for s, sp in stem_locations.items() if len(sp) > 1}

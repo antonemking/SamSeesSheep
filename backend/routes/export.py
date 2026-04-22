@@ -152,36 +152,47 @@ def _export_one_video(
 
     frames_src = LABELS_DIR / video_id / "frames"
 
-    # First pass: figure out which frames ARE exportable (have a labeled
-    # keypoint + bbox + source image). This lets us split them as a set
-    # and guarantee val ≥ 1 when possible.
+    # First pass: figure out which frames ARE exportable (have ≥1 instance
+    # with labeled keypoints + bbox + source image). In multi-subject mode
+    # each frame's .txt gets N lines (one per instance with usable kps).
+    # A frame is skipped only if NO instance has any usable keypoint.
     exportable: dict[int, dict] = {}
     skipped_no_labels = 0
     skipped_no_bbox = 0
     skipped_missing_image = 0
+    total_instances_written = 0
 
     for f in review.get("frames", []):
         idx = int(f["frame_idx"])
-        bbox = f.get("head_bbox")
-        keypoints = f.get("keypoints") or []
         frame_w = f.get("frame_width")
         frame_h = f.get("frame_height")
-
-        if bbox is None or frame_w is None or frame_h is None:
+        if frame_w is None or frame_h is None:
             skipped_no_bbox += 1
             continue
-        label_line = _yolo_label_line(
-            bbox, keypoints, frame_w, frame_h, pseudo=pseudo,
-        )
-        if label_line is None:
+
+        label_lines: list[str] = []
+        for inst in f.get("instances") or []:
+            bbox = inst.get("head_bbox")
+            keypoints = inst.get("keypoints") or []
+            if bbox is None:
+                continue
+            line = _yolo_label_line(
+                bbox, keypoints, frame_w, frame_h, pseudo=pseudo,
+            )
+            if line is not None:
+                label_lines.append(line)
+
+        if not label_lines:
             skipped_no_labels += 1
             continue
+
         img_src = frames_src / f"frame{idx:04d}.jpg"
         if not img_src.exists():
             skipped_missing_image += 1
             continue
 
-        exportable[idx] = {"label_line": label_line, "img_src": img_src}
+        exportable[idx] = {"label_lines": label_lines, "img_src": img_src}
+        total_instances_written += len(label_lines)
 
     if not exportable:
         return {
@@ -190,7 +201,7 @@ def _export_one_video(
             "skipped_no_labels": skipped_no_labels,
             "skipped_no_bbox": skipped_no_bbox,
             "skipped_missing_image": skipped_missing_image,
-            "skipped_reason": "no reviewed keypoints (v=2)",
+            "skipped_reason": "no reviewed keypoints (v=2) on any instance",
         }
 
     # Second pass: deterministic split with min-1-val guarantee when possible.
@@ -213,12 +224,13 @@ def _export_one_video(
         img_dst = dataset_dir / split / "images" / f"{stem}.jpg"
         lbl_dst = dataset_dir / split / "labels" / f"{stem}.txt"
         shutil.copyfile(payload["img_src"], img_dst)
-        lbl_dst.write_text(payload["label_line"] + "\n")
+        lbl_dst.write_text("\n".join(payload["label_lines"]) + "\n")
         exported[split] += 1
 
     return {
         "video_id": video_id,
         "exported": exported,
+        "instances_written": total_instances_written,
         "skipped_no_labels": skipped_no_labels,
         "skipped_no_bbox": skipped_no_bbox,
         "skipped_missing_image": skipped_missing_image,

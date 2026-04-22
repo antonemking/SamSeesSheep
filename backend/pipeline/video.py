@@ -227,6 +227,131 @@ def _mask_from_logits(
     return mask
 
 
+def _build_head_instance(
+    head_oid: int,
+    head_out_i: dict,
+    ear_out_i: dict,
+    nose_out_i: Optional[dict],
+    ear_left_oid: Optional[int],
+    ear_right_oid: Optional[int],
+    fw: int, fh: int,
+) -> Optional[dict]:
+    """Build one instance dict for a single head obj_id in a single frame.
+
+    Returns None if the head has no mask or the mask is empty. Used for
+    secondary heads in multi-subject mode; the primary head's instance is
+    assembled inline in the main per-frame loop (which also computes the
+    chart's ear-angle fields from the same head).
+
+    Output keys: obj_id, head_bbox, candidate_keypoints, head_confidence.
+    No midline / angle fields — those live frame-level, on the primary.
+    """
+    from backend.pipeline.ear_angle import (
+        _extract_ear_keypoints,
+        _mask_centroid,
+    )
+
+    head_t = head_out_i["obj_id_to_mask"].get(head_oid)
+    if head_t is None:
+        return None
+    head_mask = _mask_from_logits(head_t, target_size=(fh, fw))
+    if head_mask.sum() == 0:
+        return None
+    coords = np.where(head_mask > 127)
+    head_bbox = {
+        "x": int(coords[1].min()),
+        "y": int(coords[0].min()),
+        "w": int(coords[1].max() - coords[1].min()),
+        "h": int(coords[0].max() - coords[0].min()),
+    }
+    dilated_head = cv2.dilate(
+        head_mask, np.ones((15, 15), np.uint8), iterations=1,
+    ) > 127
+
+    left_mask, right_mask = None, None
+    for oid, mt in ear_out_i["obj_id_to_mask"].items():
+        if oid not in {ear_left_oid, ear_right_oid}:
+            continue
+        m = _mask_from_logits(mt, target_size=(fh, fw))
+        if m.sum() < 50:
+            continue
+        eb = m > 127
+        cs = np.where(eb)
+        cy, cx = int(cs[0].mean()), int(cs[1].mean())
+        if (not dilated_head[cy, cx]
+                and (eb & dilated_head).sum() / max(1, eb.sum()) < 0.15):
+            continue
+        if oid == ear_left_oid:
+            left_mask = m
+        elif oid == ear_right_oid:
+            right_mask = m
+    lb = (left_mask > 127) if left_mask is not None else None
+    rb = (right_mask > 127) if right_mask is not None else None
+
+    # Nose attached to this head (centroid inside this head's bbox).
+    # The primary gets explicit nose-tracking via primary_nose; secondaries
+    # settle for "any nose obj whose centroid falls inside my bbox."
+    nose_bool = None
+    if nose_out_i is not None:
+        ymin, xmin = coords[0].min(), coords[1].min()
+        ymax, xmax = coords[0].max(), coords[1].max()
+        for nose_oid, mt in nose_out_i["obj_id_to_mask"].items():
+            nm = _mask_from_logits(mt, target_size=(fh, fw))
+            mc = np.where(nm > 127)
+            if len(mc[0]) <= 20:
+                continue
+            ncy, ncx = mc[0].mean(), mc[1].mean()
+            if ymin <= ncy <= ymax and xmin <= ncx <= xmax:
+                nose_bool = nm > 127
+                break
+
+    # Candidate keypoints (same image-space L/R convention as primary).
+    head_centroid_xy = _mask_centroid(head_mask > 127)
+    kps = [{"x": 0.0, "y": 0.0, "v": 0} for _ in range(5)]
+    if nose_bool is not None:
+        nc = _mask_centroid(nose_bool)
+        if nc is not None:
+            kps[0] = {"x": nc[0], "y": nc[1], "v": 1}
+    if head_centroid_xy is not None:
+        head_cx = head_centroid_xy[0]
+        detected = []
+        for mask in (lb, rb):
+            if mask is not None:
+                cx = float(np.where(mask)[1].mean())
+                detected.append((cx, mask))
+        sl_mask, sr_mask = None, None
+        if len(detected) == 2:
+            detected.sort(key=lambda t: t[0])
+            sl_mask = detected[0][1]
+            sr_mask = detected[1][1]
+        elif len(detected) == 1:
+            cx, mask = detected[0]
+            if cx < head_cx:
+                sl_mask = mask
+            else:
+                sr_mask = mask
+        if sl_mask is not None:
+            kp = _extract_ear_keypoints(sl_mask, head_centroid_xy)
+            if kp is not None:
+                (bx, by), (tx, ty) = kp
+                kps[1] = {"x": bx, "y": by, "v": 1}
+                kps[3] = {"x": tx, "y": ty, "v": 1}
+        if sr_mask is not None:
+            kp = _extract_ear_keypoints(sr_mask, head_centroid_xy)
+            if kp is not None:
+                (bx, by), (tx, ty) = kp
+                kps[2] = {"x": bx, "y": by, "v": 1}
+                kps[4] = {"x": tx, "y": ty, "v": 1}
+    return {
+        "obj_id": int(head_oid),
+        "head_bbox": head_bbox,
+        "candidate_keypoints": kps,
+        "head_confidence": float(
+            head_out_i["obj_id_to_score"].get(head_oid, 0) or 0
+        ),
+    }
+
+
 def analyze_video(
     video_path: Path,
     subject: str = "sheep",
@@ -492,6 +617,109 @@ def analyze_video(
     elif len(locked_ear_ids) == 1:
         locked_left_oid = next(iter(locked_ear_ids))
 
+    # === MULTI-SUBJECT: collect secondary tracked heads (schema v2) ===
+    #
+    # Past this point, `primary_head` is the "observability" head — its ear
+    # angles drive the frame-level chart and the GIF's title overlay. For
+    # training data, we emit `instances[]` per frame containing the primary
+    # plus every other head that appears in at least MIN_HEAD_FRAMES frames.
+    # This prevents the single-subject false-negative pathology: previously,
+    # unlabeled sheep in a labeled frame taught the model "don't detect here."
+    # With multi-subject labels, every visible sheep is a positive example.
+    min_head_frames = max(2, len(pil_frames) // 10)
+    head_frame_counts: dict[int, int] = {}
+    for fr in results_per_prompt[head_key]:
+        for oid, mask_t in fr["obj_id_to_mask"].items():
+            m = _mask_from_logits(mask_t, target_size=(frame_h, frame_w))
+            if m.sum() >= 50:
+                head_frame_counts[oid] = head_frame_counts.get(oid, 0) + 1
+    tracked_head_oids = {
+        oid for oid, c in head_frame_counts.items() if c >= min_head_frames
+    }
+    if primary_head is not None:
+        tracked_head_oids.add(primary_head)
+    secondary_head_oids = sorted(
+        tracked_head_oids - ({primary_head} if primary_head is not None else set())
+    )
+    logger.info(
+        "Multi-head: primary=%s, secondary=%s (min_frames=%d, counts=%s)",
+        primary_head, secondary_head_oids, min_head_frames,
+        dict(sorted(head_frame_counts.items(), key=lambda kv: -kv[1])[:10]),
+    )
+
+    # Per-head ear locking for secondaries — mirrors the primary logic above
+    # but scoped per head. `claimed_ear_oids` prevents two heads from
+    # "stealing" the same ear obj_id (happens when heads are close together).
+    claimed_ear_oids: set = set(locked_ear_ids)
+    secondary_head_to_ears: dict[int, set] = {}
+    for head_oid in secondary_head_oids:
+        ears_for_head: set = set()
+        for i in range(len(pil_frames)):
+            fw, fh = pil_frames[i].size
+            head_t = results_per_prompt[head_key][i]["obj_id_to_mask"].get(head_oid)
+            if head_t is None:
+                continue
+            hm = _mask_from_logits(head_t, target_size=(fh, fw))
+            if hm.sum() == 0:
+                continue
+            dilated = cv2.dilate(
+                hm, np.ones((15, 15), np.uint8), iterations=1,
+            ) > 127
+            cands = []
+            for ear_oid, mt in results_per_prompt[ear_key][i]["obj_id_to_mask"].items():
+                if ear_oid in claimed_ear_oids or ear_oid in ears_for_head:
+                    continue
+                m = _mask_from_logits(mt, target_size=(fh, fw))
+                if m.sum() < 50:
+                    continue
+                eb = m > 127
+                cs = np.where(eb)
+                cy, cx = int(cs[0].mean()), int(cs[1].mean())
+                if (not dilated[cy, cx]
+                        and (eb & dilated).sum() / max(1, eb.sum()) < 0.15):
+                    continue
+                score = results_per_prompt[ear_key][i]["obj_id_to_score"].get(ear_oid, 0)
+                cands.append((ear_oid, score))
+            cands.sort(key=lambda x: -x[1])
+            for ear_oid, _ in cands:
+                if len(ears_for_head) >= 2:
+                    break
+                ears_for_head.add(ear_oid)
+            if len(ears_for_head) >= 2:
+                break
+        secondary_head_to_ears[head_oid] = ears_for_head
+        claimed_ear_oids |= ears_for_head
+
+    # Per-head ear side assignment (screen-x) for secondaries.
+    secondary_head_to_ear_sides: dict[int, tuple] = {}
+    for head_oid in secondary_head_oids:
+        ears = secondary_head_to_ears.get(head_oid, set())
+        l_oid, r_oid = None, None
+        if len(ears) == 1:
+            l_oid = next(iter(ears))
+        elif len(ears) == 2:
+            for i in range(len(pil_frames)):
+                fw, fh = pil_frames[i].size
+                centroids = {}
+                for ear_oid in ears:
+                    mt = results_per_prompt[ear_key][i]["obj_id_to_mask"].get(ear_oid)
+                    if mt is None:
+                        continue
+                    m = _mask_from_logits(mt, target_size=(fh, fw))
+                    if m.sum() < 50:
+                        continue
+                    cs = np.where(m > 127)
+                    centroids[ear_oid] = float(cs[1].mean())
+                if len(centroids) == 2:
+                    by_x = sorted(centroids.keys(), key=lambda o: centroids[o])
+                    l_oid, r_oid = by_x[0], by_x[1]
+                    break
+        secondary_head_to_ear_sides[head_oid] = (l_oid, r_oid)
+    logger.info(
+        "Secondary ear locks: %s",
+        {h: {"left": ls[0], "right": ls[1]} for h, ls in secondary_head_to_ear_sides.items()},
+    )
+
     # Tracks the previous frame's head-up axis so we can flip PCA sign
     # ambiguities temporally. Ears-based disambiguation fails when ears
     # straddle the long axis; temporal continuity catches those.
@@ -500,6 +728,8 @@ def analyze_video(
     for i in range(len(pil_frames)):
         frame_data = {"frame_idx": i}
         frame_w, frame_h = pil_frames[i].size
+        frame_data["frame_width"] = frame_w
+        frame_data["frame_height"] = frame_h
 
         head_out = results_per_prompt[head_key][i]
         ear_out = results_per_prompt[ear_key][i]
@@ -509,8 +739,12 @@ def analyze_video(
             else None
         )
 
-        # Head mask. If primary_head was removed/suppressed or its mask is
-        # empty on this frame, we mark the frame as a tracking gap.
+        # === PRIMARY head processing ===
+        # Populates frame-level observability fields (ear angles, midline,
+        # head_confidence) used by the dashboard chart and the annotated
+        # GIF's title overlay. Also produces the primary's instance dict
+        # (or None if the primary head is missing in this frame).
+        primary_instance: Optional[dict] = None
         head_mask = None
         removed = head_out.get("removed_obj_ids") or set()
         if (primary_head is not None
@@ -525,189 +759,179 @@ def analyze_video(
             else:
                 frame_data["head_confidence"] = head_out["obj_id_to_score"].get(primary_head)
 
-        if head_mask is None:
-            frame_data["tracking_gap"] = True
-            per_frame.append(frame_data)
-            continue
-
-        frame_data["tracking_gap"] = False
-
-        # Head bbox (y_min, x_min, y_max, x_max in pixel coords)
-        coords = np.where(head_mask > 127)
-        head_bbox = (
-            coords[0].min(), coords[1].min(),
-            coords[0].max(), coords[1].max(),
-        )
-        # Emit as {x, y, w, h} top-left + size in pixel coords so the
-        # review UI can render it directly and the export endpoint can
-        # normalize to YOLO-pose center-xywh at write time.
-        frame_data["head_bbox"] = {
-            "x": int(head_bbox[1]),
-            "y": int(head_bbox[0]),
-            "w": int(head_bbox[3] - head_bbox[1]),
-            "h": int(head_bbox[2] - head_bbox[0]),
-        }
-
-        # Ears: look up each locked obj_id directly, assigning to the same
-        # left/right trace every frame. The dilated-head attachment filter
-        # rejects the rare case where a locked ear drifts away from the
-        # tracked head.
-        dilated_head = cv2.dilate(
-            head_mask, np.ones((15, 15), np.uint8), iterations=1,
-        ) > 127
-        left_ear_mask = None
-        right_ear_mask = None
-        for oid, mask_t in ear_out["obj_id_to_mask"].items():
-            if oid not in locked_ear_ids:
-                continue
-            m = _mask_from_logits(mask_t, target_size=(frame_h, frame_w))
-            if m.sum() < 50:
-                continue
-            ear_bool = m > 127
-            coords = np.where(ear_bool)
-            cy, cx = int(coords[0].mean()), int(coords[1].mean())
-            centroid_inside = dilated_head[cy, cx]
-            overlap_frac = (ear_bool & dilated_head).sum() / ear_bool.sum()
-            if not centroid_inside and overlap_frac < 0.15:
-                continue
-            score = ear_out["obj_id_to_score"].get(oid, 0)
-            if oid == locked_left_oid:
-                left_ear_mask = m
-                frame_data["left_ear_confidence"] = score
-            elif oid == locked_right_oid:
-                right_ear_mask = m
-                frame_data["right_ear_confidence"] = score
-
-        lb = (left_ear_mask > 127) if left_ear_mask is not None else None
-        rb = (right_ear_mask > 127) if right_ear_mask is not None else None
-        hb = head_mask > 127
-
-        # Nose mask for anatomical midline — preferred over head-PCA.
-        nose_mask_bool = None
-        if (primary_nose is not None
-                and nose_out is not None
-                and primary_nose in nose_out["obj_id_to_mask"]):
-            nm = _mask_from_logits(
-                nose_out["obj_id_to_mask"][primary_nose],
-                target_size=(frame_h, frame_w),
+        if head_mask is not None:
+            # Head bbox (y_min, x_min, y_max, x_max in pixel coords)
+            coords = np.where(head_mask > 127)
+            head_bbox_tuple = (
+                coords[0].min(), coords[1].min(),
+                coords[0].max(), coords[1].max(),
             )
-            mc = np.where(nm > 127)
-            if len(mc[0]) > 20:
-                cy, cx = mc[0].mean(), mc[1].mean()
-                if (head_bbox[0] <= cy <= head_bbox[2]
-                        and head_bbox[1] <= cx <= head_bbox[3]):
-                    nose_mask_bool = nm > 127
-                    frame_data["nose_confidence"] = nose_out["obj_id_to_score"].get(primary_nose)
+            primary_bbox = {
+                "x": int(head_bbox_tuple[1]),
+                "y": int(head_bbox_tuple[0]),
+                "w": int(head_bbox_tuple[3] - head_bbox_tuple[1]),
+                "h": int(head_bbox_tuple[2] - head_bbox_tuple[0]),
+            }
 
-        if lb is None and rb is None:
-            per_frame.append(frame_data)
-            continue
+            # Ears: look up each locked obj_id directly, assigning to the
+            # same left/right trace every frame. Dilated-head attachment
+            # filter rejects a locked ear drifting away from the tracked head.
+            dilated_head = cv2.dilate(
+                head_mask, np.ones((15, 15), np.uint8), iterations=1,
+            ) > 127
+            left_ear_mask = None
+            right_ear_mask = None
+            for oid, mask_t in ear_out["obj_id_to_mask"].items():
+                if oid not in locked_ear_ids:
+                    continue
+                m = _mask_from_logits(mask_t, target_size=(frame_h, frame_w))
+                if m.sum() < 50:
+                    continue
+                ear_bool = m > 127
+                cs = np.where(ear_bool)
+                cy, cx = int(cs[0].mean()), int(cs[1].mean())
+                centroid_inside = dilated_head[cy, cx]
+                overlap_frac = (ear_bool & dilated_head).sum() / ear_bool.sum()
+                if not centroid_inside and overlap_frac < 0.15:
+                    continue
+                score = ear_out["obj_id_to_score"].get(oid, 0)
+                if oid == locked_left_oid:
+                    left_ear_mask = m
+                    frame_data["left_ear_confidence"] = score
+                elif oid == locked_right_oid:
+                    right_ear_mask = m
+                    frame_data["right_ear_confidence"] = score
 
-        # Prefer nose-anchored midline (unambiguous, stable). Fall back to
-        # head-PCA midline when nose isn't detected on this frame.
-        midline_source = None
-        midline = _compute_anatomical_midline(nose_mask_bool, lb, rb)
-        if midline is not None:
-            midline_source = "nose"
-        else:
-            midline = _compute_head_midline_pca(hb, lb, rb)
-            midline_source = "head_pca" if midline is not None else None
-        if midline is None:
-            per_frame.append(frame_data)
-            continue
-        head_up_angle, head_center = midline
-        frame_data["midline_source"] = midline_source
+            lb = (left_ear_mask > 127) if left_ear_mask is not None else None
+            rb = (right_ear_mask > 127) if right_ear_mask is not None else None
+            hb = head_mask > 127
 
-        # Sign-flip guard only applies to the PCA fallback — anatomical is
-        # already unambiguous. Prevents the wobble-then-flip we used to see
-        # when ears straddled the head's long axis.
-        if midline_source == "head_pca" and prev_head_up_angle is not None:
-            diff = ((head_up_angle - prev_head_up_angle + 180) % 360) - 180
-            if abs(diff) > 90:
-                head_up_angle = (head_up_angle + 180) % 360
-                if head_up_angle > 180:
-                    head_up_angle -= 360
-                frame_data["midline_flipped"] = True
-        prev_head_up_angle = head_up_angle
+            # Nose mask for anatomical midline — preferred over head-PCA.
+            nose_mask_bool = None
+            if (primary_nose is not None
+                    and nose_out is not None
+                    and primary_nose in nose_out["obj_id_to_mask"]):
+                nm = _mask_from_logits(
+                    nose_out["obj_id_to_mask"][primary_nose],
+                    target_size=(frame_h, frame_w),
+                )
+                mc = np.where(nm > 127)
+                if len(mc[0]) > 20:
+                    cy, cx = mc[0].mean(), mc[1].mean()
+                    if (head_bbox_tuple[0] <= cy <= head_bbox_tuple[2]
+                            and head_bbox_tuple[1] <= cx <= head_bbox_tuple[3]):
+                        nose_mask_bool = nm > 127
+                        frame_data["nose_confidence"] = nose_out["obj_id_to_score"].get(primary_nose)
 
-        head_horizontal = head_up_angle - 90.0
-        frame_data["head_midline_angle_deg"] = head_up_angle
-
-        for side, ear_bool in (("left", lb), ("right", rb)):
-            if ear_bool is None:
-                continue
-            direction = _compute_ear_direction(ear_bool, head_center)
-            if direction is None:
-                continue
-            dx, dy = direction
-            world_angle = float(np.degrees(np.arctan2(-dy, dx)))
-            rel = _normalize_angle(world_angle - head_horizontal)
-            if side == "left":
-                rel = _normalize_angle(-rel + 180) if rel > 0 else _normalize_angle(-rel - 180)
-            frame_data[f"{side}_ear_angle_deg"] = rel
-            frame_data[f"{side}_ear_position"] = _classify_ear_position(rel).value
-
-        # Candidate keypoints for the YOLO-pose labeling pipeline.
-        # Schema: [nose, L-base, R-base, L-tip, R-tip], matching the
-        # flip_idx: [0, 2, 1, 4, 3] that training expects. Each slot is
-        # {"x": px, "y": py, "v": visibility} where visibility is:
-        #   0 = not derivable (mask missing)
-        #   1 = auto-derived from SAM 3 masks (awaiting human review)
-        #   2 = human-reviewed (set later by the labeling UI)
-        #
-        # IMPORTANT — image-space L/R convention.
-        # YOLO-pose with flip_idx=[0, 2, 1, 4, 3] expects "left" to mean
-        # screen-left in the current image, not the animal's anatomical
-        # left. So per frame, we assign the leftmost ear (smallest x) to
-        # slots 1/3 and the rightmost ear to slots 2/4. This is DIFFERENT
-        # from the chart's left/right, which stays pinned to a specific
-        # obj_id across the clip so each trace follows the same physical
-        # ear. The two concerns diverge intentionally.
-        head_centroid_xy = _mask_centroid(head_mask > 127)
-        kps = [{"x": 0.0, "y": 0.0, "v": 0} for _ in range(5)]
-        if nose_mask_bool is not None:
-            nc = _mask_centroid(nose_mask_bool)
-            if nc is not None:
-                kps[0] = {"x": nc[0], "y": nc[1], "v": 1}
-        if head_centroid_xy is not None:
-            # Assign each detected ear mask to the L or R slot based on its
-            # centroid's x-position relative to the head centroid's x.
-            # With both ears visible, smaller-x = L, larger-x = R. With only
-            # one ear (profile view), compare to head_center_x: ear on the
-            # left half of the head → L slot, right half → R slot.
-            head_cx = head_centroid_xy[0]
-            detected = []
-            for mask in (lb, rb):
-                if mask is not None:
-                    cx = float(np.where(mask)[1].mean())
-                    detected.append((cx, mask))
-            screen_left_mask = None
-            screen_right_mask = None
-            if len(detected) == 2:
-                detected.sort(key=lambda t: t[0])
-                screen_left_mask = detected[0][1]
-                screen_right_mask = detected[1][1]
-            elif len(detected) == 1:
-                cx, mask = detected[0]
-                if cx < head_cx:
-                    screen_left_mask = mask
+            # Midline + ear angles (frame-level observability). Skip when no
+            # ears detected; primary instance is still built from head+bbox+
+            # whatever ear keypoints we can compute.
+            if lb is not None or rb is not None:
+                midline_source = None
+                midline = _compute_anatomical_midline(nose_mask_bool, lb, rb)
+                if midline is not None:
+                    midline_source = "nose"
                 else:
-                    screen_right_mask = mask
-            if screen_left_mask is not None:
-                kp = _extract_ear_keypoints(screen_left_mask, head_centroid_xy)
-                if kp is not None:
-                    (bx, by), (tx, ty) = kp
-                    kps[1] = {"x": bx, "y": by, "v": 1}  # L-base (screen-left)
-                    kps[3] = {"x": tx, "y": ty, "v": 1}  # L-tip  (screen-left)
-            if screen_right_mask is not None:
-                kp = _extract_ear_keypoints(screen_right_mask, head_centroid_xy)
-                if kp is not None:
-                    (bx, by), (tx, ty) = kp
-                    kps[2] = {"x": bx, "y": by, "v": 1}  # R-base (screen-right)
-                    kps[4] = {"x": tx, "y": ty, "v": 1}  # R-tip  (screen-right)
-        frame_data["candidate_keypoints"] = kps
-        frame_data["frame_width"] = frame_w
-        frame_data["frame_height"] = frame_h
+                    midline = _compute_head_midline_pca(hb, lb, rb)
+                    midline_source = "head_pca" if midline is not None else None
+
+                if midline is not None:
+                    head_up_angle, head_center = midline
+                    frame_data["midline_source"] = midline_source
+                    if midline_source == "head_pca" and prev_head_up_angle is not None:
+                        diff = ((head_up_angle - prev_head_up_angle + 180) % 360) - 180
+                        if abs(diff) > 90:
+                            head_up_angle = (head_up_angle + 180) % 360
+                            if head_up_angle > 180:
+                                head_up_angle -= 360
+                            frame_data["midline_flipped"] = True
+                    prev_head_up_angle = head_up_angle
+                    head_horizontal = head_up_angle - 90.0
+                    frame_data["head_midline_angle_deg"] = head_up_angle
+
+                    for side, ear_bool in (("left", lb), ("right", rb)):
+                        if ear_bool is None:
+                            continue
+                        direction = _compute_ear_direction(ear_bool, head_center)
+                        if direction is None:
+                            continue
+                        dx, dy = direction
+                        world_angle = float(np.degrees(np.arctan2(-dy, dx)))
+                        rel = _normalize_angle(world_angle - head_horizontal)
+                        if side == "left":
+                            rel = (
+                                _normalize_angle(-rel + 180) if rel > 0
+                                else _normalize_angle(-rel - 180)
+                            )
+                        frame_data[f"{side}_ear_angle_deg"] = rel
+                        frame_data[f"{side}_ear_position"] = _classify_ear_position(rel).value
+
+            # Candidate keypoints for the primary (image-space L/R convention).
+            # Schema: [nose, L-base, R-base, L-tip, R-tip]. Visibility:
+            #   0 = not derivable, 1 = auto-derived from SAM, 2 = human-reviewed.
+            head_centroid_xy = _mask_centroid(head_mask > 127)
+            kps = [{"x": 0.0, "y": 0.0, "v": 0} for _ in range(5)]
+            if nose_mask_bool is not None:
+                nc = _mask_centroid(nose_mask_bool)
+                if nc is not None:
+                    kps[0] = {"x": nc[0], "y": nc[1], "v": 1}
+            if head_centroid_xy is not None:
+                head_cx = head_centroid_xy[0]
+                detected = []
+                for mask in (lb, rb):
+                    if mask is not None:
+                        cx = float(np.where(mask)[1].mean())
+                        detected.append((cx, mask))
+                screen_left_mask = None
+                screen_right_mask = None
+                if len(detected) == 2:
+                    detected.sort(key=lambda t: t[0])
+                    screen_left_mask = detected[0][1]
+                    screen_right_mask = detected[1][1]
+                elif len(detected) == 1:
+                    cx, mask = detected[0]
+                    if cx < head_cx:
+                        screen_left_mask = mask
+                    else:
+                        screen_right_mask = mask
+                if screen_left_mask is not None:
+                    kp = _extract_ear_keypoints(screen_left_mask, head_centroid_xy)
+                    if kp is not None:
+                        (bx, by), (tx, ty) = kp
+                        kps[1] = {"x": bx, "y": by, "v": 1}
+                        kps[3] = {"x": tx, "y": ty, "v": 1}
+                if screen_right_mask is not None:
+                    kp = _extract_ear_keypoints(screen_right_mask, head_centroid_xy)
+                    if kp is not None:
+                        (bx, by), (tx, ty) = kp
+                        kps[2] = {"x": bx, "y": by, "v": 1}
+                        kps[4] = {"x": tx, "y": ty, "v": 1}
+
+            primary_instance = {
+                "obj_id": int(primary_head),
+                "head_bbox": primary_bbox,
+                "candidate_keypoints": kps,
+                "head_confidence": float(
+                    head_out["obj_id_to_score"].get(primary_head, 0) or 0
+                ),
+            }
+
+        # === SECONDARY heads ===
+        # Each secondary head becomes an additional entry in instances[].
+        # No chart-driving fields; just {obj_id, head_bbox, keypoints,
+        # head_confidence}.
+        instances: list[dict] = []
+        if primary_instance is not None:
+            instances.append(primary_instance)
+        for head_oid in secondary_head_oids:
+            el, er = secondary_head_to_ear_sides.get(head_oid, (None, None))
+            inst = _build_head_instance(
+                head_oid, head_out, ear_out, nose_out, el, er, frame_w, frame_h,
+            )
+            if inst is not None:
+                instances.append(inst)
+        frame_data["instances"] = instances
+        frame_data["tracking_gap"] = (len(instances) == 0)
 
         per_frame.append(frame_data)
 
@@ -727,16 +951,21 @@ def analyze_video(
     logger.info("Video analysis: %d frames in %.1fs", len(pil_frames), elapsed)
 
     # Keypoint coverage log — helps the labeler see how much auto-annotation
-    # is usable vs. will need manual placement.
+    # is usable vs. will need manual placement. In multi-subject mode this
+    # counts slot-hits across every instance in every frame; the denominator
+    # is (n_instances × n_frames) rather than just n_frames.
     kp_names = ["nose", "L_base", "R_base", "L_tip", "R_tip"]
     kp_coverage = [0] * 5
+    total_instance_frames = 0
     for f in per_frame:
-        for k, kp in enumerate(f.get("candidate_keypoints") or []):
-            if kp.get("v", 0) > 0:
-                kp_coverage[k] += 1
+        for inst in f.get("instances") or []:
+            total_instance_frames += 1
+            for k, kp in enumerate(inst.get("candidate_keypoints") or []):
+                if kp.get("v", 0) > 0:
+                    kp_coverage[k] += 1
     logger.info(
-        "Keypoint auto-coverage over %d frames: %s",
-        len(per_frame),
+        "Keypoint auto-coverage over %d instance-frames: %s",
+        total_instance_frames,
         ", ".join(f"{n}={c}" for n, c in zip(kp_names, kp_coverage)),
     )
 
@@ -825,46 +1054,69 @@ def _persist_label_artifacts(
         )
         return
 
-    # Seed review.json with candidate state. Each keypoint carries two flags:
+    # Seed review.json with multi-subject candidate state (schema v2).
+    #
+    # Per-frame structure:
+    #   {frame_idx, frame_path, frame_width, frame_height, tracking_gap,
+    #    instances: [{obj_id, head_bbox, keypoints: [5]}, ...]}
+    #
+    # Each keypoint carries two flags:
     #   auto_v: what SAM 3 derived (0 missing, 1 derived) — immutable record
     #   v:      current state in the review workflow (0, 1, or 2=reviewed)
     # The exporter only trusts v=2; see LOG.md in sheep-yolo/sheep-seg-conversation
     # for the YOLO-pose v-flag mapping.
     frames_out = []
     for i, f in enumerate(per_frame):
-        kps = f.get("candidate_keypoints") or []
-        review_kps = []
-        for kp in kps:
-            v = int(kp.get("v", 0))
-            review_kps.append({
-                "x": float(kp.get("x", 0.0)),
-                "y": float(kp.get("y", 0.0)),
-                "v": v,
-                "auto_v": v,
+        instances_out = []
+        for inst in f.get("instances") or []:
+            kps = inst.get("candidate_keypoints") or []
+            review_kps = []
+            for kp in kps:
+                v = int(kp.get("v", 0))
+                review_kps.append({
+                    "x": float(kp.get("x", 0.0)),
+                    "y": float(kp.get("y", 0.0)),
+                    "v": v,
+                    "auto_v": v,
+                })
+            instances_out.append({
+                "obj_id": int(inst.get("obj_id")),
+                "head_bbox": inst.get("head_bbox"),
+                "head_confidence": inst.get("head_confidence"),
+                "keypoints": review_kps,
             })
         frames_out.append({
             "frame_idx": i,
             "frame_path": f"frames/frame{i:04d}.jpg",
             "tracking_gap": bool(f.get("tracking_gap", True)),
-            "head_bbox": f.get("head_bbox"),
             "frame_width": f.get("frame_width"),
             "frame_height": f.get("frame_height"),
-            "keypoints": review_kps,
+            "instances": instances_out,
         })
+
+    # Collect all obj_ids that appear anywhere in the clip; the UI uses this
+    # to assign stable colors per sheep without rescanning every frame.
+    all_obj_ids = sorted({
+        int(inst["obj_id"])
+        for f in frames_out
+        for inst in f["instances"]
+    })
 
     review_payload = {
         "video_id": video_id,
-        "schema_version": 1,
+        "schema_version": 2,
         "kpt_names": ["nose", "left_ear_base", "right_ear_base",
                       "left_ear_tip", "right_ear_tip"],
         "flip_idx": [0, 2, 1, 4, 3],
         "n_frames": len(per_frame),
+        "obj_ids": all_obj_ids,
         "frames": frames_out,
     }
     review_path.write_text(json.dumps(review_payload, indent=2))
+    n_instance_rows = sum(len(f["instances"]) for f in frames_out)
     logger.info(
-        "Seeded %s with %d frames of candidate keypoints",
-        review_path, len(per_frame),
+        "Seeded %s with %d frames, %d instance-rows across %d obj_ids",
+        review_path, len(per_frame), n_instance_rows, len(all_obj_ids),
     )
 
 

@@ -13,7 +13,7 @@ h1{font-family:'SF Mono',monospace;color:#3fb950;font-size:1.1rem;margin-bottom:
 .hidden{display:none!important}
 
 .stage{background:#161b22;border:1px solid #30363d;border-radius:6px;padding:1rem}
-.progress{font-size:.75rem;color:#8b949e;font-family:'SF Mono',monospace;margin-bottom:.75rem;display:flex;gap:1.5rem;flex-wrap:wrap}
+.progress{font-size:.75rem;color:#8b949e;font-family:'SF Mono',monospace;margin-bottom:.75rem;display:flex;gap:1.5rem;flex-wrap:wrap;align-items:center}
 .progress-bar{flex:1;height:6px;background:#30363d;border-radius:3px;overflow:hidden;min-width:200px;align-self:center}
 .progress-bar-fill{height:100%;background:#3fb950;transition:width .25s}
 
@@ -24,8 +24,20 @@ h1{font-family:'SF Mono',monospace;color:#3fb950;font-size:1.1rem;margin-bottom:
 .kp-dot{cursor:grab;transition:r .1s}
 .kp-dot:hover{r:9}
 .kp-dot.dragging{cursor:grabbing;r:10}
+.kp-dot.inactive{cursor:pointer;opacity:.35}
+.kp-dot.inactive:hover{opacity:.7}
 .kp-label{font-family:'SF Mono',monospace;font-size:9px;fill:#e6edf3;pointer-events:none;text-shadow:0 1px 2px #000}
 .kp-unplaced{opacity:.55;stroke-dasharray:3,2}
+
+.bbox-inactive{cursor:pointer;transition:stroke-opacity .15s}
+.bbox-inactive:hover{stroke-opacity:1.0}
+
+.instance-bar{display:flex;gap:.4rem;flex-wrap:wrap;margin:.5rem 0;font-family:'SF Mono',monospace;font-size:.75rem}
+.inst-pill{padding:.25rem .6rem;border-radius:999px;border:1px solid #30363d;background:#0d1117;cursor:pointer;display:inline-flex;gap:.35rem;align-items:center}
+.inst-pill:hover{border-color:#8b949e}
+.inst-pill.active{border-width:2px;padding:calc(.25rem - 1px) calc(.6rem - 1px)}
+.inst-pill.done{color:#3fb950}
+.inst-swatch{width:10px;height:10px;border-radius:50%}
 
 .legend{display:flex;gap:.75rem;flex-wrap:wrap;font-size:.7rem;margin-top:.6rem;color:#8b949e}
 .legend-item{display:inline-flex;align-items:center;gap:.3rem}
@@ -50,10 +62,10 @@ h1{font-family:'SF Mono',monospace;color:#3fb950;font-size:1.1rem;margin-bottom:
 </head>
 <body>
 <h1>Keypoint labeler</h1>
-<p class="sub">5 points per sheep head. Drag a dot onto the anatomy (sets v=2). If a keypoint is occluded or out-of-frame, <strong>leave it dashed at bbox center (v=0)</strong> — the exporter will skip it and training learns from the visible keypoints only. Do not guess positions for invisible keypoints.
-  <br><strong>Nose:</strong> drop it on the <em>tip of the muzzle</em> — the most forward-projecting point, where the nostrils are. Not the top of the muzzle, not the nostril center.
-  <br><strong>Ear base:</strong> where the ear meets the skull. <strong>Ear tip:</strong> the distal-most point of the ear.
-  <br><strong>L / R are image-space:</strong> "L-base" = the ear on the <em>left side of the screen</em> in this frame, not the animal's anatomical left. When the sheep turns around, the physical ear behind each slot changes — that's correct.
+<p class="sub">5 points per sheep. Drag a dot onto the anatomy (sets v=2). If a keypoint is occluded or out-of-frame, <strong>leave it dashed at bbox center (v=0)</strong> — training skips it and learns from the visible keypoints only. Do not guess positions for invisible keypoints.
+  <br><strong>Multi-subject:</strong> each sheep is a separate instance under the same video_id. Click a sheep's bbox or a dimmed dot to make that sheep active — active sheep's 5 dots are draggable, others render dimmed. The pills above the frame let you switch too.
+  <br><strong>Nose:</strong> tip of the muzzle (most forward-projecting point, where the nostrils are). <strong>Ear base:</strong> where ear meets skull. <strong>Ear tip:</strong> distal-most point.
+  <br><strong>L / R are image-space:</strong> "L-base" = ear on the <em>left side of the screen</em> in this frame, not the animal's anatomical left.
   <br><a href="/" style="font-size:.7rem">← dashboard</a></p>
 
 <div class="stage">
@@ -63,6 +75,8 @@ h1{font-family:'SF Mono',monospace;color:#3fb950;font-size:1.1rem;margin-bottom:
     <span id="reviewed-label"></span>
   </div>
   <div id="frame-strip" style="display:flex;gap:2px;margin-bottom:.75rem;height:14px"></div>
+
+  <div class="instance-bar" id="instance-bar"></div>
 
   <div class="frame-wrap" id="stage-wrap">
     <img id="frame-img">
@@ -77,29 +91,57 @@ h1{font-family:'SF Mono',monospace;color:#3fb950;font-size:1.1rem;margin-bottom:
     <button class="btn" id="btn-prev">← Prev</button>
     <button class="btn primary" id="btn-save-next">Save &amp; Next →</button>
     <button class="btn warn" id="btn-skip">Skip (leave as-is)</button>
-    <button class="btn" id="btn-accept-all">Accept candidates as-is (v=2)</button>
-    <button class="btn danger" id="btn-reset">Reset to SAM auto</button>
+    <button class="btn" id="btn-accept-all">Accept active sheep's candidates as-is (v=2)</button>
+    <button class="btn danger" id="btn-reset">Reset active sheep to SAM auto</button>
   </div>
-  <div class="hint">Keyboard: ← / → navigate · Enter = Save &amp; Next · S = Skip · A = Accept candidates · R = Reset</div>
+  <div class="hint">Keyboard: ← / → navigate frames · Tab = next sheep · Enter = Save &amp; Next · S = Skip · A = Accept active · R = Reset active</div>
 </div>
 
 <script>
+// Keypoint slot metadata. Colors are per-slot, NOT per-sheep — same slot
+// is the same color across every instance so the reviewer can pattern-match
+// "yellow = nose" regardless of which sheep is active.
 const KP_META = [
-  {idx: 0, name: 'nose',           color: '#e3b341'},  // yellow
-  {idx: 1, name: 'L-base',         color: '#58a6ff'},  // blue
-  {idx: 2, name: 'R-base',         color: '#f0883e'},  // orange
-  {idx: 3, name: 'L-tip',          color: '#79c0ff'},  // light blue
-  {idx: 4, name: 'R-tip',          color: '#ff7b72'},  // red
+  {idx: 0, name: 'nose',   color: '#e3b341'},
+  {idx: 1, name: 'L-base', color: '#58a6ff'},
+  {idx: 2, name: 'R-base', color: '#f0883e'},
+  {idx: 3, name: 'L-tip',  color: '#79c0ff'},
+  {idx: 4, name: 'R-tip',  color: '#ff7b72'},
+];
+
+// Per-sheep accent colors for bbox borders + instance pills. Track-id
+// indexes into this array modulo length. Not a full-palette visual code —
+// just enough variety to distinguish 2-6 sheep at a glance.
+const INST_COLORS = [
+  '#3fb950', '#d29922', '#f85149', '#bc8cff', '#2ea7e0', '#ec6cb9', '#a371f7'
 ];
 
 const $ = id => document.getElementById(id);
 const VIDEO_ID = location.pathname.split('/').pop();
 
-let state = null;     // the full review.json payload
-let frameIdx = 0;     // which frame we're on
-let currentKps = null; // mutable working copy for this frame (before save)
-let dragging = null;  // {i, dx, dy} while dragging
+let state = null;            // the full review.json payload (schema v2)
+let frameIdx = 0;            // which frame we're on
+let activeInstanceIdx = 0;   // which entry in currentInstances is editable
+let currentInstances = null; // mutable working copy for this frame (before save)
+let dragging = null;         // {kpIdx} while dragging
 let imgNaturalW = 0, imgNaturalH = 0;
+
+// Map obj_id → color index, stable across the whole video based on the order
+// obj_ids appear in state.obj_ids. New obj_ids we haven't seen fall back to
+// the end of the list.
+function instanceColor(objId) {
+  const ids = (state && state.obj_ids) || [];
+  const i = ids.indexOf(objId);
+  return INST_COLORS[(i >= 0 ? i : ids.length) % INST_COLORS.length];
+}
+
+function instanceReviewed(inst) {
+  return (inst.keypoints || []).some(k => k.v === 2);
+}
+
+function frameReviewed(frame) {
+  return (frame.instances || []).some(instanceReviewed);
+}
 
 async function loadState() {
   const r = await fetch(`/api/label/${VIDEO_ID}`);
@@ -108,21 +150,22 @@ async function loadState() {
     return;
   }
   state = await r.json();
+  if ((state.schema_version || 1) < 2) {
+    $('status-line').textContent = `Unsupported schema_version=${state.schema_version}; expected ≥2. Re-run /api/analyze/video to regenerate.`;
+    return;
+  }
   $('vid-label').textContent = `video: ${state.video_id}`;
   renderLegend();
 
-  // Land on the first frame that's (a) not a tracking gap AND (b) has no
-  // v=2 keypoints yet — i.e., the next frame that needs review. If every
-  // frame is already reviewed, fall back to the first non-gap frame so
-  // the user can still inspect their work.
+  // Land on the first frame that has instances AND isn't fully reviewed.
+  // Fall back to the first non-gap frame so the user can still inspect.
   frameIdx = 0;
   let firstUnreviewed = -1, firstNonGap = -1;
   for (let i = 0; i < state.frames.length; i++) {
     const f = state.frames[i];
-    if (f.tracking_gap) continue;
+    if (f.tracking_gap || !(f.instances || []).length) continue;
     if (firstNonGap < 0) firstNonGap = i;
-    const reviewed = (f.keypoints || []).some(k => k.v === 2);
-    if (!reviewed) { firstUnreviewed = i; break; }
+    if (!frameReviewed(f)) { firstUnreviewed = i; break; }
   }
   frameIdx = firstUnreviewed >= 0 ? firstUnreviewed
            : firstNonGap >= 0    ? firstNonGap
@@ -138,10 +181,29 @@ function renderLegend() {
 
 function renderFrame() {
   const f = state.frames[frameIdx];
-  currentKps = f.keypoints.map(k => ({...k}));
-  $('frame-label').textContent = `frame ${frameIdx + 1} / ${state.n_frames}${f.tracking_gap ? ' (tracking gap)' : ''}`;
+  // Deep-copy instances so edits are local until Save.
+  currentInstances = (f.instances || []).map(inst => ({
+    obj_id: inst.obj_id,
+    head_bbox: inst.head_bbox,
+    keypoints: (inst.keypoints || []).map(k => ({...k})),
+  }));
+  // Clamp activeInstanceIdx into range; prefer the first unreviewed instance.
+  if (currentInstances.length === 0) {
+    activeInstanceIdx = 0;
+  } else {
+    let preferred = currentInstances.findIndex(i => !instanceReviewed(i));
+    if (preferred < 0) preferred = 0;
+    activeInstanceIdx = Math.min(activeInstanceIdx, currentInstances.length - 1);
+    if (activeInstanceIdx < 0 || !currentInstances[activeInstanceIdx]) {
+      activeInstanceIdx = preferred;
+    }
+  }
+  $('frame-label').textContent = `frame ${frameIdx + 1} / ${state.n_frames}` +
+    (f.tracking_gap ? ' (tracking gap)' : '') +
+    (currentInstances.length > 0 ? ` · ${currentInstances.length} sheep` : '');
   updateReviewedCounter();
   renderFrameStrip();
+  renderInstanceBar();
 
   const img = $('frame-img');
   img.onload = () => {
@@ -153,10 +215,7 @@ function renderFrame() {
 }
 
 function updateReviewedCounter() {
-  // A frame is "reviewed" if ANY keypoint has v=2 (user placed it).
-  const reviewed = state.frames.filter(fr =>
-    (fr.keypoints || []).some(k => k.v === 2)
-  ).length;
+  const reviewed = state.frames.filter(frameReviewed).length;
   $('reviewed-label').textContent = `${reviewed} / ${state.n_frames} frames reviewed`;
   renderFrameStrip();
 }
@@ -170,13 +229,39 @@ function renderFrameStrip() {
     cell.style.borderRadius = '2px';
     cell.style.cursor = 'pointer';
     cell.style.border = (i === frameIdx) ? '1px solid #e6edf3' : '1px solid transparent';
-    const reviewed = (f.keypoints || []).some(k => k.v === 2);
-    if (f.tracking_gap)    cell.style.background = '#484f58';  // grey — tracking gap
-    else if (reviewed)     cell.style.background = '#3fb950';  // green — reviewed
-    else                   cell.style.background = '#21262d';  // dark — pending
-    cell.title = `frame ${i + 1}${f.tracking_gap ? ' (gap)' : reviewed ? ' (reviewed)' : ' (pending)'}`;
+    const reviewed = frameReviewed(f);
+    const hasInstances = (f.instances || []).length > 0;
+    if (f.tracking_gap || !hasInstances) cell.style.background = '#484f58';
+    else if (reviewed)                   cell.style.background = '#3fb950';
+    else                                 cell.style.background = '#21262d';
+    cell.title = `frame ${i + 1}` + (
+      (f.tracking_gap || !hasInstances) ? ' (no tracked sheep)'
+      : reviewed ? ` (${(f.instances || []).filter(instanceReviewed).length}/${(f.instances || []).length} sheep reviewed)`
+      : ' (pending)'
+    );
     cell.onclick = () => goto(i);
     strip.appendChild(cell);
+  });
+}
+
+function renderInstanceBar() {
+  const bar = $('instance-bar');
+  bar.innerHTML = '';
+  if (currentInstances.length === 0) {
+    bar.innerHTML = '<span style="color:#484f58">No tracked sheep in this frame.</span>';
+    return;
+  }
+  currentInstances.forEach((inst, idx) => {
+    const color = instanceColor(inst.obj_id);
+    const done = instanceReviewed(inst);
+    const pill = document.createElement('span');
+    pill.className = 'inst-pill' + (idx === activeInstanceIdx ? ' active' : '') + (done ? ' done' : '');
+    pill.style.borderColor = color;
+    pill.innerHTML =
+      `<span class="inst-swatch" style="background:${color}"></span>` +
+      `obj ${inst.obj_id}` + (done ? ' ✓' : '');
+    pill.onclick = () => { activeInstanceIdx = idx; renderOverlay(); renderInstanceBar(); };
+    bar.appendChild(pill);
   });
 }
 
@@ -188,62 +273,88 @@ function renderOverlay() {
   svg.setAttribute('preserveAspectRatio', 'none');
   svg.innerHTML = '';
 
-  // Head bbox
-  if (f.head_bbox) {
-    const b = f.head_bbox;
+  // Draw every instance's bbox. Inactive ones are clickable to switch active.
+  currentInstances.forEach((inst, idx) => {
+    if (!inst.head_bbox) return;
+    const active = (idx === activeInstanceIdx);
+    const color = instanceColor(inst.obj_id);
+    const b = inst.head_bbox;
     const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
     rect.setAttribute('x', b.x);
     rect.setAttribute('y', b.y);
     rect.setAttribute('width', b.w);
     rect.setAttribute('height', b.h);
     rect.setAttribute('fill', 'none');
-    rect.setAttribute('stroke', '#3fb950');
-    rect.setAttribute('stroke-width', '1');
-    rect.setAttribute('stroke-dasharray', '4,3');
-    rect.setAttribute('opacity', '0.6');
-    svg.appendChild(rect);
-  }
-
-  // Keypoints
-  currentKps.forEach((kp, i) => {
-    const meta = KP_META[i];
-    let {x, y, v} = kp;
-    // If unplaced (v=0), park at bbox center so it's draggable onto the anatomy.
-    if (v === 0 && f.head_bbox) {
-      x = f.head_bbox.x + f.head_bbox.w / 2;
-      y = f.head_bbox.y + f.head_bbox.h / 2;
+    rect.setAttribute('stroke', color);
+    rect.setAttribute('stroke-width', active ? '2' : '1');
+    rect.setAttribute('stroke-dasharray', active ? '4,3' : '2,4');
+    rect.setAttribute('opacity', active ? '0.9' : '0.45');
+    if (!active) {
+      rect.classList.add('bbox-inactive');
+      rect.addEventListener('pointerdown', e => {
+        e.preventDefault();
+        activeInstanceIdx = idx;
+        renderOverlay();
+        renderInstanceBar();
+      });
     }
-    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-    g.setAttribute('data-kp-idx', i);
+    svg.appendChild(rect);
+  });
 
-    const circ = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-    circ.setAttribute('cx', x);
-    circ.setAttribute('cy', y);
-    circ.setAttribute('r', 7);
-    circ.setAttribute('fill', meta.color);
-    circ.setAttribute('fill-opacity', '0.35');
-    circ.setAttribute('stroke', meta.color);
-    circ.setAttribute('stroke-width', 2);
-    circ.classList.add('kp-dot');
-    if (v === 0) circ.classList.add('kp-unplaced');
-    g.appendChild(circ);
+  // Draw keypoints for every instance. Only the active instance's are
+  // draggable; inactive sheep's dots are dimmed and act as "click to
+  // activate that sheep" affordances.
+  currentInstances.forEach((inst, instIdx) => {
+    const active = (instIdx === activeInstanceIdx);
+    const bbox = inst.head_bbox;
+    (inst.keypoints || []).forEach((kp, kpIdx) => {
+      const meta = KP_META[kpIdx];
+      let {x, y, v} = kp;
+      if (v === 0 && bbox) {
+        x = bbox.x + bbox.w / 2;
+        y = bbox.y + bbox.h / 2;
+      }
+      const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      g.setAttribute('data-inst-idx', instIdx);
+      g.setAttribute('data-kp-idx', kpIdx);
 
-    const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-    label.setAttribute('x', x + 10);
-    label.setAttribute('y', y + 4);
-    label.textContent = `${i}`;
-    label.classList.add('kp-label');
-    g.appendChild(label);
+      const circ = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      circ.setAttribute('cx', x);
+      circ.setAttribute('cy', y);
+      circ.setAttribute('r', active ? 7 : 5);
+      circ.setAttribute('fill', meta.color);
+      circ.setAttribute('fill-opacity', active ? '0.35' : '0.15');
+      circ.setAttribute('stroke', meta.color);
+      circ.setAttribute('stroke-width', active ? 2 : 1);
+      circ.classList.add('kp-dot');
+      if (v === 0) circ.classList.add('kp-unplaced');
+      if (!active) circ.classList.add('inactive');
+      g.appendChild(circ);
 
-    svg.appendChild(g);
+      if (active) {
+        const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        label.setAttribute('x', x + 10);
+        label.setAttribute('y', y + 4);
+        label.textContent = `${kpIdx}`;
+        label.classList.add('kp-label');
+        g.appendChild(label);
+      }
+
+      svg.appendChild(g);
+    });
   });
 
   renderKpStatus();
 }
 
 function renderKpStatus() {
+  const inst = currentInstances[activeInstanceIdx];
+  if (!inst) {
+    $('kp-status').innerHTML = '<span style="color:#484f58">(no active sheep)</span>';
+    return;
+  }
   const cells = KP_META.map((m, i) => {
-    const v = currentKps[i].v;
+    const v = inst.keypoints[i].v;
     let cls = 'kp-status-item';
     let label = `${i}:${m.name}`;
     if (v === 2)      { cls += ' reviewed'; label += ' ✓'; }
@@ -251,7 +362,9 @@ function renderKpStatus() {
     else              { label += ' ·'; }
     return `<span class="${cls}">${label}</span>`;
   }).join('');
-  $('kp-status').innerHTML = cells;
+  $('kp-status').innerHTML =
+    `<span style="color:#8b949e;margin-right:.3rem">obj ${inst.obj_id}:</span>` +
+    cells;
 }
 
 // Drag handling — SVG event coords → frame coords via viewBox math.
@@ -267,8 +380,17 @@ function svgPoint(evt) {
 $('overlay').addEventListener('pointerdown', e => {
   const g = e.target.closest('g[data-kp-idx]');
   if (!g) return;
-  const i = parseInt(g.dataset.kpIdx, 10);
-  dragging = {i};
+  const instIdx = parseInt(g.dataset.instIdx, 10);
+  const kpIdx = parseInt(g.dataset.kpIdx, 10);
+  if (instIdx !== activeInstanceIdx) {
+    // Clicked a dimmed sheep's keypoint → switch active, don't drag.
+    e.preventDefault();
+    activeInstanceIdx = instIdx;
+    renderOverlay();
+    renderInstanceBar();
+    return;
+  }
+  dragging = {kpIdx};
   e.target.classList.add('dragging');
   $('overlay').setPointerCapture(e.pointerId);
 });
@@ -276,9 +398,10 @@ $('overlay').addEventListener('pointerdown', e => {
 $('overlay').addEventListener('pointermove', e => {
   if (!dragging) return;
   const p = svgPoint(e);
-  currentKps[dragging.i].x = Math.round(p.x * 10) / 10;
-  currentKps[dragging.i].y = Math.round(p.y * 10) / 10;
-  currentKps[dragging.i].v = 2;  // drag = human-placed
+  const kps = currentInstances[activeInstanceIdx].keypoints;
+  kps[dragging.kpIdx].x = Math.round(p.x * 10) / 10;
+  kps[dragging.kpIdx].y = Math.round(p.y * 10) / 10;
+  kps[dragging.kpIdx].v = 2;  // drag = human-placed
   renderOverlay();
 });
 
@@ -292,17 +415,32 @@ $('btn-prev').onclick = () => goto(frameIdx - 1);
 $('btn-save-next').onclick = async () => { await saveFrame(); goto(frameIdx + 1); };
 $('btn-skip').onclick = () => goto(frameIdx + 1);
 $('btn-accept-all').onclick = () => {
-  currentKps.forEach(kp => { if (kp.v >= 1) kp.v = 2; });
+  const inst = currentInstances[activeInstanceIdx];
+  if (!inst) return;
+  inst.keypoints.forEach(kp => { if (kp.v >= 1) kp.v = 2; });
   renderOverlay();
+  renderInstanceBar();
 };
 $('btn-reset').onclick = () => {
-  const f = state.frames[frameIdx];
-  currentKps = f.keypoints.map(k => ({...k, v: k.auto_v}));
+  const frameInst = state.frames[frameIdx].instances[activeInstanceIdx];
+  if (!frameInst) return;
+  currentInstances[activeInstanceIdx].keypoints =
+    (frameInst.keypoints || []).map(k => ({...k, v: k.auto_v}));
   renderOverlay();
+  renderInstanceBar();
 };
 
 async function saveFrame() {
-  const body = {keypoints: currentKps.map(k => ({x: k.x, y: k.y, v: k.v}))};
+  if (currentInstances.length === 0) {
+    $('status-line').textContent = 'No instances to save in this frame.';
+    return false;
+  }
+  const body = {
+    instances: currentInstances.map(inst => ({
+      obj_id: inst.obj_id,
+      keypoints: inst.keypoints.map(k => ({x: k.x, y: k.y, v: k.v})),
+    })),
+  };
   const r = await fetch(`/api/label/${VIDEO_ID}/frame/${frameIdx}`, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
@@ -313,15 +451,18 @@ async function saveFrame() {
     return false;
   }
   // Mirror the save into in-memory state so the counter + progress bar
-  // update without a full reload. auto_v is immutable so we leave it alone.
-  const stored = state.frames[frameIdx].keypoints;
-  currentKps.forEach((k, i) => {
-    stored[i].x = k.x;
-    stored[i].y = k.y;
-    stored[i].v = k.v;
-    // auto_v is preserved by the server; don't touch it here.
+  // update without a full reload. auto_v is immutable, server preserves it.
+  const stored = state.frames[frameIdx].instances;
+  currentInstances.forEach((inst, instIdx) => {
+    const s = stored[instIdx];
+    if (!s) return;
+    inst.keypoints.forEach((k, i) => {
+      s.keypoints[i].x = k.x;
+      s.keypoints[i].y = k.y;
+      s.keypoints[i].v = k.v;
+    });
   });
-  $('status-line').textContent = `Saved frame ${frameIdx + 1}.`;
+  $('status-line').textContent = `Saved frame ${frameIdx + 1} (${currentInstances.length} sheep).`;
   updateReviewedCounter();
   return true;
 }
@@ -337,6 +478,14 @@ window.addEventListener('keydown', async e => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
   if (e.key === 'ArrowLeft')  { e.preventDefault(); goto(frameIdx - 1); }
   if (e.key === 'ArrowRight') { e.preventDefault(); goto(frameIdx + 1); }
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    if (currentInstances.length > 0) {
+      activeInstanceIdx = (activeInstanceIdx + 1) % currentInstances.length;
+      renderOverlay();
+      renderInstanceBar();
+    }
+  }
   if (e.key === 'Enter')      { e.preventDefault(); await saveFrame(); goto(frameIdx + 1); }
   if (e.key.toLowerCase() === 's') { e.preventDefault(); goto(frameIdx + 1); }
   if (e.key.toLowerCase() === 'a') { e.preventDefault(); $('btn-accept-all').click(); }
