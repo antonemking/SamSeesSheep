@@ -2,7 +2,9 @@
 # Run on the RunPod pod to bring the sheep-seg server up.
 #
 # Handles the pain points from the first setup day:
-#   - Ensures labels dir is symlinked to the durable Network Volume
+#   - Installs rsync (RunPod pytorch image doesn't ship it)
+#   - Symlinks data/labels → durable Network Volume
+#   - Persists HF cache + auth on the volume (survives Terminate)
 #   - Ensures uv is installed and on PATH
 #   - Ensures venv exists and is synced
 #   - Sets PYTORCH_CUDA_ALLOC_CONF + SHEEPSEG_FULL_PIPELINE
@@ -14,7 +16,7 @@ set -e
 
 cd "$(dirname "$0")/.."
 
-# Load pod-side env (LABELS_VOLUME, etc.) if present
+# Load pod-side env (LABELS_VOLUME, HF_HOME, etc.) if present
 if [ -f .env.pod ]; then
   set -a
   # shellcheck disable=SC1091
@@ -22,7 +24,15 @@ if [ -f .env.pod ]; then
   set +a
 fi
 
-# 0. Durable labels dir on the Network Volume.
+# 0a. Install rsync if missing — needed for backup_dataset.sh on the laptop
+# to pull labels off the pod, and for the migration steps below. RunPod's
+# pytorch base image doesn't ship it.
+if ! command -v rsync >/dev/null 2>&1; then
+  echo "[startup] Installing rsync..."
+  apt-get update -qq && apt-get install -y rsync
+fi
+
+# 0b. Durable labels dir on the Network Volume.
 #
 # The dataset is the one piece of state that represents unrecoverable human
 # work. Container disk survives Stop/Resume but NOT Terminate or spot
@@ -73,14 +83,31 @@ else
   echo "[startup] data/labels → $LABELS_VOLUME (symlink created)"
 fi
 
-# 1. Install rsync if missing — needed for backup_dataset.sh on the laptop
-# to pull labels off the pod. RunPod's pytorch base image doesn't ship it.
-if ! command -v rsync >/dev/null 2>&1; then
-  echo "[startup] Installing rsync..."
-  apt-get update -qq && apt-get install -y rsync
-fi
+# 0c. HuggingFace cache on the volume.
+#
+# By default, HF libraries write auth token and downloaded models to
+# ~/.cache/huggingface/, which is on container disk — wiped on Terminate.
+# Putting HF_HOME on the volume means: across pod redeploys, the ~3 GB
+# SAM 3 download sticks around AND the auth token survives, so
+# `hf auth login` is a one-time cost per volume, not per pod.
+#
+# The variable is exported so child processes (uv run, uvicorn) inherit it.
+HF_HOME="${HF_HOME:-/workspace/.hf-cache}"
+export HF_HOME
 
-# 2. Install uv if missing (fresh pods sometimes lose it after redeploy)
+if [ ! -d "$HF_HOME" ]; then
+  mkdir -p "$HF_HOME"
+  # One-time migration: if a container-disk cache already exists (first
+  # run on a pod that downloaded SAM before this change landed), move it
+  # onto the volume so the download isn't wasted.
+  if [ -d "$HOME/.cache/huggingface" ] && [ -n "$(ls -A "$HOME/.cache/huggingface" 2>/dev/null)" ]; then
+    echo "[startup] Migrating existing HF cache → $HF_HOME ..."
+    rsync -a "$HOME/.cache/huggingface/" "$HF_HOME/"
+  fi
+fi
+echo "[startup] HF_HOME=$HF_HOME (on volume)"
+
+# 1. Install uv if missing (fresh pods sometimes lose it after redeploy)
 if [ ! -x "$HOME/.local/bin/uv" ]; then
   echo "[startup] Installing uv..."
   curl -LsSf https://astral.sh/uv/install.sh | sh
