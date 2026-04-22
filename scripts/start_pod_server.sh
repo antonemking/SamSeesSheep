@@ -73,7 +73,14 @@ else
   echo "[startup] data/labels → $LABELS_VOLUME (symlink created)"
 fi
 
-# 1. Install uv if missing (fresh pods sometimes lose it after redeploy)
+# 1. Install rsync if missing — needed for backup_dataset.sh on the laptop
+# to pull labels off the pod. RunPod's pytorch base image doesn't ship it.
+if ! command -v rsync >/dev/null 2>&1; then
+  echo "[startup] Installing rsync..."
+  apt-get update -qq && apt-get install -y rsync
+fi
+
+# 2. Install uv if missing (fresh pods sometimes lose it after redeploy)
 if [ ! -x "$HOME/.local/bin/uv" ]; then
   echo "[startup] Installing uv..."
   curl -LsSf https://astral.sh/uv/install.sh | sh
