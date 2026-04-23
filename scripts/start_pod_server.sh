@@ -94,16 +94,17 @@ fi
 # The variable is exported so child processes (uv run, uvicorn) inherit it.
 HF_HOME="${HF_HOME:-/workspace/.hf-cache}"
 export HF_HOME
+mkdir -p "$HF_HOME"
 
-if [ ! -d "$HF_HOME" ]; then
-  mkdir -p "$HF_HOME"
-  # One-time migration: if a container-disk cache already exists (first
-  # run on a pod that downloaded SAM before this change landed), move it
-  # onto the volume so the download isn't wasted.
-  if [ -d "$HOME/.cache/huggingface" ] && [ -n "$(ls -A "$HOME/.cache/huggingface" 2>/dev/null)" ]; then
-    echo "[startup] Migrating existing HF cache → $HF_HOME ..."
-    rsync -a "$HOME/.cache/huggingface/" "$HF_HOME/"
-  fi
+# Migrate any NEW container-disk HF state onto the volume every run.
+# Rationale: users sometimes `hf auth login` in an interactive shell
+# (without HF_HOME set), which writes ~/.cache/huggingface/token to
+# container disk. On next boot, without this sync, start_pod_server.sh
+# wouldn't see the token in HF_HOME and would warn "not logged in" even
+# though the user *did* log in. rsync is idempotent: nothing to do if
+# the files are already in sync.
+if [ -d "$HOME/.cache/huggingface" ] && [ -n "$(ls -A "$HOME/.cache/huggingface" 2>/dev/null)" ]; then
+  rsync -a "$HOME/.cache/huggingface/" "$HF_HOME/"
 fi
 echo "[startup] HF_HOME=$HF_HOME (on volume)"
 
