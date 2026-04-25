@@ -122,7 +122,7 @@ This follows the **trust deltas, not absolutes** principle: pairwise comparisons
 
 | Item | Method | Status |
 |---|---|---|
-| SAM 2.1 segmentation success rate on sheep faces in real pasture conditions | 30 phone photos across varied lighting/angles/distances; manual scoring | Pending |
+| SAM 3 segmentation success rate on sheep faces in real pasture conditions | 30 phone photos across varied lighting/angles/distances; manual scoring | Pending |
 | Annotator baseline (me) for ear-up vs. ear-down on still frames | 100 frames double-labeled with 1-week gap; intra-rater agreement | Pending |
 | Behavioral baseline observation of the 5 sheep | 2 hours unassisted notebook observation | Pending |
 

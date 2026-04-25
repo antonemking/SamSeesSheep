@@ -30,10 +30,6 @@ RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 LABELS_DIR.mkdir(parents=True, exist_ok=True)
 WEIGHTS_DIR.mkdir(parents=True, exist_ok=True)
 
-# SAM model config
-SAM_MODEL_TYPE = "sam2.1_hiera_large"
-SAM_CHECKPOINT = WEIGHTS_DIR / "sam2.1_hiera_large.pt"
-
 # Ear angle thresholds (derived from SPFES literature)
 # McLennan et al. 2019, Reefmann et al. 2009
 # Ear angle relative to dorsal head axis:
