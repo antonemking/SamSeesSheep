@@ -6,44 +6,53 @@
 <title>SamSeesSheep — Keypoint labeler</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0d1117;color:#e6edf3;line-height:1.5;max-width:900px;margin:0 auto;padding:1.5rem}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0d1117;color:#e6edf3;line-height:1.5;max-width:1280px;margin:0 auto;padding:1rem}
 a{color:#58a6ff}
 h1{font-family:'SF Mono',monospace;color:#3fb950;font-size:1.1rem;margin-bottom:.15rem}
-.sub{color:#8b949e;font-size:.75rem;margin-bottom:1rem}
+.sub{color:#8b949e;font-size:.75rem;margin-bottom:.75rem}
 .hidden{display:none!important}
 
-.stage{background:#161b22;border:1px solid #30363d;border-radius:6px;padding:1rem}
-.progress{font-size:.75rem;color:#8b949e;font-family:'SF Mono',monospace;margin-bottom:.75rem;display:flex;gap:1.5rem;flex-wrap:wrap;align-items:center}
-.progress-bar{flex:1;height:6px;background:#30363d;border-radius:3px;overflow:hidden;min-width:200px;align-self:center}
-.progress-bar-fill{height:100%;background:#3fb950;transition:width .25s}
+.stage{background:#161b22;border:1px solid #30363d;border-radius:6px}
+.topbar{position:sticky;top:0;z-index:20;background:rgba(22,27,34,.96);border-bottom:1px solid #30363d;padding:.65rem .8rem;backdrop-filter:blur(8px)}
+.progress{font-size:.75rem;color:#8b949e;font-family:'SF Mono',monospace;display:flex;gap:1rem;flex-wrap:wrap;align-items:center}
+.progress strong{color:#e6edf3;font-weight:700}
+.dirty{color:#d29922}
+#frame-strip{display:flex;gap:2px;margin-top:.55rem;height:14px}
+.workbench{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:.85rem;padding:.85rem}
+.side-panel{border-left:1px solid #30363d;padding-left:.85rem;min-width:0}
+.panel-title{font-size:.62rem;color:#3fb950;text-transform:uppercase;letter-spacing:.12em;font-weight:700;margin-bottom:.4rem}
 
-.frame-wrap{position:relative;display:inline-block;max-width:100%;background:#0d1117;border-radius:4px;user-select:none}
-.frame-wrap img{display:block;max-width:100%;border-radius:4px}
+.frame-wrap{position:relative;display:block;width:100%;background:#0d1117;border-radius:4px;user-select:none;cursor:crosshair}
+.frame-wrap img{display:block;width:100%;height:auto;border-radius:4px}
 .frame-wrap svg{position:absolute;top:0;left:0;width:100%;height:100%;overflow:visible}
 
-.kp-dot{cursor:grab;transition:r .1s}
+.kp-dot{cursor:grab;transition:r .1s,opacity .12s,stroke-width .12s}
 .kp-dot:hover{r:9}
 .kp-dot.dragging{cursor:grabbing;r:10}
 .kp-dot.inactive{cursor:pointer;opacity:.35}
 .kp-dot.inactive:hover{opacity:.7}
 .kp-label{font-family:'SF Mono',monospace;font-size:9px;fill:#e6edf3;pointer-events:none;text-shadow:0 1px 2px #000}
 .kp-unplaced{opacity:.55;stroke-dasharray:3,2}
+.kp-auto{stroke-dasharray:2,2}
+.kp-reviewed{fill-opacity:.7}
+.kp-active{stroke:#fff;stroke-width:3}
 
 .bbox-inactive{cursor:pointer;transition:stroke-opacity .15s}
 .bbox-inactive:hover{stroke-opacity:1.0}
 
-.instance-bar{display:flex;gap:.4rem;flex-wrap:wrap;margin:.5rem 0;font-family:'SF Mono',monospace;font-size:.75rem}
-.inst-pill{padding:.25rem .6rem;border-radius:999px;border:1px solid #30363d;background:#0d1117;cursor:pointer;display:inline-flex;gap:.35rem;align-items:center}
+.instance-bar{display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.85rem;font-family:'SF Mono',monospace;font-size:.75rem}
+.inst-pill{padding:.28rem .55rem;border-radius:999px;border:1px solid #30363d;background:#0d1117;cursor:pointer;display:inline-flex;gap:.35rem;align-items:center}
 .inst-pill:hover{border-color:#8b949e}
 .inst-pill.active{border-width:2px;padding:calc(.25rem - 1px) calc(.6rem - 1px)}
 .inst-pill.done{color:#3fb950}
 .inst-swatch{width:10px;height:10px;border-radius:50%}
+.inst-count{color:#8b949e}
 
-.legend{display:flex;gap:.75rem;flex-wrap:wrap;font-size:.7rem;margin-top:.6rem;color:#8b949e}
+.legend{display:flex;gap:.5rem;flex-wrap:wrap;font-size:.7rem;color:#8b949e;margin-bottom:.75rem}
 .legend-item{display:inline-flex;align-items:center;gap:.3rem}
 .legend-swatch{width:14px;height:14px;border-radius:50%;border:2px solid}
 
-.controls{margin-top:1rem;display:flex;gap:.5rem;flex-wrap:wrap;align-items:center}
+.controls{position:sticky;bottom:0;z-index:20;background:rgba(22,27,34,.96);border-top:1px solid #30363d;padding:.7rem .85rem;display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;backdrop-filter:blur(8px)}
 .btn{padding:.45rem 1rem;border-radius:4px;font-size:.8rem;font-weight:600;border:1px solid #30363d;cursor:pointer;background:#0d1117;color:#e6edf3;transition:border-color .15s}
 .btn:hover{border-color:#8b949e}
 .btn:disabled{opacity:.35;cursor:default}
@@ -51,13 +60,26 @@ h1{font-family:'SF Mono',monospace;color:#3fb950;font-size:1.1rem;margin-bottom:
 .btn.primary:hover{background:#1a3020}
 .btn.warn{border-color:#d29922;color:#d29922}
 .btn.danger{border-color:#f85149;color:#f85149}
-.hint{font-size:.65rem;color:#484f58;margin-top:.4rem;font-family:'SF Mono',monospace}
+.btn.toggle.active{border-color:#58a6ff;color:#58a6ff;background:rgba(88,166,255,.08)}
+.hint{font-size:.65rem;color:#484f58;font-family:'SF Mono',monospace;flex:1;min-width:260px}
 
-.status-line{font-size:.75rem;color:#8b949e;margin-top:.5rem;min-height:1em}
-.kp-status{display:flex;gap:.6rem;font-size:.7rem;color:#8b949e;margin-top:.3rem;font-family:'SF Mono',monospace;flex-wrap:wrap}
-.kp-status-item{padding:1px 6px;border-radius:3px;background:#21262d}
+.status-line{font-size:.75rem;color:#8b949e;margin-top:.65rem;min-height:1em;font-family:'SF Mono',monospace}
+.kp-status{display:grid;gap:.4rem;font-size:.72rem;color:#8b949e;font-family:'SF Mono',monospace}
+.kp-status-item{padding:.32rem .45rem;border-radius:4px;background:#21262d;border:1px solid transparent;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:.5rem;font:inherit;color:inherit;width:100%;text-align:left}
+.kp-status-item:hover{border-color:#8b949e}
+.kp-status-item.active{border-color:#e6edf3;color:#e6edf3;background:#30363d}
 .kp-status-item.reviewed{color:#3fb950;background:rgba(63,185,80,.12)}
 .kp-status-item.unplaced{color:#484f58}
+.kp-status-item.auto{color:#d29922;background:rgba(210,153,34,.1)}
+.kp-chip{display:inline-flex;align-items:center;gap:.35rem}
+.kp-key{color:#e6edf3}
+
+@media (max-width:900px){
+  body{padding:.5rem}
+  .workbench{display:block;padding:.6rem}
+  .side-panel{border-left:0;border-top:1px solid #30363d;padding-left:0;padding-top:.75rem;margin-top:.75rem}
+  .frame-wrap img{max-height:none}
+}
 </style>
 </head>
 <body>
@@ -69,32 +91,45 @@ h1{font-family:'SF Mono',monospace;color:#3fb950;font-size:1.1rem;margin-bottom:
   <br><a href="/" style="font-size:.7rem">← dashboard</a></p>
 
 <div class="stage">
-  <div class="progress">
-    <span id="vid-label">loading…</span>
-    <span id="frame-label"></span>
-    <span id="reviewed-label"></span>
-  </div>
-  <div id="frame-strip" style="display:flex;gap:2px;margin-bottom:.75rem;height:14px"></div>
-
-  <div class="instance-bar" id="instance-bar"></div>
-
-  <div class="frame-wrap" id="stage-wrap">
-    <img id="frame-img">
-    <svg id="overlay" xmlns="http://www.w3.org/2000/svg"></svg>
+  <div class="topbar">
+    <div class="progress">
+      <span id="vid-label">loading…</span>
+      <span id="frame-label"></span>
+      <span id="reviewed-label"></span>
+      <span id="active-label"></span>
+      <span id="dirty-label"></span>
+    </div>
+    <div id="frame-strip"></div>
   </div>
 
-  <div class="legend" id="legend"></div>
-  <div class="kp-status" id="kp-status"></div>
-  <div class="status-line" id="status-line"></div>
+  <div class="workbench">
+    <main>
+      <div class="frame-wrap" id="stage-wrap" title="Click to place the active keypoint. Drag dots to refine.">
+        <img id="frame-img">
+        <svg id="overlay" xmlns="http://www.w3.org/2000/svg"></svg>
+      </div>
+    </main>
+
+    <aside class="side-panel">
+      <div class="panel-title">Sheep</div>
+      <div class="instance-bar" id="instance-bar"></div>
+      <div class="panel-title">Keypoints</div>
+      <div class="legend" id="legend"></div>
+      <div class="kp-status" id="kp-status"></div>
+      <div class="status-line" id="status-line"></div>
+    </aside>
+  </div>
 
   <div class="controls">
-    <button class="btn" id="btn-prev">← Prev</button>
-    <button class="btn primary" id="btn-save-next">Save &amp; Next →</button>
-    <button class="btn warn" id="btn-skip">Skip (leave as-is)</button>
-    <button class="btn" id="btn-accept-all">Accept active sheep's candidates as-is (v=2)</button>
-    <button class="btn danger" id="btn-reset">Reset active sheep to SAM auto</button>
+    <button class="btn" id="btn-prev">Prev</button>
+    <button class="btn primary" id="btn-save-next">Save</button>
+    <button class="btn warn" id="btn-skip">Skip</button>
+    <button class="btn" id="btn-accept-all">Accept</button>
+    <button class="btn danger" id="btn-reset">Reset</button>
+    <button class="btn toggle" id="btn-hide-inactive">Hide inactive</button>
+    <button class="btn" id="btn-next-kp">Next point</button>
+    <div class="hint">Keys: 1-5 point · Space next point · Tab next incomplete sheep · H hide inactive · Enter save/advance · A accept · R reset · S skip</div>
   </div>
-  <div class="hint">Keyboard: ← / → navigate frames · Tab = next sheep · Enter = Save &amp; Next · S = Skip · A = Accept active · R = Reset active</div>
 </div>
 
 <script>
@@ -122,8 +157,11 @@ const VIDEO_ID = location.pathname.split('/').pop();
 let state = null;            // the full review.json payload (schema v2)
 let frameIdx = 0;            // which frame we're on
 let activeInstanceIdx = 0;   // which entry in currentInstances is editable
+let activeKpIdx = 0;         // which keypoint click placement targets
 let currentInstances = null; // mutable working copy for this frame (before save)
 let dragging = null;         // {kpIdx} while dragging
+let hideInactiveOverlays = false;
+let dirty = false;
 let imgNaturalW = 0, imgNaturalH = 0;
 
 // Map obj_id → color index, stable across the whole video based on the order
@@ -143,6 +181,99 @@ function frameReviewed(frame) {
   return (frame.instances || []).some(instanceReviewed);
 }
 
+function reviewedCount(inst) {
+  return (inst && inst.keypoints ? inst.keypoints : []).filter(k => k.v === 2).length;
+}
+
+function instanceComplete(inst) {
+  return reviewedCount(inst) >= KP_META.length;
+}
+
+function frameComplete(frame) {
+  const instances = frame.instances || [];
+  return instances.length > 0 && instances.every(instanceComplete);
+}
+
+function activeInstance() {
+  return currentInstances && currentInstances[activeInstanceIdx];
+}
+
+function firstIncompleteKp(inst, startIdx = 0) {
+  if (!inst || !inst.keypoints) return 0;
+  for (let offset = 0; offset < KP_META.length; offset++) {
+    const idx = (startIdx + offset) % KP_META.length;
+    if (inst.keypoints[idx] && inst.keypoints[idx].v !== 2) return idx;
+  }
+  return Math.min(activeKpIdx, KP_META.length - 1);
+}
+
+function setDirty(next) {
+  dirty = next;
+  const label = $('dirty-label');
+  if (label) {
+    label.textContent = dirty ? 'unsaved' : '';
+    label.className = dirty ? 'dirty' : '';
+  }
+}
+
+function updateActiveLabel() {
+  const inst = activeInstance();
+  if (!inst) {
+    $('active-label').textContent = '';
+    return;
+  }
+  const kp = KP_META[activeKpIdx];
+  $('active-label').innerHTML =
+    `<strong>obj ${inst.obj_id}</strong> ${reviewedCount(inst)}/5 · point ${kp.idx + 1}: ${kp.name}`;
+}
+
+function selectActiveKp(kpIdx) {
+  activeKpIdx = Math.max(0, Math.min(KP_META.length - 1, kpIdx));
+  renderOverlay();
+}
+
+function setActiveInstance(idx, keepKeypoint = false) {
+  if (!currentInstances || currentInstances.length === 0) return;
+  activeInstanceIdx = Math.max(0, Math.min(currentInstances.length - 1, idx));
+  if (!keepKeypoint) {
+    activeKpIdx = firstIncompleteKp(currentInstances[activeInstanceIdx], activeKpIdx);
+  }
+  renderOverlay();
+  renderInstanceBar();
+}
+
+function nextIncompleteInstanceIdx(startIdx = activeInstanceIdx + 1) {
+  if (!currentInstances || currentInstances.length === 0) return -1;
+  for (let offset = 0; offset < currentInstances.length; offset++) {
+    const idx = (startIdx + offset) % currentInstances.length;
+    if (!instanceComplete(currentInstances[idx])) return idx;
+  }
+  return -1;
+}
+
+function advanceActiveKeypoint() {
+  const inst = activeInstance();
+  if (!inst) return;
+  activeKpIdx = firstIncompleteKp(inst, activeKpIdx + 1);
+  renderOverlay();
+}
+
+function smartAdvanceAfterSave() {
+  const inst = activeInstance();
+  if (inst && !instanceComplete(inst)) {
+    activeKpIdx = firstIncompleteKp(inst, activeKpIdx);
+    renderOverlay();
+    renderInstanceBar();
+    return;
+  }
+  const nextInst = nextIncompleteInstanceIdx(activeInstanceIdx + 1);
+  if (nextInst >= 0 && nextInst !== activeInstanceIdx) {
+    setActiveInstance(nextInst);
+    return;
+  }
+  goto(frameIdx + 1);
+}
+
 async function loadState() {
   const r = await fetch(`/api/label/${VIDEO_ID}`);
   if (!r.ok) {
@@ -157,7 +288,7 @@ async function loadState() {
   $('vid-label').textContent = `video: ${state.video_id}`;
   renderLegend();
 
-  // Land on the first frame that has instances AND isn't fully reviewed.
+  // Land on the first frame that has instances AND isn't complete in the UI.
   // Fall back to the first non-gap frame so the user can still inspect.
   frameIdx = 0;
   let firstUnreviewed = -1, firstNonGap = -1;
@@ -165,7 +296,7 @@ async function loadState() {
     const f = state.frames[i];
     if (f.tracking_gap || !(f.instances || []).length) continue;
     if (firstNonGap < 0) firstNonGap = i;
-    if (!frameReviewed(f)) { firstUnreviewed = i; break; }
+    if (!frameComplete(f)) { firstUnreviewed = i; break; }
   }
   frameIdx = firstUnreviewed >= 0 ? firstUnreviewed
            : firstNonGap >= 0    ? firstNonGap
@@ -191,12 +322,14 @@ function renderFrame() {
   if (currentInstances.length === 0) {
     activeInstanceIdx = 0;
   } else {
-    let preferred = currentInstances.findIndex(i => !instanceReviewed(i));
+    let preferred = currentInstances.findIndex(i => !instanceComplete(i));
     if (preferred < 0) preferred = 0;
     activeInstanceIdx = Math.min(activeInstanceIdx, currentInstances.length - 1);
-    if (activeInstanceIdx < 0 || !currentInstances[activeInstanceIdx]) {
+    if (activeInstanceIdx < 0 || !currentInstances[activeInstanceIdx] ||
+        instanceComplete(currentInstances[activeInstanceIdx])) {
       activeInstanceIdx = preferred;
     }
+    activeKpIdx = firstIncompleteKp(currentInstances[activeInstanceIdx], activeKpIdx);
   }
   $('frame-label').textContent = `frame ${frameIdx + 1} / ${state.n_frames}` +
     (f.tracking_gap ? ' (tracking gap)' : '') +
@@ -204,6 +337,8 @@ function renderFrame() {
   updateReviewedCounter();
   renderFrameStrip();
   renderInstanceBar();
+  setDirty(false);
+  updateActiveLabel();
 
   const img = $('frame-img');
   img.onload = () => {
@@ -216,8 +351,10 @@ function renderFrame() {
 
 function updateReviewedCounter() {
   const reviewed = state.frames.filter(frameReviewed).length;
-  $('reviewed-label').textContent = `${reviewed} / ${state.n_frames} frames reviewed`;
+  const complete = state.frames.filter(frameComplete).length;
+  $('reviewed-label').textContent = `${reviewed} touched · ${complete} / ${state.n_frames} complete`;
   renderFrameStrip();
+  updateActiveLabel();
 }
 
 function renderFrameStrip() {
@@ -230,13 +367,16 @@ function renderFrameStrip() {
     cell.style.cursor = 'pointer';
     cell.style.border = (i === frameIdx) ? '1px solid #e6edf3' : '1px solid transparent';
     const reviewed = frameReviewed(f);
+    const complete = frameComplete(f);
     const hasInstances = (f.instances || []).length > 0;
     if (f.tracking_gap || !hasInstances) cell.style.background = '#484f58';
-    else if (reviewed)                   cell.style.background = '#3fb950';
+    else if (complete)                   cell.style.background = '#3fb950';
+    else if (reviewed)                   cell.style.background = '#d29922';
     else                                 cell.style.background = '#21262d';
     cell.title = `frame ${i + 1}` + (
       (f.tracking_gap || !hasInstances) ? ' (no tracked sheep)'
-      : reviewed ? ` (${(f.instances || []).filter(instanceReviewed).length}/${(f.instances || []).length} sheep reviewed)`
+      : complete ? ' (complete)'
+      : reviewed ? ' (partially reviewed)'
       : ' (pending)'
     );
     cell.onclick = () => goto(i);
@@ -253,14 +393,15 @@ function renderInstanceBar() {
   }
   currentInstances.forEach((inst, idx) => {
     const color = instanceColor(inst.obj_id);
-    const done = instanceReviewed(inst);
+    const count = reviewedCount(inst);
+    const done = instanceComplete(inst);
     const pill = document.createElement('span');
     pill.className = 'inst-pill' + (idx === activeInstanceIdx ? ' active' : '') + (done ? ' done' : '');
     pill.style.borderColor = color;
     pill.innerHTML =
       `<span class="inst-swatch" style="background:${color}"></span>` +
-      `obj ${inst.obj_id}` + (done ? ' ✓' : '');
-    pill.onclick = () => { activeInstanceIdx = idx; renderOverlay(); renderInstanceBar(); };
+      `obj ${inst.obj_id} <span class="inst-count">${count}/5</span>`;
+    pill.onclick = () => setActiveInstance(idx);
     bar.appendChild(pill);
   });
 }
@@ -277,6 +418,7 @@ function renderOverlay() {
   currentInstances.forEach((inst, idx) => {
     if (!inst.head_bbox) return;
     const active = (idx === activeInstanceIdx);
+    if (!active && hideInactiveOverlays) return;
     const color = instanceColor(inst.obj_id);
     const b = inst.head_bbox;
     const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
@@ -286,16 +428,15 @@ function renderOverlay() {
     rect.setAttribute('height', b.h);
     rect.setAttribute('fill', 'none');
     rect.setAttribute('stroke', color);
-    rect.setAttribute('stroke-width', active ? '2' : '1');
+    rect.setAttribute('stroke-width', active ? '3' : '1');
     rect.setAttribute('stroke-dasharray', active ? '4,3' : '2,4');
-    rect.setAttribute('opacity', active ? '0.9' : '0.45');
+    rect.setAttribute('opacity', active ? '0.95' : '0.28');
     if (!active) {
       rect.classList.add('bbox-inactive');
       rect.addEventListener('pointerdown', e => {
         e.preventDefault();
-        activeInstanceIdx = idx;
-        renderOverlay();
-        renderInstanceBar();
+        e.stopPropagation();
+        setActiveInstance(idx);
       });
     }
     svg.appendChild(rect);
@@ -306,6 +447,7 @@ function renderOverlay() {
   // activate that sheep" affordances.
   currentInstances.forEach((inst, instIdx) => {
     const active = (instIdx === activeInstanceIdx);
+    if (!active && hideInactiveOverlays) return;
     const bbox = inst.head_bbox;
     (inst.keypoints || []).forEach((kp, kpIdx) => {
       const meta = KP_META[kpIdx];
@@ -323,11 +465,14 @@ function renderOverlay() {
       circ.setAttribute('cy', y);
       circ.setAttribute('r', active ? 7 : 5);
       circ.setAttribute('fill', meta.color);
-      circ.setAttribute('fill-opacity', active ? '0.35' : '0.15');
+      circ.setAttribute('fill-opacity', v === 2 ? '0.7' : active ? '0.35' : '0.12');
       circ.setAttribute('stroke', meta.color);
       circ.setAttribute('stroke-width', active ? 2 : 1);
       circ.classList.add('kp-dot');
       if (v === 0) circ.classList.add('kp-unplaced');
+      if (v === 1) circ.classList.add('kp-auto');
+      if (v === 2) circ.classList.add('kp-reviewed');
+      if (active && kpIdx === activeKpIdx) circ.classList.add('kp-active');
       if (!active) circ.classList.add('inactive');
       g.appendChild(circ);
 
@@ -335,7 +480,7 @@ function renderOverlay() {
         const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
         label.setAttribute('x', x + 10);
         label.setAttribute('y', y + 4);
-        label.textContent = `${kpIdx}`;
+        label.textContent = `${kpIdx + 1}`;
         label.classList.add('kp-label');
         g.appendChild(label);
       }
@@ -351,20 +496,27 @@ function renderKpStatus() {
   const inst = currentInstances[activeInstanceIdx];
   if (!inst) {
     $('kp-status').innerHTML = '<span style="color:#484f58">(no active sheep)</span>';
+    updateActiveLabel();
     return;
   }
   const cells = KP_META.map((m, i) => {
     const v = inst.keypoints[i].v;
     let cls = 'kp-status-item';
-    let label = `${i}:${m.name}`;
-    if (v === 2)      { cls += ' reviewed'; label += ' ✓'; }
-    else if (v === 0) { cls += ' unplaced'; label += ' ◯'; }
-    else              { label += ' ·'; }
-    return `<span class="${cls}">${label}</span>`;
+    if (i === activeKpIdx) cls += ' active';
+    let stateLabel = 'auto';
+    if (v === 2)      { cls += ' reviewed'; stateLabel = 'reviewed'; }
+    else if (v === 0) { cls += ' unplaced'; stateLabel = 'unplaced'; }
+    else              { cls += ' auto'; }
+    return `<button class="${cls}" type="button" data-kp-select="${i}">
+      <span class="kp-chip"><span class="kp-key">${i + 1}</span>${m.name}</span>
+      <span>${stateLabel}</span>
+    </button>`;
   }).join('');
-  $('kp-status').innerHTML =
-    `<span style="color:#8b949e;margin-right:.3rem">obj ${inst.obj_id}:</span>` +
-    cells;
+  $('kp-status').innerHTML = cells;
+  $('kp-status').querySelectorAll('[data-kp-select]').forEach(btn => {
+    btn.onclick = () => selectActiveKp(parseInt(btn.dataset.kpSelect, 10));
+  });
+  updateActiveLabel();
 }
 
 // Drag handling — SVG event coords → frame coords via viewBox math.
@@ -379,17 +531,29 @@ function svgPoint(evt) {
 
 $('overlay').addEventListener('pointerdown', e => {
   const g = e.target.closest('g[data-kp-idx]');
-  if (!g) return;
+  if (!g) {
+    if (!activeInstance()) return;
+    const p = svgPoint(e);
+    const kps = activeInstance().keypoints;
+    kps[activeKpIdx].x = Math.round(p.x * 10) / 10;
+    kps[activeKpIdx].y = Math.round(p.y * 10) / 10;
+    kps[activeKpIdx].v = 2;  // click = human-placed
+    setDirty(true);
+    $('status-line').textContent = `Placed ${KP_META[activeKpIdx].name} on obj ${activeInstance().obj_id}.`;
+    advanceActiveKeypoint();
+    renderInstanceBar();
+    return;
+  }
   const instIdx = parseInt(g.dataset.instIdx, 10);
   const kpIdx = parseInt(g.dataset.kpIdx, 10);
   if (instIdx !== activeInstanceIdx) {
     // Clicked a dimmed sheep's keypoint → switch active, don't drag.
     e.preventDefault();
-    activeInstanceIdx = instIdx;
-    renderOverlay();
-    renderInstanceBar();
+    setActiveInstance(instIdx);
     return;
   }
+  activeKpIdx = kpIdx;
+  renderKpStatus();
   dragging = {kpIdx};
   e.target.classList.add('dragging');
   $('overlay').setPointerCapture(e.pointerId);
@@ -402,7 +566,9 @@ $('overlay').addEventListener('pointermove', e => {
   kps[dragging.kpIdx].x = Math.round(p.x * 10) / 10;
   kps[dragging.kpIdx].y = Math.round(p.y * 10) / 10;
   kps[dragging.kpIdx].v = 2;  // drag = human-placed
+  setDirty(true);
   renderOverlay();
+  renderInstanceBar();
 });
 
 $('overlay').addEventListener('pointerup', e => {
@@ -412,12 +578,14 @@ $('overlay').addEventListener('pointerup', e => {
 
 // Buttons
 $('btn-prev').onclick = () => goto(frameIdx - 1);
-$('btn-save-next').onclick = async () => { await saveFrame(); goto(frameIdx + 1); };
+$('btn-save-next').onclick = async () => { if (await saveFrame()) smartAdvanceAfterSave(); };
 $('btn-skip').onclick = () => goto(frameIdx + 1);
 $('btn-accept-all').onclick = () => {
   const inst = currentInstances[activeInstanceIdx];
   if (!inst) return;
   inst.keypoints.forEach(kp => { if (kp.v >= 1) kp.v = 2; });
+  activeKpIdx = firstIncompleteKp(inst, activeKpIdx);
+  setDirty(true);
   renderOverlay();
   renderInstanceBar();
 };
@@ -426,11 +594,21 @@ $('btn-reset').onclick = () => {
   if (!frameInst) return;
   currentInstances[activeInstanceIdx].keypoints =
     (frameInst.keypoints || []).map(k => ({...k, v: k.auto_v}));
+  activeKpIdx = firstIncompleteKp(currentInstances[activeInstanceIdx], 0);
+  setDirty(true);
   renderOverlay();
   renderInstanceBar();
 };
+$('btn-hide-inactive').onclick = () => {
+  hideInactiveOverlays = !hideInactiveOverlays;
+  $('btn-hide-inactive').classList.toggle('active', hideInactiveOverlays);
+  $('btn-hide-inactive').textContent = hideInactiveOverlays ? 'Show inactive' : 'Hide inactive';
+  renderOverlay();
+};
+$('btn-next-kp').onclick = () => advanceActiveKeypoint();
 
 async function saveFrame() {
+  if (!currentInstances) return false;
   if (currentInstances.length === 0) {
     $('status-line').textContent = 'No instances to save in this frame.';
     return false;
@@ -463,7 +641,10 @@ async function saveFrame() {
     });
   });
   $('status-line').textContent = `Saved frame ${frameIdx + 1} (${currentInstances.length} sheep).`;
+  setDirty(false);
   updateReviewedCounter();
+  renderInstanceBar();
+  renderOverlay();
   return true;
 }
 
@@ -480,13 +661,15 @@ window.addEventListener('keydown', async e => {
   if (e.key === 'ArrowRight') { e.preventDefault(); goto(frameIdx + 1); }
   if (e.key === 'Tab') {
     e.preventDefault();
-    if (currentInstances.length > 0) {
-      activeInstanceIdx = (activeInstanceIdx + 1) % currentInstances.length;
-      renderOverlay();
-      renderInstanceBar();
+    if (currentInstances && currentInstances.length > 0) {
+      const next = nextIncompleteInstanceIdx(activeInstanceIdx + 1);
+      setActiveInstance(next >= 0 ? next : (activeInstanceIdx + 1) % currentInstances.length);
     }
   }
-  if (e.key === 'Enter')      { e.preventDefault(); await saveFrame(); goto(frameIdx + 1); }
+  if (e.key === 'Enter')      { e.preventDefault(); if (await saveFrame()) smartAdvanceAfterSave(); }
+  if (e.key === ' ')          { e.preventDefault(); advanceActiveKeypoint(); }
+  if (/^[1-5]$/.test(e.key))  { e.preventDefault(); selectActiveKp(parseInt(e.key, 10) - 1); }
+  if (e.key.toLowerCase() === 'h') { e.preventDefault(); $('btn-hide-inactive').click(); }
   if (e.key.toLowerCase() === 's') { e.preventDefault(); goto(frameIdx + 1); }
   if (e.key.toLowerCase() === 'a') { e.preventDefault(); $('btn-accept-all').click(); }
   if (e.key.toLowerCase() === 'r') { e.preventDefault(); $('btn-reset').click(); }

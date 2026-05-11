@@ -1,7 +1,7 @@
 # Scripts — training + pod orchestration
 
 This directory owns the **training flywheel**: labeling (sheep-seg on the pod) →
-training (sheep-seg on the pod's 4090) → weights file sync to sheep-yolo (local,
+training (sheep-seg on the pod's GPU) → weights file sync to sheep-yolo (local,
 for inference). It is the deliberate consolidation of what used to be scattered
 across two repos.
 
@@ -29,13 +29,13 @@ because:
 
 | Location | Repo | Responsibility |
 |---|---|---|
-| Pod (RunPod 4090) | sheep-seg | SAM 3 pipeline, labeling UI, dataset export, `yolo train` |
+| Pod (RunPod cloud GPU — 4090 / L40S / H100) | sheep-seg | SAM 3 pipeline, labeling UI, dataset export, `yolo train` |
 | Laptop | sheep-seg | Scripts that SSH the pod: trigger training, pull weights |
 | Laptop | sheep-yolo | Inference pipeline, σ benchmark, demo UI — consumes `best.pt` |
 
 Nothing ever runs training *or* labeling locally. The 6 GB GTX 1660 Ti on the
-laptop is for inference and visualization only. The 4090 on the pod does every
-compute-heavy thing.
+laptop is for inference and visualization only. The cloud GPU on the pod does
+every compute-heavy thing.
 
 ## The scripts
 
@@ -44,7 +44,7 @@ compute-heavy thing.
 | `pod_ssh.sh` | laptop | Generic SSH into the pod (handy for manual poking). |
 | `start_pod_server.sh` | **pod** | Boots the labeling server on the pod after a pod resume. |
 | `push_clip.sh` | laptop | Upload a fresh video clip to the pod's `data/uploads/`. |
-| `train_on_pod.sh` | laptop | Trigger full training run on the 4090. Synchronous — logs stream to your terminal until training finishes (~10 min at current dataset scale). |
+| `train_on_pod.sh` | laptop | Trigger full training run on the pod's GPU. Synchronous — logs stream to your terminal until training finishes (~10 min at current dataset scale, faster on H100). |
 | `sync_weights_from_pod.sh` | laptop | After training, pull `best.pt` + `last.pt` into `~/dev/lorewood-advisors/sheep-yolo/weights/`. |
 | `fetch_dataset.sh` | laptop | **Optional.** Pulls the dataset images to the laptop for eyeballing labels. Not part of the training loop — dataset never leaves the pod in normal use. |
 | `backup_dataset.sh` | laptop | **Durability layer 2.** rsync mirror of the pod's `data/labels/` tree to `~/Backups/sheep-seg/labels/`. Covers in-progress JSON state, not just YOLO exports. Run manually (weekly is plenty); cron example in the script's docstring. |
@@ -62,7 +62,7 @@ You (labeler):
 Me / YOLO side, from laptop (`~/dev/lorewood-advisors/sheep-seg`):
 
 ```
-# 1. Kick off training on the pod's 4090. Synchronous: stays attached.
+# 1. Kick off training on the pod's GPU. Synchronous: stays attached.
 ./scripts/train_on_pod.sh
 
 # 2. When that finishes, pull the trained weights into sheep-yolo.
@@ -151,8 +151,8 @@ the sheep-yolo weights dir, and `YOLOE_MODEL=...` picks which one loads.
 ## What these scripts deliberately do NOT do
 
 - **Train locally.** The laptop's 6 GB VRAM can't fit `batch=8 imgsz=640`.
-  Every training path runs on the pod's 4090. The laptop is for inference and
-  benchmarking only.
+  Every training path runs on the pod's cloud GPU. The laptop is for inference
+  and benchmarking only.
 - **Sync the dataset to the laptop as part of the training loop.** That was
   the original plan and we explicitly undid it. The dataset lives and dies on
   the pod. `fetch_dataset.sh` exists for the narrow case where you want to
