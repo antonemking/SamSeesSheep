@@ -29,6 +29,22 @@ The ear-angle thresholds shown in the observability chart come from clinical stu
 
 ![SAM 3 head + ear segmentation with derived ear-angle readout](docs/face-extract-seg.png)
 
+## v0.3 vs v0.2 — what 3× more labels does
+
+Same model (YOLO26n-pose, 2.5 M params), same training recipe, same compute. Only the training-data scale changed: **98 reviewed instances across 3 videos → 313 across 6 videos**. Both versions were then tested on two fresh clips neither had ever seen.
+
+![v0.2 vs v0.3 — side-by-side keypoint inference on a held-out clip, looping](docs/v0.2-vs-v0.3-compare.webp)
+
+*Left: v0.2 (98 instances). Right: v0.3 (313 instances). Same conf threshold (0.25), same frames.*
+
+On the harder of the two held-out clips (three sheep crowding the frame), v0.2 detected the target head on **47%** of motionless-window frames; v0.3 on **99%**. After subtracting slow head drift, per-keypoint jitter dropped from **~40 px to ~6 px** on a 260-px-wide head — about 7× more stable. On the cleaner single-subject clip, the same pattern: 83% → 100% detection, 12 px → 4 px jitter.
+
+![v0.3 inference loop on a held-out clip](docs/v0.3-SSS-loop.webp)
+
+*v0.3 running on a held-out clip — keypoints stay locked to the right anatomy across the loop.*
+
+Full numbers, per-keypoint σ tables, honest caveats, and the σ-residual methodology: [`docs/v0.3-benchmark.md`](docs/v0.3-benchmark.md). Inference + benchmark code lives in the `sheep-yolo` repo.
+
 ## The pipeline
 
 ```
