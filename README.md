@@ -31,19 +31,24 @@ The ear-angle thresholds shown in the observability chart come from clinical stu
 
 ## v0.3 vs v0.2 — what 3× more labels does
 
-Same model (YOLO26n-pose, 2.5 M params), same training recipe, same compute. Only the training-data scale changed: **98 reviewed instances across 3 videos → 313 across 6 videos**. Both versions were then tested on two fresh clips neither had ever seen.
+Same model (YOLO26n-pose, 2.5 M params), same training recipe, same compute. Only the training-data scale changed: **98 reviewed instances across 3 videos → 313 across 6 videos**.
 
-![v0.2 vs v0.3 — side-by-side keypoint inference on a held-out clip, looping](docs/v0.2-vs-v0.3-compare.webp)
+![v0.2 vs v0.3 — side-by-side keypoint inference, looping](docs/v0.2-vs-v0.3-compare.webp)
 
 *Left: v0.2 (98 instances). Right: v0.3 (313 instances). Same conf threshold (0.25), same frames.*
 
-On the harder of the two held-out clips (three sheep crowding the frame), v0.2 detected the target head on **47%** of motionless-window frames; v0.3 on **99%**. After subtracting slow head drift, per-keypoint jitter dropped from **~40 px to ~6 px** on a 260-px-wide head — about 7× more stable. On the cleaner single-subject clip, the same pattern: 83% → 100% detection, 12 px → 4 px jitter.
+**About the clips in this comparison.** The two clips shown (`IMG_3583` and `IMG_3601`) were captured *after* v0.2's training set was frozen — so they are out-of-distribution for v0.2 — and then *included* in v0.3's training set. That means the comparison is **not** apples-to-apples held-out generalization. It is:
 
-![v0.3 inference loop on a held-out clip](docs/v0.3-SSS-loop.webp)
+- **v0.2** asked to handle scenes it has never seen → 47% / 83% detection across the two clips' motionless windows, ~40 px and ~12 px keypoint jitter on a 260 px wide head.
+- **v0.3** evaluated on scenes whose 2-fps sampled frames went into training → 99% / 100% detection, residual jitter 4–6 px.
 
-*v0.3 running on a held-out clip — keypoints stay locked to the right anatomy across the loop.*
+What this *does* show: v0.2's three-video training set covers too little visual variation to handle these new scenes, and v0.3 fits the scenes it's been trained on tightly. What it does **not** show: that v0.3 generalizes better than v0.2 to new unseen scenes. A clean apples-to-apples held-out benchmark — both models against a fresh clip neither has been trained on — is the next thing on the list.
 
-Full numbers, per-keypoint σ tables, honest caveats, and the σ-residual methodology: [`docs/v0.3-benchmark.md`](docs/v0.3-benchmark.md). Inference + benchmark code lives in the `sheep-yolo` repo.
+![v0.3 inference loop](docs/v0.3-SSS-loop.webp)
+
+*v0.3 running on `IMG_3583` — the model was trained on 2-fps-sampled frames from this clip; the loop above is from the source 30-fps stream.*
+
+Full per-keypoint σ tables, methodology, and caveats: [`docs/v0.3-benchmark.md`](docs/v0.3-benchmark.md). Inference + benchmark code lives in the `sheep-yolo` repo.
 
 ## The pipeline
 
