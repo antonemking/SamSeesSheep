@@ -1,0 +1,28 @@
+[project]
+name = "sheep-yolo"
+version = "0.2.0"
+description = "Out-of-the-box YOLO benchmark for sheep ear-angle welfare monitoring (v2 of sheep-seg)"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "python-multipart>=0.0.9",
+    "pillow>=10.0",
+    "pillow-heif>=0.18",
+    "opencv-python-headless>=4.9",
+    "numpy>=1.26",
+    "imageio[pyav]>=2.34",
+    "ultralytics>=8.3",
+    "torch>=2.1",
+    "torchvision>=0.16",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "httpx>=0.27"]
+
+[project.scripts]
+sheep-yolo = "backend.main:main"
+
+[tool.setuptools]
+packages = ["backend", "backend.pipeline", "backend.routes"]

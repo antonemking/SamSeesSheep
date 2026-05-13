@@ -17,9 +17,15 @@
 # Config via ~/.sheep-yolo.env or CLI. Defaults:
 #
 #   DATASET=sheep-pose-v0.1
-#   LOCAL_WEIGHTS_DIR=~/dev/lorewood-advisors/sheep-yolo/weights
+#   LOCAL_WEIGHTS_DIR=<repo-root>/sheep-yolo/weights
 
 set -e
+
+# Locate the repo root from the script's own location — lets the default
+# weights/datasets paths resolve to the in-repo sheep-yolo subdir
+# regardless of cwd or shell.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 if [ -f "$HOME/.sheep-yolo.env" ]; then
   set -a
@@ -32,7 +38,7 @@ POD_IP="${POD_IP:-}"
 POD_SSH_PORT="${POD_SSH_PORT:-}"
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/id_ed25519}"
 DATASET="${1:-${DATASET:-sheep-pose-v0.1}}"
-LOCAL_WEIGHTS_DIR="${LOCAL_WEIGHTS_DIR:-$HOME/dev/lorewood-advisors/sheep-yolo/weights}"
+LOCAL_WEIGHTS_DIR="${LOCAL_WEIGHTS_DIR:-$REPO_ROOT/sheep-yolo/weights}"
 
 POD_IP="${2:-$POD_IP}"
 POD_SSH_PORT="${3:-$POD_SSH_PORT}"

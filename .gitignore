@@ -92,3 +92,14 @@ data/results/
 /.dvc/tmp
 .env.pod
 .pushed_clips.tsv
+
+# Claude Code session-local settings (machine-local)
+.claude/
+
+# sheep-yolo subdir — inference artifacts, weights, raw clips
+sheep-yolo/artifacts/
+sheep-yolo/footage/
+sheep-yolo/test-clips/
+sheep-yolo/LinkedInPostArtifacts/
+sheep-yolo/mobileclip_blt.ts
+sheep-yolo/.sheep-yolo.env

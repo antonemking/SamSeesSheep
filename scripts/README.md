@@ -1,37 +1,36 @@
 # Scripts — training + pod orchestration
 
-This directory owns the **training flywheel**: labeling (sheep-seg on the pod) →
-training (sheep-seg on the pod's GPU) → weights file sync to sheep-yolo (local,
-for inference). It is the deliberate consolidation of what used to be scattered
-across two repos.
+This directory owns the **training flywheel**: labeling (sheep-seg backend on the pod) →
+training (sheep-seg on the pod's GPU) → weights file sync into the `sheep-yolo/`
+subdir for local inference. As of 2026-05-12 sheep-seg and sheep-yolo live in
+the same repo; this script set lives at the root because every step it touches
+crosses the subdir boundary.
 
-## Why these scripts live in sheep-seg (not sheep-yolo)
-
-Earlier drafts put the sync scripts in sheep-yolo. We pulled them into sheep-seg
-because:
+## Why these scripts live at the repo root (not inside sheep-yolo/)
 
 1. **The dataset lives here.** The YOLO-pose dataset is produced by
-   `/api/export/keypoints` in this repo. Scripts that trigger exports or shell
-   into the pod that runs the labeling server belong next to the labeling
-   server.
+   `/api/export/keypoints` (sheep-seg backend). Scripts that trigger exports
+   or shell into the pod that runs the labeling server belong next to the
+   labeling server.
 2. **Training compute lives on the pod, which is a sheep-seg deployment.** The
-   pod clones sheep-seg (SAM 3 + labeling UI + `ultralytics` dep). It does not
-   clone sheep-yolo. Scripts that SSH into the pod to kick off `yolo train` are
-   sheep-seg concerns.
-3. **sheep-yolo's only responsibility is inference + σ benchmarks.** It
+   pod clones the repo to use its SAM 3 + labeling UI + `ultralytics`
+   dependencies. The inference-only `sheep-yolo/` subdir is never installed on
+   the pod. Scripts that SSH into the pod to kick off `yolo train` are
+   sheep-seg-side concerns.
+3. **The `sheep-yolo/` subdir's responsibility is inference + σ benchmarks.** It
    consumes a `best.pt` produced elsewhere. Anything upstream of "weights file
    exists locally" is somebody else's problem from sheep-yolo's perspective.
-4. **Single source of truth.** One repo owns labeling *and* training — the two
-   steps that produce the artifact sheep-yolo consumes. Avoids two repos
-   racing to update the same sync conventions.
+4. **Cross-cutting orchestration lives at the root.** These scripts coordinate
+   the pod, the labeling backend, and the inference subdir — none of those
+   alone owns the workflow.
 
-## Repo split at a glance
+## Code layout at a glance
 
-| Location | Repo | Responsibility |
+| Location | Path | Responsibility |
 |---|---|---|
-| Pod (RunPod cloud GPU — 4090 / L40S / H100) | sheep-seg | SAM 3 pipeline, labeling UI, dataset export, `yolo train` |
-| Laptop | sheep-seg | Scripts that SSH the pod: trigger training, pull weights |
-| Laptop | sheep-yolo | Inference pipeline, σ benchmark, demo UI — consumes `best.pt` |
+| Pod (RunPod cloud GPU — 4090 / L40S / H100) | repo root | SAM 3 pipeline, labeling UI, dataset export, `yolo train` |
+| Laptop | `scripts/` (repo root) | Scripts that SSH the pod: trigger training, pull weights |
+| Laptop | `sheep-yolo/` subdir | Inference pipeline, σ benchmark, demo UI — consumes `best.pt` |
 
 Nothing ever runs training *or* labeling locally. The 6 GB GTX 1660 Ti on the
 laptop is for inference and visualization only. The cloud GPU on the pod does
@@ -45,7 +44,7 @@ every compute-heavy thing.
 | `start_pod_server.sh` | **pod** | Boots the labeling server on the pod after a pod resume. |
 | `push_clip.sh` | laptop | Upload a fresh video clip to the pod's `data/uploads/`. |
 | `train_on_pod.sh` | laptop | Trigger full training run on the pod's GPU. Synchronous — logs stream to your terminal until training finishes (~10 min at current dataset scale, faster on H100). |
-| `sync_weights_from_pod.sh` | laptop | After training, pull `best.pt` + `last.pt` into `~/dev/lorewood-advisors/sheep-yolo/weights/`. |
+| `sync_weights_from_pod.sh` | laptop | After training, pull `best.pt` + `last.pt` into `sheep-yolo/weights/` (in-repo). |
 | `fetch_dataset.sh` | laptop | **Optional.** Pulls the dataset images to the laptop for eyeballing labels. Not part of the training loop — dataset never leaves the pod in normal use. |
 | `backup_dataset.sh` | laptop | **Durability layer 2.** rsync mirror of the pod's `data/labels/` tree to `~/Backups/sheep-seg/labels/`. Covers in-progress JSON state, not just YOLO exports. Run manually (weekly is plenty); cron example in the script's docstring. |
 | `validate_dataset.py` | pod or laptop | Dataset health checks — paired image/label counts, 20-column label format, `[0,1]` coord ranges, per-slot v=2 coverage, train/val leakage. Run as a pre-flight inside `train_on_pod.sh`; can also be run standalone any time. Exit 1 on any critical error so bad data never silently feeds into training. |
@@ -69,11 +68,12 @@ Me / YOLO side, from laptop (`~/dev/lorewood-advisors/sheep-seg`):
 ./scripts/sync_weights_from_pod.sh
 ```
 
-Then from sheep-yolo:
+Then from the sheep-yolo subdir:
 
 ```
-export YOLOE_MODEL=~/dev/lorewood-advisors/sheep-yolo/weights/sheep-pose-v0.X.pt
-# run σ-on-motionless-sheep benchmark, post results to sheep-seg-conversation/LOG.md
+cd sheep-yolo
+export YOLOE_MODEL=weights/sheep-pose-v0.X.pt
+# run σ-on-motionless-sheep benchmark, post results to docs/v0.X-benchmark.md
 ```
 
 Only the ~10 MB weights file crosses the network. The hundreds of MB of
@@ -175,7 +175,7 @@ the sheep-yolo weights dir, and `YOLOE_MODEL=...` picks which one loads.
 Once `sheep-yolo/weights/sheep-pose-v0.X.pt` exists locally:
 
 ```bash
-cd ~/dev/lorewood-advisors/sheep-yolo
+cd sheep-yolo
 source .venv/bin/activate
 export YOLOE_MODEL=weights/sheep-pose-v0.X.pt
 python -m backend.main

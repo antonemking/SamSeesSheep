@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>sheep-yolo</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0d1117;color:#e6edf3;line-height:1.6;max-width:960px;margin:0 auto;padding:2rem 1.5rem}
+a{color:#58a6ff}
+h1{font-family:'SF Mono',monospace;color:#3fb950;font-size:1.4rem}
+.sub{color:#8b949e;font-size:.85rem;margin:.25rem 0 1.25rem}
+.upload{border:2px dashed #30363d;border-radius:6px;padding:1.5rem;text-align:center;cursor:pointer;margin:1.25rem 0;transition:border-color .2s}
+.upload:hover{border-color:#3fb950}
+.upload input{position:absolute;width:0;height:0;opacity:0}
+.upload p{color:#8b949e;font-size:.85rem}
+.hidden{display:none!important}
+.status{font-size:.8rem;color:#8b949e;margin:.5rem 0;min-height:1.2em}
+.spinner{display:inline-block;width:14px;height:14px;border:2px solid #30363d;border-top-color:#3fb950;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:.35rem}
+@keyframes spin{to{transform:rotate(360deg)}}
+.mode{display:flex;gap:.5rem;margin:.75rem 0}
+.mode button{flex:1;background:#161b22;color:#8b949e;border:1px solid #30363d;padding:.6rem .9rem;border-radius:6px;cursor:pointer;font-family:inherit;font-size:.85rem;transition:all .15s}
+.mode button:hover{border-color:#3fb950;color:#e6edf3}
+.mode button.active{background:#0d3b1a;border-color:#3fb950;color:#3fb950}
+.click-photo{position:relative;cursor:crosshair;display:inline-block;max-width:100%}
+.click-photo img{max-width:100%;max-height:420px;border-radius:6px;border:1px solid #30363d;display:block}
+.click-dot{position:absolute;width:18px;height:18px;border-radius:50%;border:2px solid #3fb950;background:rgba(63,185,80,.35);transform:translate(-50%,-50%);pointer-events:none}
+.card{border:1px solid #30363d;border-radius:6px;padding:1rem;background:#0d1117;margin:1rem 0}
+.dash-h{font-size:.6rem;color:#3fb950;text-transform:uppercase;letter-spacing:.12em;font-weight:700;margin-bottom:.35rem}
+.dash-cap{font-size:.65rem;color:#8b949e;font-style:italic}
+video{width:100%;max-height:520px;border-radius:4px;background:#000;display:block}
+.footer{margin-top:2rem;padding-top:1.5rem;border-top:1px solid #30363d;font-size:.75rem;color:#484f58}
+.sheep-legend{display:flex;gap:.75rem;flex-wrap:wrap;font-family:'SF Mono',monospace;font-size:.7rem;margin:.5rem 0}
+.sheep-legend span{display:inline-flex;align-items:center;gap:.3rem}
+.sheep-legend i{display:inline-block;width:14px;height:3px}
+.meta{font-family:'SF Mono',monospace;font-size:.7rem;color:#8b949e}
+.warn{background:#3b2b05;border:1px solid #9e6a03;color:#e8c372;padding:.5rem .7rem;border-radius:4px;font-size:.8rem;margin:.75rem 0}
+</style>
+</head>
+<body>
+<h1>sheep-yolo</h1>
+<p class="sub">YOLOE-seg out-of-the-box benchmark for sheep head / ear / nose part detection. Ear angles computed against SPFES thresholds (<a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC6523241/">McLennan &amp; Mahmoud 2019</a>). v2 of sheep-seg — see <code>sheep-chat.md</code> for the why.</p>
+
+<div class="upload" id="upload-zone">
+  <p><strong>Drop a sheep video</strong> or click to browse</p>
+  <input type="file" id="file-input" accept="video/*,.mp4,.mov,.webm">
+</div>
+
+<div class="status" id="status"></div>
+
+<div id="selector-section" class="hidden card">
+  <div class="dash-h">Detection mode</div>
+  <div class="mode">
+    <button id="det-parts" class="active" type="button">Parts (YOLOE · head/ear/nose)</button>
+    <button id="det-whole" type="button">Whole sheep (YOLO26-seg · COCO)</button>
+  </div>
+  <div class="dash-cap" id="det-cap">Parts mode runs the text-prompt experiment. If it misses ears on your footage, switch to whole mode to confirm YOLO at least tracks the animals reliably.</div>
+
+  <div class="dash-h" style="margin-top:.8rem">Subject mode</div>
+  <div class="mode">
+    <button id="mode-all" class="active" type="button">Track all sheep</button>
+    <button id="mode-one" type="button">Click to select one</button>
+  </div>
+
+  <div id="frame-wrap" class="hidden" style="text-align:center">
+    <div class="dash-cap" style="margin-bottom:.35rem">Click the sheep you want to track</div>
+    <div class="click-photo" id="click-photo">
+      <img id="frame0">
+    </div>
+  </div>
+
+  <div style="margin-top:.75rem;text-align:right">
+    <button id="run-btn" type="button" style="background:#0d3b1a;border:1px solid #3fb950;color:#3fb950;padding:.55rem 1.1rem;border-radius:6px;cursor:pointer;font-family:inherit;font-size:.85rem">Run YOLO pipeline</button>
+  </div>
+</div>
+
+<div id="results-section" class="hidden">
+  <div class="card">
+    <div class="dash-h">YOLOE-seg · tracked parts</div>
+    <video id="result-video" controls autoplay loop muted playsinline></video>
+    <div class="meta" id="result-meta" style="margin-top:.5rem"></div>
+    <div id="fallback-warn" class="warn hidden"></div>
+  </div>
+
+  <div class="card">
+    <div class="dash-h" id="chart-title">Ear angle timeline</div>
+    <div class="dash-cap" id="chart-caption">Angle relative to head dorsal axis · positive = up/forward · negative = back/down. Shaded bands mark SPFES up / neutral / down regions.</div>
+    <div class="sheep-legend" id="sheep-legend"></div>
+    <div style="position:relative;height:360px;margin-top:.5rem">
+      <canvas id="chart"></canvas>
+    </div>
+    <div class="meta" id="stats" style="margin-top:.5rem"></div>
+  </div>
+
+  <div class="card">
+    <div class="dash-h" style="color:#484f58">Methodology</div>
+    <div style="font-size:.72rem;color:#8b949e;line-height:1.7">
+      <div>· Model: <code>ultralytics YOLOE-seg</code>, text prompts <code>"sheep head" / "sheep ear" / "sheep nose"</code> — no fine-tuning</div>
+      <div>· Tracking: Ultralytics built-in (ByteTrack) — stable per-sheep track IDs across frames</div>
+      <div>· Ear angle: nose → ear-midpoint for the dorsal axis (PCA fallback); ear vector from base → tip</div>
+      <div>· Thresholds: <a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC6523241/">McLennan &amp; Mahmoud 2019 (SPFES)</a>, Reefmann 2009, Boissy 2011</div>
+      <div>· This repo exists to measure <strong>out-of-the-box</strong> YOLO performance on sheep anatomy. Custom training lives in a separate repo.</div>
+    </div>
+  </div>
+</div>
+
+<div class="footer" style="text-align:center;border:none;padding-top:2rem">sheep-yolo · v0.2.0</div>
+
+<script>
+const $=id=>document.getElementById(id);
+const COLORS=['#f08a3e','#3fb950','#58a6ff','#d26bd2','#e3b341','#c9d1d9','#b5cea8','#f47068'];
+let state={video_id:null,click_norm:null,mode:'all',detMode:'parts',frameSize:null};
+let chartInstance=null;
+
+const zone=$('upload-zone'),input=$('file-input');
+zone.addEventListener('dragover',e=>{e.preventDefault();zone.style.borderColor='#3fb950'});
+zone.addEventListener('dragleave',()=>zone.style.borderColor='#30363d');
+zone.addEventListener('drop',e=>{e.preventDefault();zone.style.borderColor='#30363d';if(e.dataTransfer.files.length)uploadVideo(e.dataTransfer.files[0])});
+zone.addEventListener('click',()=>input.click());
+input.addEventListener('change',e=>{if(e.target.files.length)uploadVideo(e.target.files[0])});
+
+$('mode-all').addEventListener('click',()=>setMode('all'));
+$('mode-one').addEventListener('click',()=>setMode('one'));
+$('det-parts').addEventListener('click',()=>setDetMode('parts'));
+$('det-whole').addEventListener('click',()=>setDetMode('whole'));
+$('run-btn').addEventListener('click',runPipeline);
+
+function setDetMode(m){
+  state.detMode=m;
+  $('det-parts').classList.toggle('active',m==='parts');
+  $('det-whole').classList.toggle('active',m==='whole');
+}
+
+function setMode(m){
+  state.mode=m;
+  $('mode-all').classList.toggle('active',m==='all');
+  $('mode-one').classList.toggle('active',m==='one');
+  $('frame-wrap').classList.toggle('hidden',m!=='one');
+  if(m==='all'){state.click_norm=null;document.querySelectorAll('.click-dot').forEach(d=>d.remove());}
+}
+
+async function uploadVideo(file){
+  $('status').innerHTML='<span class="spinner"></span>Uploading '+file.name+'...';
+  $('results-section').classList.add('hidden');
+  $('selector-section').classList.add('hidden');
+  const fd=new FormData();fd.append('file',file);
+  try{
+    const r=await fetch('/api/upload_video',{method:'POST',body:fd});
+    if(!r.ok)throw new Error('upload failed');
+    const info=await r.json();
+    state.video_id=info.video_id;
+    state.frameSize={w:info.first_frame_width,h:info.first_frame_height};
+    if(info.first_frame_url){$('frame0').src=info.first_frame_url;}
+    $('selector-section').classList.remove('hidden');
+    setMode('all');
+    $('status').textContent='Uploaded ('+info.size_kb+' KB). Pick a mode, then run.';
+  }catch(e){$('status').textContent='Upload failed: '+e.message;}
+}
+
+$('click-photo').addEventListener('click',e=>{
+  if(state.mode!=='one')return;
+  const img=$('frame0'),rect=img.getBoundingClientRect();
+  const x=(e.clientX-rect.left)/rect.width;
+  const y=(e.clientY-rect.top)/rect.height;
+  state.click_norm={x,y};
+  document.querySelectorAll('.click-dot').forEach(d=>d.remove());
+  const dot=document.createElement('div');
+  dot.className='click-dot';
+  dot.style.left=(x*100)+'%';dot.style.top=(y*100)+'%';
+  $('click-photo').appendChild(dot);
+});
+
+async function runPipeline(){
+  if(!state.video_id)return;
+  if(state.mode==='one'&&!state.click_norm){$('status').textContent='Click a sheep on the frame first.';return;}
+  $('status').innerHTML='<span class="spinner"></span>Running YOLOE on video (first run downloads weights; subsequent runs ~real-time)...';
+  $('results-section').classList.add('hidden');
+  const body={video_id:state.video_id,mode:state.detMode};
+  if(state.click_norm){body.click_x=state.click_norm.x;body.click_y=state.click_norm.y;}
+  try{
+    const r=await fetch('/api/analyze/video',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(body),
+    });
+    if(!r.ok){const err=await r.json().catch(()=>({}));throw new Error(err.detail||r.statusText);}
+    const d=await r.json();
+    renderResults(d);
+    $('status').textContent='Processed '+d.n_frames+' frames in '+Math.round(d.elapsed_s)+'s ('+(d.n_frames/Math.max(d.elapsed_s,.01)).toFixed(1)+' fps). '+d.sheep.length+' sheep tracked.';
+  }catch(e){
+    $('status').textContent='Analysis failed: '+(e.message||e);
+  }
+}
+
+function renderResults(d){
+  $('results-section').classList.remove('hidden');
+  if(d.annotated_video_url){
+    const v=$('result-video');
+    v.src=d.annotated_video_url;
+    v.load();
+  }
+  let trackSuffix=`${d.sheep.length} sheep tracked`;
+  if(d.sheep_transient){
+    trackSuffix+=` (${d.sheep_transient} short-lived track${d.sheep_transient===1?'':'s'} below ${(d.track_coverage_floor*100).toFixed(0)}% coverage filtered out — typically re-acquired IDs from occlusion)`;
+  }
+  $('result-meta').textContent=`${d.model} · prompts=${JSON.stringify(d.prompts)} · ${d.n_frames} frames @ ${d.fps.toFixed(1)} fps · ${trackSuffix}`;
+
+  if(d.fallback_note){
+    $('fallback-warn').textContent=d.fallback_note;
+    $('fallback-warn').classList.remove('hidden');
+  }else{
+    $('fallback-warn').classList.add('hidden');
+  }
+
+  if(d.mode==='whole'){
+    $('chart-title').textContent='Per-sheep presence across frames';
+    $('chart-caption').textContent='Whole-sheep tracking via COCO-pretrained YOLO26-seg. Each step trace lifts when that sheep is visible on that frame. No ear-angle measurement in this mode.';
+  } else {
+    $('chart-title').textContent='Ear angle timeline';
+    $('chart-caption').textContent='Angle relative to head dorsal axis · positive = up/forward · negative = back/down. Shaded bands mark SPFES up / neutral / down regions.';
+  }
+
+  renderChart(d);
+}
+
+function renderChart(d){
+  const n=d.n_frames;
+  const labels=Array.from({length:n},(_,i)=>i);
+  const datasets=[];
+  const legendHost=$('sheep-legend');
+  legendHost.innerHTML='';
+  const statsLines=[];
+  const isWhole=d.mode==='whole';
+
+  d.sheep.forEach((sh,i)=>{
+    const color=COLORS[i%COLORS.length];
+    const lbl='sheep#'+sh.track_id;
+    if(isWhole){
+      // Whole-sheep mode: one step-trace per sheep, y = sheep index (baseline)
+      // with the line lifting to (baseline + 0.8) when detected.
+      const base=i*1.2;
+      const data=(sh.presence||[]).map(p=>p?base+0.8:base);
+      datasets.push({
+        label:lbl,data:data,
+        borderColor:color,backgroundColor:color+'22',borderWidth:2.2,
+        pointRadius:0,stepped:true,fill:'start',tension:0,
+      });
+      const leg=document.createElement('span');
+      leg.innerHTML=`<i style="background:${color}"></i>${lbl} · tracked ${sh.frames_tracked}/${n} frames (${(sh.coverage*100).toFixed(0)}%)`;
+      legendHost.appendChild(leg);
+      statsLines.push(`${lbl}: frames=${sh.frames_tracked}/${n} · coverage=${(sh.coverage*100).toFixed(1)}%`);
+    } else {
+      datasets.push({
+        label:lbl+' L',data:pad(sh.left_ear_angle_deg_smoothed,n),
+        borderColor:color,borderWidth:2.2,pointRadius:0,tension:.25,spanGaps:false,
+      });
+      datasets.push({
+        label:lbl+' R',data:pad(sh.right_ear_angle_deg_smoothed,n),
+        borderColor:color,borderWidth:2.2,borderDash:[4,3],pointRadius:0,tension:.25,spanGaps:false,
+      });
+      const leg=document.createElement('span');
+      leg.innerHTML=`<i style="background:${color}"></i>${lbl} (solid=L, dashed=R)`;
+      legendHost.appendChild(leg);
+      const fmt=x=>x==null?'--':((x>0?'+':'')+x.toFixed(1)+'°');
+      statsLines.push(
+        `${lbl}: frames=${sh.frames_tracked} · L ${fmt(sh.left_mean_deg)}±${fmt(sh.left_std_deg)} · R ${fmt(sh.right_mean_deg)}±${fmt(sh.right_std_deg)}`
+      );
+    }
+  });
+
+  $('stats').innerHTML=statsLines.map(l=>'<div>'+l+'</div>').join('');
+
+  const up=d.ear_up_threshold_deg,down=d.ear_down_threshold_deg;
+  const annotations=isWhole?{}:{
+    bandUp:{type:'box',yMin:up,yMax:60,backgroundColor:'rgba(63,185,80,0.12)',borderWidth:0,label:{display:true,content:'UP',position:{x:'end',y:'center'},xAdjust:22,color:'#3fb950',font:{weight:'bold',size:10},backgroundColor:'transparent'}},
+    bandNeutral:{type:'box',yMin:down,yMax:up,backgroundColor:'rgba(210,153,34,0.08)',borderWidth:0,label:{display:true,content:'NEUTRAL',position:{x:'end',y:'center'},xAdjust:36,color:'#d29922',font:{weight:'bold',size:10},backgroundColor:'transparent'}},
+    bandDown:{type:'box',yMin:-60,yMax:down,backgroundColor:'rgba(248,81,73,0.12)',borderWidth:0,label:{display:true,content:'DOWN',position:{x:'end',y:'center'},xAdjust:28,color:'#f85149',font:{weight:'bold',size:10},backgroundColor:'transparent'}},
+    zero:{type:'line',yMin:0,yMax:0,borderColor:'#484f58',borderWidth:1,borderDash:[3,3]},
+  };
+
+  const yScale=isWhole
+    ? {min:-0.2,max:Math.max(1.4,d.sheep.length*1.2),ticks:{display:false},grid:{color:'#30363d'}}
+    : {min:-60,max:60,ticks:{color:'#8b949e',stepSize:30,callback:v=>(v>0?'+':'')+v+'°'},grid:{color:'#30363d'}};
+
+  const options={
+    responsive:true,maintainAspectRatio:false,animation:{duration:250},
+    scales:{
+      y:yScale,
+      x:{ticks:{color:'#484f58'},grid:{color:'rgba(48,54,61,.5)'},title:{display:true,text:'frame',color:'#484f58'}},
+    },
+    plugins:{
+      legend:{display:false},
+      annotation:{annotations},
+      tooltip:{mode:'index',intersect:false,backgroundColor:'#161b22',borderColor:'#30363d',borderWidth:1,
+        callbacks:{label:ctx=>{const v=ctx.parsed.y;if(v==null)return null;return ctx.dataset.label+': '+(v>0?'+':'')+v.toFixed(1)+'°'}},
+      },
+    },
+    interaction:{mode:'index',intersect:false},
+  };
+
+  if(chartInstance)chartInstance.destroy();
+  chartInstance=new Chart($('chart').getContext('2d'),{type:'line',data:{labels,datasets},options});
+}
+
+function pad(arr,n){
+  if(!arr)return new Array(n).fill(null);
+  if(arr.length>=n)return arr.slice(0,n);
+  return arr.concat(new Array(n-arr.length).fill(null));
+}
+</script>
+</body>
+</html>

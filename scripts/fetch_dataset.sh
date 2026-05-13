@@ -27,11 +27,16 @@
 #   POD_SSH_PORT=27921
 #   SSH_KEY=~/.ssh/id_ed25519           # defaults to this
 #   DATASET=sheep-pose-v0.1               # default dataset name
-#   LOCAL_DATASETS_DIR=~/dev/lorewood-advisors/sheep-yolo/datasets   # default
+#   LOCAL_DATASETS_DIR=<repo-root>/sheep-yolo/datasets   # default
 #
 # CLI override order: args > env > ~/.sheep-yolo.env defaults.
 
 set -e
+
+# Locate the repo root from the script's own location — lets the default
+# datasets path resolve to the in-repo sheep-yolo subdir regardless of cwd.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # Load config file if present
 if [ -f "$HOME/.sheep-yolo.env" ]; then
@@ -45,7 +50,7 @@ POD_IP="${POD_IP:-}"
 POD_SSH_PORT="${POD_SSH_PORT:-}"
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/id_ed25519}"
 DATASET="${DATASET:-sheep-pose-v0.1}"
-LOCAL_DATASETS_DIR="${LOCAL_DATASETS_DIR:-$HOME/dev/lorewood-advisors/sheep-yolo/datasets}"
+LOCAL_DATASETS_DIR="${LOCAL_DATASETS_DIR:-$REPO_ROOT/sheep-yolo/datasets}"
 
 # Positional overrides
 POD_IP="${1:-$POD_IP}"

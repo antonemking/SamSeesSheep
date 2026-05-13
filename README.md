@@ -15,7 +15,7 @@ graph LR
     C --> D[YOLO-pose<br/>training set]
     D --> E[yolo train<br/>on cloud GPU pod]
     E --> F[best.pt]
-    F --> G[Inference<br/>sheep-yolo repo]
+    F --> G[Inference<br/>sheep-yolo/ subdir]
 ```
 
 ## Scope — read this first
@@ -48,7 +48,7 @@ What this *does* show: v0.2's three-video training set covers too little visual 
 
 *v0.3 running on `IMG_3583` — the model was trained on 2-fps-sampled frames from this clip; the loop above is from the source 30-fps stream.*
 
-Full per-keypoint σ tables, methodology, and caveats: [`docs/v0.3-benchmark.md`](docs/v0.3-benchmark.md). Inference + benchmark code lives in the `sheep-yolo` repo.
+Full per-keypoint σ tables, methodology, and caveats: [`docs/v0.3-benchmark.md`](docs/v0.3-benchmark.md). Inference + benchmark code lives in the [`sheep-yolo/`](sheep-yolo/) subdir.
 
 ## The pipeline
 
@@ -82,7 +82,7 @@ Export — data/labels/exports/sheep-pose-v0.N/  (YOLO-pose format,
 yolo train  (on the pod's GPU; sync-streamed from laptop via SSH)
    │
    ▼
-best.pt → synced to the sheep-yolo repo's weights/  (~10 MB)
+best.pt → synced to sheep-yolo/weights/  (~10 MB)
 ```
 
 Alongside the labeling flow, the UI also produces a per-frame ear-angle timeline with SPFES-referenced threshold bands — useful for eyeballing a clip but not the primary artifact.
@@ -123,7 +123,7 @@ bash scripts/start_pod_server.sh        # labeling server
 
 # On the laptop (after dataset reaches ~100 reviewed frames):
 ./scripts/train_on_pod.sh               # runs yolo train on the pod's GPU
-./scripts/sync_weights_from_pod.sh      # pulls best.pt to the sheep-yolo repo
+./scripts/sync_weights_from_pod.sh      # pulls best.pt to sheep-yolo/weights/
 ```
 
 Only `best.pt` (~10 MB) crosses the network. The dataset stays on the pod.
