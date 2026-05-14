@@ -36,6 +36,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
+from PIL import Image  # animated WEBP writer for README-inline loops
 from ultralytics import YOLO
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -485,6 +486,73 @@ def sigma_report_n(targets: dict[str, np.ndarray]) -> dict:
     }
 
 
+def make_n_way_webp(labels, colors, captions, alls, out_path,
+                     panel_h: int = 400, fps: int = 12, quality: int = 72):
+    """Render an animated WEBP loop suitable for inline embedding in GitHub
+    README. Same composition logic as make_n_way_sxs but smaller dimensions
+    and lower fps to keep file size in the 1–3 MB range. The window is the
+    σ window from CLIPS[SELECTED] (typically 5 sec, the motionless window).
+
+    quality=78 is the sweet spot for our content (sheep + UI overlay): below
+    ~70 introduces visible blockiness on the keypoint dots; above ~85 the
+    file grows fast without obvious quality gain.
+    """
+    cap = cv2.VideoCapture(str(CLIP))
+    src_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    src_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    src_fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    cx0, cy0, cx1, cy1 = crop_from_n_models(alls, WINDOW, src_w, src_h)
+    crop_w = cx1 - cx0
+    crop_h = cy1 - cy0
+    panel_w = int(round(panel_h * crop_w / crop_h))
+    if panel_w % 2:
+        panel_w += 1
+    scale = panel_h / crop_h
+    a, b = WINDOW
+
+    # Subsample frames from the source 30 fps stream down to `fps`.
+    stride = max(1, int(round(src_fps / fps)))
+    cap.set(cv2.CAP_PROP_POS_FRAMES, a)
+    pil_frames: list[Image.Image] = []
+    for i in range(a, b):
+        ok, frm = cap.read()
+        if not ok:
+            break
+        if (i - a) % stride != 0:
+            continue
+        cropped = cv2.resize(
+            frm[cy0:cy1, cx0:cx1], (panel_w, panel_h),
+            interpolation=cv2.INTER_CUBIC,
+        )
+        panels = []
+        for color, caption, all_kpts in zip(colors, captions, alls):
+            panel = _compose_panel_zoom(
+                cropped.copy(), all_kpts[i], scale, (cx0, cy0),
+                color, caption,
+            )
+            panels.append(panel)
+        composed_bgr = np.concatenate(panels, axis=1)
+        composed_rgb = cv2.cvtColor(composed_bgr, cv2.COLOR_BGR2RGB)
+        pil_frames.append(Image.fromarray(composed_rgb))
+    cap.release()
+
+    if not pil_frames:
+        raise RuntimeError("no frames composed for webp")
+
+    duration_ms = int(round(1000 / fps))
+    pil_frames[0].save(
+        str(out_path),
+        save_all=True,
+        append_images=pil_frames[1:],
+        format="WEBP",
+        duration=duration_ms,
+        loop=0,
+        quality=quality,
+        method=6,  # max compression effort; slow but worth it for a one-off
+    )
+    return out_path
+
+
 def make_n_way_sxs(labels, colors, captions, alls, out_path):
     cap = cv2.VideoCapture(str(CLIP))
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
@@ -649,6 +717,30 @@ def main() -> None:
         alls=[v02_all, v03_all, v04_all],
         out_path=curve_stills,
     )
+
+    # Animated WEBP loops for inline README embedding. GitHub doesn't inline
+    # MP4s without a manual UI upload, but does render animated WEBP.
+    docs_dir = ROOT.parent / "docs"  # sheep-yolo/ → sheep-seg root → docs/
+    docs_dir.mkdir(exist_ok=True)
+    v04_loop = docs_dir / "v0.4-loop.webp"
+    make_n_way_webp(
+        labels=["v0.4"],
+        colors=[V04_BGR],
+        captions=["v0.4  (405 reviewed instances)"],
+        alls=[v04_all],
+        out_path=v04_loop,
+    )
+    sxs_loop = docs_dir / "v0.2-vs-v0.4-loop.webp"
+    make_n_way_webp(
+        labels=["v0.2", "v0.4"],
+        colors=[V02_BGR, V04_BGR],
+        captions=["v0.2  (98 instances, 3 vids)",
+                  "v0.4  (405 instances, 8 vids)"],
+        alls=[v02_all, v04_all],
+        out_path=sxs_loop,
+    )
+    print(f"  v0.4 loop  -> {v04_loop} ({v04_loop.stat().st_size/1e6:.1f} MB)")
+    print(f"  SXS loop   -> {sxs_loop} ({sxs_loop.stat().st_size/1e6:.1f} MB)")
 
     report = {
         "clip": str(CLIP.relative_to(ROOT)),
