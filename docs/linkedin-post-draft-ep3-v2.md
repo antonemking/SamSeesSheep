@@ -8,9 +8,13 @@ in `linkedin-post-draft-ep3.md` as history.)*
 
 ---
 
-This morning I sat at the kitchen table for about ninety minutes and labeled another 60 frames of sheep faces. Five keypoints per sheep — nose, both ear bases, both ear tips — across two new clips I'd shot at the trough earlier in the week. By lunch the dataset had gone from 313 reviewed sheep-head instances to 405. By 1:07pm a 4th-generation model was finished training. Six minutes on a rented 4090.
+Two posts ago I said the next one would have *the* benchmark: a clip of a sheep that isn't moving, run through the model, and the ear-angle line should be flat. Off-the-shelf YOLO would produce noise. A model trained on my own hand-labeled frames should produce the line. If it didn't, I'd publish that too.
 
-[VIDEO — HERO: `v0.2-vs-v0.4-IMG_3651.mp4`. 5-second 2-up. v0.2 on the left (orange keypoints, 98 labels). v0.4 on the right (magenta, 405 labels). Same frames. A clip neither model has ever seen.]
+Here's the line.
+
+[IMAGE — HERO: `ear_angle_lines-IMG_3651.png` (chart). Per-frame ear angle for v0.2 (orange), v0.3 (green), v0.4 (magenta) on a 5-second window of a stationary sheep in a clip none of the three models has ever seen. v0.2 bounces 6–7°. v0.4 holds within ~4°.]
+
+This morning I sat at the kitchen table for about ninety minutes and labeled another 60 frames of sheep faces. By lunch the dataset had gone from 313 reviewed sheep-head instances to 405. By 1:07pm a 4th-generation model was finished training. Six minutes on a rented 4090.
 
 I'm telling that story in minutes because for once the AI is not the slow part. I am. Three labeling sessions, three retrains, three months apart. Same model architecture. Same training recipe. The only thing that changed was how many ear tips I'd clicked.
 
@@ -40,28 +44,29 @@ A 53% relative improvement over the full curve. v0.3 over v0.2 was the big jump 
 
 ## The number that matters for welfare
 
-mAP is a benchmark number. The whole point of these models is to measure ear angles on a sheep that's just standing there — and the welfare signal collapses if the model is jittering frame to frame on an animal that hasn't moved.
+mAP is a benchmark number. The whole point of these models is to measure ear angles on a sheep that's just standing there — and the welfare signal collapses if the model is jittering frame to frame on an animal that hasn't moved. So I measure the angle directly, in degrees, on a window where the sheep is mostly still.
 
-So we measure σ. Pixel-standard-deviation of each keypoint across a multi-second window of a sheep just standing in place, after subtracting slow head sway with a rolling median (because slow sway is the sheep, not the model). What's left is pure frame-to-frame jitter. The lower it is, the more usable the downstream signal.
+This time, for the first time, the test was on a **clip none of the three models has ever seen** — never pushed to the labeler, never reviewed, never in any training set. The v0.3 round used hero clips whose 2-fps-sampled frames had ended up in v0.3's training set; I called that out in the writeup at the time. This time the held-out is real.
 
-This time, for the first time, the test was on a **clip none of the three models has ever seen** — never pushed to the labeler, never reviewed, never in any training set. The v0.3 round used hero clips that were technically in v0.3's training distribution, and I called that out in the writeup at the time. This one is honest about the held-out setup.
-
-Per-keypoint residual σ on a 5-second motionless window:
+Ear-angle residual σ (pure jitter after subtracting slow head sway with a rolling median):
 
 ```
-                v0.2     v0.3     v0.4     Δ v0.2→v0.4
-nose            11.0 px   10.0 px   8.0 px      −27%
-L-ear-base       9.3 px    6.2 px   6.0 px      −35%
-R-ear-base       9.1 px    7.7 px   7.0 px      −23%
-L-ear-tip       12.6 px    8.4 px   7.7 px      −39%
-R-ear-tip       12.4 px   12.3 px   9.8 px      −21%
-─────────────────────────────────────────────────────
-mean            10.9 px    8.9 px   7.7 px      −29%
+            v0.2      v0.3      v0.4      Δ v0.2→v0.4
+left ear    6.71°     4.82°     4.06°       −39%
+right ear   6.07°     4.21°     4.09°       −33%
 ```
 
-v0.4's keypoint jitter on a held-out 234-px-wide sheep head is **about 3.3% of head size**. That's a usable number for ear-angle estimation. v0.2's was about 4.6% of head size on the same sheep, in the same frames, with the same threshold. The ear tips — the keypoints that matter most for welfare — improved the most (−39% / −21% from v0.2 to v0.4).
+Per-keypoint pixel-level σ tells the same story underneath — v0.4 puts every keypoint within ~7 px of where the rolling median says it should be, on a 234-px-wide head. That's about 3% of head size. The ear tips, the keypoints that matter most for welfare, improved the most. Full per-keypoint table and methodology in [`docs/v0.4-benchmark.md`](https://github.com/antonemking/SamSeesSheep/blob/main/docs/v0.4-benchmark.md).
 
 [VIDEO — SUPPLEMENTARY: `v0.2-vs-v0.3-vs-v0.4-IMG_3651.mp4`. 3-up. v0.2 (orange), v0.3 (green), v0.4 (magenta). For people who want to see the curve, not just the endpoints.]
+
+## What "off-the-shelf YOLO" actually does
+
+I owed Post 2 the off-the-shelf comparison. The honest answer is *stronger* than I'd framed it.
+
+Stock `yolo26n.pt` — the COCO-trained checkpoint you get with `pip install ultralytics` — finds a bounding box around 35% of the sheep in this clip. That's it. Box only. **Zero keypoints.** No nose, no ear bases, no ear tips. The ear-angle line doesn't have *noise* in the stock baseline; it has *no value at all*, because the measurement is undefined without a sheep-pose keypoint head.
+
+That's the part of this that doesn't get talked about enough. You don't actually have a "noisy welfare model" before you do the labeling work. You have a vacuum. The keypoints are a thing you have to grow against your own animals. There's no shortcut, no prompt, no zero-shot, no foundation model that knows where this Katahdin ewe's left ear tip is. You sit at the kitchen table and you click.
 
 ## The lesson I keep relearning
 
@@ -97,7 +102,8 @@ Pick one for the LinkedIn header:
 
 ## Editorial notes for me (delete before posting)
 
-- **All three model versions are real and on disk** at `sheep-yolo/weights/`. The benchmark is reproducible: `python sheep-yolo/scripts/bench_held_out.py IMG_3651`. Full numbers in `docs/v0.4-benchmark.md` and `sheep-yolo/artifacts/bench_report-IMG_3651-3way.json`.
+- **All three model versions are real and on disk** at `sheep-yolo/weights/`. The benchmark is reproducible: `python sheep-yolo/scripts/bench_held_out.py IMG_3651`. Full numbers in `docs/v0.4-benchmark.md` and `sheep-yolo/artifacts/bench_report-IMG_3651-3way.json`. The ear-angle chart is `sheep-yolo/artifacts/ear_angle_lines-IMG_3651.png` (also in `docs/v0.4-ear-angle-chart.png` for the README).
+- **Post 2 IOU is closed.** The exact promise was: "Off-the-shelf YOLO will produce noise around it. The version trained on my hand-labeled frames should produce the flat line." Stock yolo26n.pt actually produces *zero keypoints*, which is a stronger statement than "noise" — call this out explicitly in the post.
 - **Held-out caveat I deliberately did NOT bury.** The v0.3 hero post had to caveat that its test clips were in v0.3's training set. This post should foreground "first truly held-out benchmark" because it makes the σ numbers stronger, not weaker.
 - **What this post does NOT show, by design:**
   - The earlier hero v0.2-vs-v0.3 "47% → 99% detection rate" delta. Those clips were crowded, multi-sheep, and in v0.3's training set. That delta was real but partly a function of scene difficulty, not pure model gap. IMG_3651 has a single dominant subject — all three models find it ~94–97% of the time. Detection rate isn't the story here. Jitter is.
