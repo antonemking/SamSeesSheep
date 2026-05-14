@@ -12,6 +12,26 @@ The [`VALIDATION.md`](./VALIDATION.md) document is versioned alongside the code.
 
 ## [Unreleased]
 
+### Added — 2026-05-13 — sheep-pose v0.4 and the first clean held-out benchmark
+
+Third labeling round: 313 → 405 reviewed sheep-head instances across 6 → 8 videos. Same YOLO26n-pose architecture, same recipe, same compute as v0.2 and v0.3. Trained on the RunPod 4090 in ~6 min. Val pose mAP50-95 went 0.643 → 0.732.
+
+Closed the v0.3 doc's outstanding IOU: a clean apples-to-apples held-out benchmark against `IMG_3651.MOV` — never pushed to the labeler, never reviewed, NCC < 0.23 vs every training video. All three model versions (v0.2 / v0.3 / v0.4) run against it, plus stock `yolo26n.pt` as the "off-the-shelf YOLO" baseline Post 2 promised.
+
+Ear-angle residual σ on a 5-second motionless window: v0.2 6.7° / 6.1° → v0.3 4.8° / 4.2° → v0.4 4.1° / 4.1° (L / R). Stock yolo26n.pt produces zero keypoints — ear angle is unmeasurable without a sheep-pose keypoint head.
+
+#### Added
+- `sheep-yolo/scripts/bench_held_out.py` — 3-way held-out benchmark script. PyAV libx264 (CRF 18) video writer replaces cv2 mp4v default-bitrate output. Keypoint-distance dedupe handles overlapping NMS-survival detections. Pickle cache for per-model predictions so re-render iterations skip the ~3-min-per-model CPU inference.
+- `docs/v0.4-benchmark.md` — full 3-way held-out report with per-keypoint σ tables, ear-angle σ, and stock-baseline numbers.
+- `docs/v0.4-ear-angle-chart.png` — the flat-line chart Post 2 promised.
+- `docs/linkedin-post-draft-ep3-v2.md` — Part 3 v2 (full v0.2 → v0.3 → v0.4 curve framing). v1 preserved.
+- `sheep-yolo/weights/sheep-pose-v0.4-yolo26n.pt` (gitignored; produced by `train_on_pod.sh`).
+- `sheep-yolo/test-clips` symlink so the bench scripts find clips after the monorepo move.
+- `CLAUDE.md` and `AGENTS.md` — operational notes for code agents (env-file split, pod paths, gotchas, label-count snippets).
+
+#### Changed
+- `README.md` — replaced the v0.3-vs-v0.2 hero section with a v0.4 section centered on the ear-angle chart and held-out framing.
+
 ### Changed — 2026-04-17 — Scope reset to visualization artifact
 
 v0 descoped from *welfare instrument* to *visualization artifact*. A peer review flagged that the pipeline had drifted into capability-breadth rather than applied rigor — multiple segmentation backbones, multiple trackers, VLM orchestrators generating a constant, a depth-mesh feature off the critical path. The simplify branch cut ~3,700 lines to leave a single-backbone pipeline (SAM 3 Video → head-PCA midline → ear angles → chart). See `VALIDATION.md` §"Scope reset" for the claim implications.

@@ -29,26 +29,25 @@ The ear-angle thresholds shown in the observability chart come from clinical stu
 
 ![SAM 3 head + ear segmentation with derived ear-angle readout](docs/face-extract-seg.png)
 
-## v0.3 vs v0.2 — what 3× more labels does
+## v0.4 — the welfare signal is now usable
 
-Same model (YOLO26n-pose, 2.5 M params), same training recipe, same compute. Only the training-data scale changed: **98 reviewed instances across 3 videos → 313 across 6 videos**.
+Same model (YOLO26n-pose, 2.5 M params), same recipe, same compute. Three labeling sessions later: **98 → 313 → 405 reviewed instances across 3 → 6 → 8 videos**.
 
-![v0.2 vs v0.3 — side-by-side keypoint inference, looping](docs/v0.2-vs-v0.3-compare.webp)
+![Ear angle on a stationary sheep across three model versions — IMG_3651, 5-second held-out motionless window](docs/v0.4-ear-angle-chart.png)
 
-*Left: v0.2 (98 instances). Right: v0.3 (313 instances). Same conf threshold (0.25), same frames.*
+*A sheep standing still should produce a flat ear-angle line. v0.2 bounces 6–7° on both ears. v0.4 holds within ~4°. The clip is held-out — never pushed to the labeler, never reviewed, NCC < 0.23 vs every training video.*
 
-**About the clips in this comparison.** The two clips shown (`IMG_3583` and `IMG_3601`) were captured *after* v0.2's training set was frozen — so they are out-of-distribution for v0.2 — and then *included* in v0.3's training set. That means the comparison is **not** apples-to-apples held-out generalization. It is:
+**Ear-angle residual jitter on the held-out clip (degrees, lower is more usable as a welfare signal):**
 
-- **v0.2** asked to handle scenes it has never seen → 47% / 83% detection across the two clips' motionless windows, ~40 px and ~12 px keypoint jitter on a 260 px wide head.
-- **v0.3** evaluated on scenes whose 2-fps sampled frames went into training → 99% / 100% detection, residual jitter 4–6 px.
+| | left ear σ | right ear σ |
+|---|---|---|
+| v0.2 | 6.71° | 6.07° |
+| v0.3 | 4.82° | 4.21° |
+| **v0.4** | **4.06°** | **4.09°** |
 
-What this *does* show: v0.2's three-video training set covers too little visual variation to handle these new scenes, and v0.3 fits the scenes it's been trained on tightly. What it does **not** show: that v0.3 generalizes better than v0.2 to new unseen scenes. A clean apples-to-apples held-out benchmark — both models against a fresh clip neither has been trained on — is the next thing on the list.
+Stock YOLO (`yolo26n.pt`) produces **zero keypoints** on this clip. It can detect a "sheep" bounding box on ~35% of frames, but with no nose/ear landmarks the ear-angle measurement is *unmeasurable* until you label your own flock and train a keypoint head against it.
 
-![v0.3 inference loop](docs/v0.3-SSS-loop.webp)
-
-*v0.3 running on `IMG_3583` — the model was trained on 2-fps-sampled frames from this clip; the loop above is from the source 30-fps stream.*
-
-Full per-keypoint σ tables, methodology, and caveats: [`docs/v0.3-benchmark.md`](docs/v0.3-benchmark.md). Inference + benchmark code lives in the [`sheep-yolo/`](sheep-yolo/) subdir.
+**The clean held-out the v0.3 doc promised.** The earlier v0.3-vs-v0.2 hero used clips whose 2-fps-sampled frames had ended up in v0.3's training set — strong numbers, but in-distribution. `IMG_3651` is the first apples-to-apples generalization test of this stack. Full per-keypoint σ tables, side-by-side videos, and methodology: [`docs/v0.4-benchmark.md`](docs/v0.4-benchmark.md). Earlier-round artifacts in [`docs/v0.3-benchmark.md`](docs/v0.3-benchmark.md). Inference + benchmark code lives in the [`sheep-yolo/`](sheep-yolo/) subdir.
 
 ## The pipeline
 

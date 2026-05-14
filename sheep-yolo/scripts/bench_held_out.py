@@ -32,6 +32,9 @@ from pathlib import Path
 
 import av  # PyAV — h264 (libx264) writer; cv2.VideoWriter's mp4v is grainy at typical bitrates
 import cv2
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import numpy as np
 from ultralytics import YOLO
 
@@ -154,6 +157,195 @@ def predict_clip(model_path: Path, label: str) -> tuple[Path, np.ndarray, list]:
     with open(cache, "wb") as f:
         pickle.dump({"target": kpts, "all": all_kpts_per_frame}, f)
     return final, kpts, all_kpts_per_frame
+
+
+# Keypoint indices match the v0.X training schema (see VALIDATION.md).
+KPT_NOSE = 0
+KPT_L_BASE = 1
+KPT_R_BASE = 2
+KPT_L_TIP = 3
+KPT_R_TIP = 4
+
+# matplotlib uses RGB 0-1; constants above are cv2 BGR 0-255.
+V02_RGB = (V02_BGR[2] / 255, V02_BGR[1] / 255, V02_BGR[0] / 255)
+V03_RGB = (V03_BGR[2] / 255, V03_BGR[1] / 255, V03_BGR[0] / 255)
+V04_RGB = (V04_BGR[2] / 255, V04_BGR[1] / 255, V04_BGR[0] / 255)
+
+
+def _safe_angle(midline_vec: np.ndarray, ear_vec: np.ndarray) -> float:
+    """Signed angle (deg) between ear_vec and midline_vec. Positive when the
+    ear tip lies on the snout-side of the head midline (alert/forward),
+    negative when behind (drooping/back). Matches the SPFES convention used
+    in the labeler observability chart."""
+    cross = midline_vec[0] * ear_vec[1] - midline_vec[1] * ear_vec[0]
+    dot = midline_vec[0] * ear_vec[0] + midline_vec[1] * ear_vec[1]
+    return float(np.degrees(np.arctan2(cross, dot)))
+
+
+def compute_ear_angles(kpt: np.ndarray) -> tuple[float, float]:
+    """Return (L_ear_deg, R_ear_deg) for a single (5,3) keypoint array.
+
+    Head midline runs from the midpoint of the ear bases toward the nose
+    (= the snout-pointing axis of the head). The left/right ear vectors are
+    (ear_base → ear_tip). Returns (NaN, NaN) when nose or both bases are
+    missing — that's the floor on what we can measure with this keypoint
+    set.
+    """
+    nose, lb, rb, lt, rt = kpt
+    if nose[2] <= 0 or lb[2] <= 0 or rb[2] <= 0:
+        return np.nan, np.nan
+    mid = (lb[:2] + rb[:2]) / 2
+    midline = nose[:2] - mid
+    l_angle = _safe_angle(midline, lt[:2] - lb[:2]) if lt[2] > 0 else np.nan
+    r_angle = _safe_angle(midline, rt[:2] - rb[:2]) if rt[2] > 0 else np.nan
+    return l_angle, r_angle
+
+
+def _residual_sigma_1d(x: np.ndarray, w: int = 7) -> float | None:
+    """Std-dev of (x − rolling-median-w-of-x) over non-NaN entries.
+    Matches the residual-σ definition used elsewhere in this bench."""
+    ok = ~np.isnan(x)
+    if ok.sum() < 8:
+        return None
+    v = x[ok]
+    half = w // 2
+    rmed = np.empty_like(v)
+    for i in range(len(v)):
+        rmed[i] = np.median(v[max(0, i - half): min(len(v), i + half + 1)])
+    return float(np.std(v - rmed))
+
+
+def ear_angle_series(target_kpts: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Per-frame (L, R) ear angle arrays over the σ window, NaN where the
+    geometry is undefined (missing detection or kpt below confidence)."""
+    a, b = WINDOW
+    n = b - a
+    L = np.empty(n)
+    R = np.empty(n)
+    for i in range(n):
+        L[i], R[i] = compute_ear_angles(target_kpts[a + i])
+    return L, R
+
+
+def make_ear_angle_chart(targets: dict[str, np.ndarray], fps: float,
+                          out_path: Path) -> Path:
+    """Two-row matplotlib time series: left ear (top) and right ear (bottom).
+    Each row overlays v0.2/v0.3/v0.4. The point is visual: v0.4's line is
+    flat, v0.2's bounces. SPFES bands (green/amber/red) drawn behind for
+    welfare context — they're not measurement thresholds in this clip, just
+    a reading aid that matches the labeler dashboard."""
+    a, b = WINDOW
+    n = b - a
+    t = np.arange(n) / fps
+    fig, axes = plt.subplots(2, 1, figsize=(11, 6.5), sharex=True)
+    colors = {"v0.2": V02_RGB, "v0.3": V03_RGB, "v0.4": V04_RGB}
+    series_pairs = {label: ear_angle_series(arr) for label, arr in targets.items()}
+    for ax, ear_idx, ear_name in zip(axes, (0, 1), ("Left", "Right")):
+        # SPFES bands (per labeler dashboard convention)
+        ax.axhspan(-100, -10, color="red", alpha=0.05, zorder=0)
+        ax.axhspan(-10, 30, color="orange", alpha=0.05, zorder=0)
+        ax.axhspan(30, 200, color="green", alpha=0.05, zorder=0)
+        for label, (L, R) in series_pairs.items():
+            y = L if ear_idx == 0 else R
+            sig = _residual_sigma_1d(y)
+            sig_str = f"  σ={sig:.1f}°" if sig is not None else ""
+            ax.plot(t, y, color=colors[label], linewidth=1.6, alpha=0.9,
+                    label=f"{label}{sig_str}")
+        ax.set_ylabel(f"{ear_name} ear angle (°)")
+        ax.legend(loc="upper right", fontsize=9, framealpha=0.85)
+        ax.grid(True, alpha=0.25)
+    axes[-1].set_xlim(0, float(t[-1]))
+    axes[-1].set_xlabel(f"Time in motionless window (s)  ·  clip: {CLIP.stem}")
+    fig.suptitle(
+        "Ear angle on a stationary held-out sheep — same clip, three models\n"
+        "Flatter = usable welfare signal · noisier = jitter masking the signal",
+        fontsize=12,
+    )
+    plt.tight_layout(rect=(0, 0, 1, 0.96))
+    plt.savefig(out_path, dpi=140, bbox_inches="tight")
+    plt.close(fig)
+    return out_path
+
+
+def predict_stock_baseline(stock_model: str = "yolo26n.pt",
+                            label: str = "stock-yolo26n") -> tuple[Path, dict]:
+    """Run stock COCO-trained YOLO on the clip — detection only, no kpts.
+
+    This is the floor Post 2 promised to show: "off-the-shelf YOLO" applied
+    to ear-angle measurement. The truthful answer is *stronger* than
+    Post 2 framed it — stock yolo26n.pt has no keypoint head at all, so
+    ear angle isn't noisy, it's literally unmeasurable. The annotated mp4
+    shows boxes labeled `sheep`/`horse`/`cow` (closest COCO classes) and
+    not a single dot on any animal's face.
+
+    Caches the summary stats so re-renders skip the ~3 min inference cost.
+    """
+    annotated_final = ART / f"{label}-on-{CLIP.stem}.mp4"
+    cache = CACHE_DIR / f"{label}__{CLIP.stem}.pkl"
+    if cache.exists() and annotated_final.exists():
+        print(f"\n=== {label}  ({stock_model}) [cached]")
+        with open(cache, "rb") as f:
+            return annotated_final, pickle.load(f)
+
+    print(f"\n=== {label}  ({stock_model}) — detection only ===")
+    model = YOLO(stock_model)
+    out_name = f"{label}-on-{CLIP.stem}"
+    # COCO indices for the closest classes to a sheep: 17=cat (no), 19=sheep,
+    # 18=horse, 20=cow, 22=zebra. Restrict to ungulate-ish classes so YOLO
+    # doesn't draw bird/person boxes on the pasture noise.
+    sheep_class = 19
+    n_frames = 0
+    sheep_dets = 0
+    any_dets = 0
+    other_classes: dict[int, int] = {}
+    results = model.predict(
+        source=str(CLIP), conf=0.25, save=True,
+        project=str(ART / "_ultra"), name=out_name, exist_ok=True,
+        stream=True, verbose=False,
+    )
+    for r in results:
+        n_frames += 1
+        if r.boxes is None or len(r.boxes) == 0:
+            continue
+        any_dets += 1
+        for c in r.boxes.cls.cpu().numpy().astype(int):
+            if c == sheep_class:
+                sheep_dets += 1
+                break
+        for c in r.boxes.cls.cpu().numpy().astype(int):
+            if c != sheep_class:
+                other_classes[int(c)] = other_classes.get(int(c), 0) + 1
+    print(f"  frames={n_frames}  any-detection={any_dets}  sheep-class={sheep_dets}")
+
+    ultra_run_dir = ART / "_ultra" / out_name
+    annotated = None
+    for ext in (".mp4", ".avi"):
+        for p in ultra_run_dir.glob(f"*{ext}"):
+            annotated = p
+            break
+        if annotated:
+            break
+    if annotated is None:
+        raise RuntimeError(f"no annotated video found in {ultra_run_dir}")
+    annotated_final.unlink(missing_ok=True)
+    if annotated.suffix == ".mp4":
+        annotated_final.symlink_to(annotated.resolve())
+    else:
+        _transcode(annotated, annotated_final)
+
+    summary = {
+        "model": stock_model,
+        "n_frames": n_frames,
+        "any_detection": any_dets,
+        "sheep_class_detections": sheep_dets,
+        "other_class_counts": other_classes,
+        "keypoints_produced": 0,
+        "ear_angle_measurable": False,
+    }
+    CACHE_DIR.mkdir(exist_ok=True)
+    with open(cache, "wb") as f:
+        pickle.dump(summary, f)
+    return annotated_final, summary
 
 
 def dedupe_detections(arr: np.ndarray, dist_px: float = 50.0) -> np.ndarray:
@@ -395,7 +587,31 @@ def main() -> None:
     v03_all = [dedupe_detections(a) for a in v03_all]
     v04_all = [dedupe_detections(a) for a in v04_all]
 
+    # Stock COCO baseline — the "off-the-shelf YOLO" Post 2 promised. Stock
+    # yolo26n.pt has no keypoint head, so this is the literal floor: it can
+    # find the sheep box but cannot measure ear angle at all.
+    stock_mp4, stock_summary = predict_stock_baseline()
+
     sigmas = sigma_report_n({"v0.2": v02_t, "v0.3": v03_t, "v0.4": v04_t})
+
+    # Ear-angle line chart — the visual Post 2 promised. v0.2 noisy → v0.4 flat.
+    ear_angle_png = ART / f"ear_angle_lines-{CLIP.stem}.png"
+    make_ear_angle_chart(
+        {"v0.2": v02_t, "v0.3": v03_t, "v0.4": v04_t},
+        fps=30.0,
+        out_path=ear_angle_png,
+    )
+
+    # Per-model ear-angle residual σ (degrees) — the welfare-relevant scalar.
+    ear_sigmas = {}
+    for label, arr in {"v0.2": v02_t, "v0.3": v03_t, "v0.4": v04_t}.items():
+        L, R = ear_angle_series(arr)
+        ear_sigmas[label] = {
+            "L_ear_residual_sigma_deg": _residual_sigma_1d(L),
+            "R_ear_residual_sigma_deg": _residual_sigma_1d(R),
+            "n_L_visible": int((~np.isnan(L)).sum()),
+            "n_R_visible": int((~np.isnan(R)).sum()),
+        }
 
     hero_sxs = ART / f"v0.2-vs-v0.4-{CLIP.stem}.mp4"
     make_n_way_sxs(
@@ -453,7 +669,13 @@ def main() -> None:
         "hero_v0.2_vs_v0.4_png": str(hero_stills.relative_to(ROOT)),
         "curve_3way_mp4": str(curve_sxs.relative_to(ROOT)),
         "curve_3way_png": str(curve_stills.relative_to(ROOT)),
+        "ear_angle_chart_png": str(ear_angle_png.relative_to(ROOT)),
+        "stock_baseline": {
+            "annotated_mp4": str(stock_mp4.relative_to(ROOT)),
+            **stock_summary,
+        },
         "sigmas": sigmas,
+        "ear_angle_residual_sigma_deg": ear_sigmas,
     }
     res = sigmas["residual_sigma"]
     own = sigmas["own_frames_raw_sigma"]
@@ -474,6 +696,20 @@ def main() -> None:
             "v0.3": own["v0.3"]["mean_sigma"],
             "v0.4": own["v0.4"]["mean_sigma"],
         },
+        "ear_angle_residual_sigma_deg": {
+            label: {
+                "L": ear_sigmas[label]["L_ear_residual_sigma_deg"],
+                "R": ear_sigmas[label]["R_ear_residual_sigma_deg"],
+            }
+            for label in ("v0.2", "v0.3", "v0.4")
+        },
+        "off_the_shelf_yolo": (
+            f"stock {stock_summary['model']} produced "
+            f"{stock_summary['keypoints_produced']} keypoints on this clip "
+            f"({stock_summary['sheep_class_detections']}/{stock_summary['n_frames']} "
+            f"frames flagged as COCO sheep). Ear angle is unmeasurable without "
+            f"a keypoint head."
+        ),
     }
     out_json = ART / f"bench_report-{CLIP.stem}-3way.json"
     out_json.write_text(json.dumps(report, indent=2))
