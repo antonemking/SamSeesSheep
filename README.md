@@ -26,11 +26,14 @@ Full per-keypoint σ tables, methodology, and the full benchmark report: [`docs/
 
 ### Same clip, different models
 
-![v0.2 vs v0.4 keypoint placement — four stills sampled across the motionless window](docs/v0.2-vs-v0.4-stills.png)
+<p align="center">
+  <img src="docs/v0.4-loop.webp" width="32%" alt="v0.4 alone — 405 instances, magenta keypoints, anatomically correct placement frame after frame" />
+  <img src="docs/v0.2-vs-v0.4-loop.webp" width="65%" alt="v0.2 (orange) vs v0.4 (magenta) on the same frames — v0.2's keypoints wander, v0.4's lock on" />
+</p>
 
-*Top row: v0.2 (orange dots, 98 training instances). Bottom row: v0.4 (magenta, 405). Same frames, same conf threshold. v0.2 places ear tips in mid-air and confuses left vs right; v0.4 lands every keypoint on anatomy on every frame.*
+*Left: v0.4 alone (magenta keypoints, 405 reviewed training instances). Right: v0.2 (orange) and v0.4 (magenta) on the same frames. v0.2 places ear tips in mid-air and confuses left vs right; v0.4 lands every keypoint on anatomy on every frame.*
 
-Side-by-side comparison videos in the repo: [`v0.2-vs-v0.4-IMG_3651.mp4`](sheep-yolo/artifacts/v0.2-vs-v0.4-IMG_3651.mp4) (hero, 2-up) and [`v0.2-vs-v0.3-vs-v0.4-IMG_3651.mp4`](sheep-yolo/artifacts/v0.2-vs-v0.3-vs-v0.4-IMG_3651.mp4) (3-up curve). GitHub doesn't inline MP4s without a manual upload — click through to play.
+Static stills grid: [`docs/v0.2-vs-v0.4-stills.png`](docs/v0.2-vs-v0.4-stills.png). Full-length comparison videos: [`v0.2-vs-v0.4-IMG_3651.mp4`](sheep-yolo/artifacts/v0.2-vs-v0.4-IMG_3651.mp4) (hero, 2-up) and [`v0.2-vs-v0.3-vs-v0.4-IMG_3651.mp4`](sheep-yolo/artifacts/v0.2-vs-v0.3-vs-v0.4-IMG_3651.mp4) (3-up curve).
 
 ## Scope — read this first
 
