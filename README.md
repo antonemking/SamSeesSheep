@@ -4,34 +4,9 @@
 
 Built and validated against a single Katahdin flock in Middletown, DE. Generalization to other breeds and conditions is future work.
 
+*v0.4 · 405 reviewed instances · ~4° ear-angle σ on a held-out clip · stock YOLO produces zero keypoints*
+
 > Part of an ongoing series applying AI to small-flock animal welfare.
-
-![Labeling UI — keypoint review on a flock frame, schema v2 records keypoints per instance](docs/labeling-ui.png)
-
-```mermaid
-graph LR
-    A[Video clip] --> B[SAM 3 Video<br/>text-prompted<br/>head + ear + nose]
-    B --> C[Labeling UI<br/>multi-subject review<br/>instances per frame]
-    C --> D[YOLO-pose<br/>training set]
-    D --> E[yolo train<br/>on cloud GPU pod]
-    E --> F[best.pt]
-    F --> G[Inference<br/>sheep-yolo/ subdir]
-```
-
-## Scope — read this first
-
-This repo owns **labeling and training**. It is not a welfare instrument, and no claims in the interface should be read as clinical.
-
-- **What it does:** segments **every sheep** in a short clip via SAM 3 Video text prompts (`"sheep head"`, `"sheep ear"`, `"sheep nose"`), producing head/ear/nose masks per instance per frame. Presents a keypoint labeling UI that lets me (the reviewer) confirm or correct SAM's auto-placed nose tip, ear bases, and ear tips for **every detected instance** (schema v2: `instances[]` per frame). Exports the reviewed keypoints as a YOLO-pose training dataset. On a GPU pod, trains a small YOLO-pose model against that dataset. Ships the trained weights to the inference repo.
-- **What it does not do:** detect pain, score welfare, generalize across flocks, or validate against documented stress events. Validation against stress events is future work. Inference and σ-benchmarking happen in a separate repo (see below).
-
-The ear-angle thresholds shown in the observability chart come from clinical studies ([McLennan & Mahmoud 2019](https://pmc.ncbi.nlm.nih.gov/articles/PMC6523241/), [Reefmann et al. 2009](https://www.sciencedirect.com/science/article/pii/S0168159109001610), [Boissy et al. 2011](https://www.sciencedirect.com/science/article/pii/S0031938411000369)). Applying them to ambient pasture observation is a real and unresolved gap. [`VALIDATION.md`](./VALIDATION.md) is the contract.
-
-![SAM 3 head + ear segmentation with derived ear-angle readout](docs/face-extract-seg.png)
-
-## v0.4 — the welfare signal is now usable
-
-Same model (YOLO26n-pose, 2.5 M params), same recipe, same compute. Three labeling sessions later: **98 → 313 → 405 reviewed instances across 3 → 6 → 8 videos**.
 
 ![Ear angle on a stationary sheep across three model versions — IMG_3651, 5-second held-out motionless window](docs/v0.4-ear-angle-chart.png)
 
@@ -47,9 +22,28 @@ Same model (YOLO26n-pose, 2.5 M params), same recipe, same compute. Three labeli
 
 Stock YOLO (`yolo26n.pt`) produces **zero keypoints** on this clip. It can detect a "sheep" bounding box on ~35% of frames, but with no nose/ear landmarks the ear-angle measurement is *unmeasurable* until you label your own flock and train a keypoint head against it.
 
-**The clean held-out the v0.3 doc promised.** The earlier v0.3-vs-v0.2 hero used clips whose 2-fps-sampled frames had ended up in v0.3's training set — strong numbers, but in-distribution. `IMG_3651` is the first apples-to-apples generalization test of this stack. Full per-keypoint σ tables, side-by-side videos, and methodology: [`docs/v0.4-benchmark.md`](docs/v0.4-benchmark.md). Earlier-round artifacts in [`docs/v0.3-benchmark.md`](docs/v0.3-benchmark.md). Inference + benchmark code lives in the [`sheep-yolo/`](sheep-yolo/) subdir.
+Full per-keypoint σ tables, methodology, and the full benchmark report: [`docs/v0.4-benchmark.md`](docs/v0.4-benchmark.md).
 
-## The pipeline
+### Same clip, different models
+
+![v0.2 vs v0.4 keypoint placement — four stills sampled across the motionless window](docs/v0.2-vs-v0.4-stills.png)
+
+*Top row: v0.2 (orange dots, 98 training instances). Bottom row: v0.4 (magenta, 405). Same frames, same conf threshold. v0.2 places ear tips in mid-air and confuses left vs right; v0.4 lands every keypoint on anatomy on every frame.*
+
+Side-by-side comparison videos in the repo: [`v0.2-vs-v0.4-IMG_3651.mp4`](sheep-yolo/artifacts/v0.2-vs-v0.4-IMG_3651.mp4) (hero, 2-up) and [`v0.2-vs-v0.3-vs-v0.4-IMG_3651.mp4`](sheep-yolo/artifacts/v0.2-vs-v0.3-vs-v0.4-IMG_3651.mp4) (3-up curve). GitHub doesn't inline MP4s without a manual upload — click through to play.
+
+## Scope — read this first
+
+This repo owns **labeling and training**. It is not a welfare instrument, and no claims in the interface should be read as clinical.
+
+- **What it does:** segments **every sheep** in a short clip via SAM 3 Video text prompts (`"sheep head"`, `"sheep ear"`, `"sheep nose"`), producing head/ear/nose masks per instance per frame. Presents a keypoint labeling UI that lets me (the reviewer) confirm or correct SAM's auto-placed nose tip, ear bases, and ear tips for **every detected instance** (schema v2: `instances[]` per frame). Exports the reviewed keypoints as a YOLO-pose training dataset. On a GPU pod, trains a small YOLO-pose model against that dataset. Ships the trained weights to the inference repo.
+- **What it does not do:** detect pain, score welfare, generalize across flocks, or validate against documented stress events. Validation against stress events is future work. Inference and σ-benchmarking happen in a separate repo (see below).
+
+The ear-angle thresholds shown in the labeler's observability chart come from clinical studies ([McLennan & Mahmoud 2019](https://pmc.ncbi.nlm.nih.gov/articles/PMC6523241/), [Reefmann et al. 2009](https://www.sciencedirect.com/science/article/pii/S0168159109001610), [Boissy et al. 2011](https://www.sciencedirect.com/science/article/pii/S0031938411000369)). Applying them to ambient pasture observation is a real and unresolved gap. [`VALIDATION.md`](./VALIDATION.md) is the contract.
+
+![SAM 3 head + ear segmentation with derived ear-angle readout](docs/face-extract-seg.png)
+
+## How it's built
 
 ```
 Video clip (phone capture, 15–30s, 1080p)
@@ -84,7 +78,9 @@ yolo train  (on the pod's GPU; sync-streamed from laptop via SSH)
 best.pt → synced to sheep-yolo/weights/  (~10 MB)
 ```
 
-Alongside the labeling flow, the UI also produces a per-frame ear-angle timeline with SPFES-referenced threshold bands — useful for eyeballing a clip but not the primary artifact.
+![Labeling UI — keypoint review on a flock frame, schema v2 records keypoints per instance](docs/labeling-ui.png)
+
+Alongside the labeling flow, the UI also produces a per-frame ear-angle timeline with SPFES-referenced threshold bands — useful for eyeballing a clip but not the primary artifact. See "The labeler's per-clip ear-angle chart" below.
 
 ## Related repo — sheep-yolo
 
@@ -134,9 +130,9 @@ The labeling work is the single most irreplaceable thing in this project. It's p
 1. **RunPod Network Volume.** On the pod, `data/labels/` is a symlink to a Network Volume (mount path `/mnt/labels`, attached via the RunPod UI at pod-deploy time). Volumes survive Stop/Resume *and* Terminate / spot preemption; container disk does not. `scripts/start_pod_server.sh` refuses to boot if the mount is missing, so labels never silently land on ephemeral disk. Setup in [`docs/CLOUD.md`](./docs/CLOUD.md#1a-create-the-network-volume-durable-labels-storage).
 2. **Laptop rsync mirror.** `./scripts/backup_dataset.sh` pulls the full `data/labels/` tree to `~/Backups/sheep-seg/labels/`. Manual, weekly. Covers RunPod-outage / volume-delete / billing-lapse scenarios the volume alone can't.
 
-## Reading the ear-angle chart (observability only)
+## The labeler's per-clip ear-angle chart
 
-While reviewing a clip in the labeler, the dashboard shows a per-frame ear-angle timeline. It's not a measurement instrument — the chart exists so I can spot obviously-wrong keypoint placements at a glance.
+This is a **different** chart from the model-comparison one at the top. While reviewing a clip in the labeler, the dashboard shows a per-frame ear-angle timeline for *that one clip*. It's not a measurement instrument — it exists so I can spot obviously-wrong keypoint placements at a glance during review.
 
 ![Per-frame ear-angle timeline with SPFES-referenced threshold bands](ekg-kindof.png)
 
@@ -150,7 +146,7 @@ Trust deltas, not absolutes. A within-animal EUP% change before/after a document
 
 - **Validation against documented stress events** (hoof trim, tagging, separation, startle). This is the welfare-instrument project — separate undertaking with a capture protocol and a kill criterion.
 - **Continuous monitoring** — trained model running at the water trough / handling chute, flagging ear-posture anomalies over time windows.
-- **σ-benchmark across dataset versions** — formal comparison of v0.1 → v0.N trained models against a motionless-sheep baseline, tracked in `sheep-seg-conversation/LOG.md` (cross-team log).
+- **σ-benchmark across dataset versions** — formal comparison of v0.1 → v0.N (currently v0.4) trained models against a motionless-sheep baseline. The reproducible bench script is [`sheep-yolo/scripts/bench_held_out.py`](sheep-yolo/scripts/bench_held_out.py).
 - **Real-time mode** — current pipeline is batch; a streaming inference path on edge hardware comes after the v0.N model proves out.
 
 **Kill criterion for the welfare-instrument follow-up (not this artifact):** if fewer than 70% of documented stress events show measurable EUP% change once the trained YOLO-pose model is running, the welfare project ends and the writeup of what failed is itself the deliverable.
