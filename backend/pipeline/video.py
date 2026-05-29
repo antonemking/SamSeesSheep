@@ -50,6 +50,21 @@ def _full_pipeline_enabled() -> bool:
     return False
 
 
+def _crop_refine_enabled() -> bool:
+    """True when the deterministic crop-and-upscale refinement pass runs.
+
+    Opt-in via SHEEPSEG_REFINE_CROP=1; off by default so the original
+    propagation path is unchanged. After the main pass, weak primary
+    keypoints get re-derived from a full-res crop of the head re-run
+    through SAM. Intended for full-pipeline GPUs — on a 6 GB card the
+    extra per-crop sessions risk OOM. No LLM in the loop: which frames
+    get refined is decided by deterministic validators (see
+    _instance_needs_refine).
+    """
+    import os
+    return os.environ.get("SHEEPSEG_REFINE_CROP") == "1"
+
+
 def unload_video_model():
     """Drop the SAM 3 Video model from GPU and clear the allocator.
 
@@ -107,12 +122,18 @@ def _load_video_model():
 
 
 def _extract_frames(
-    video_path: Path, max_frames: int = 30, target_fps: float = 2.0
-) -> list[Image.Image]:
+    video_path: Path, max_frames: int = 30, target_fps: float = 2.0,
+    return_fullres: bool = False,
+):
     """Extract evenly-spaced frames from a video as PIL Images.
 
     Falls back to even sampling when fps metadata is unreliable
     (common for webm files where pyav can return time-base values).
+
+    When return_fullres=True, also returns the un-downscaled frames at the
+    same sampled indices (for the crop-refine pass, which needs real pixels
+    that the MAX_DIM downscale threw away). Returns just the downscaled list
+    otherwise, so the default call site is unchanged.
     """
     import imageio.v3 as iio
 
@@ -151,8 +172,11 @@ def _extract_frames(
     #   anyway and YOLO training uses HUMAN labels, not SAM-derived ones.
     MAX_DIM = 512 if _full_pipeline_enabled() else 384
     pil_frames = []
+    fullres_frames = []
     for i in idxs:
         img = Image.fromarray(frames[i])
+        if return_fullres:
+            fullres_frames.append(img.copy())
         w, h = img.size
         if max(w, h) > MAX_DIM:
             scale = MAX_DIM / max(w, h)
@@ -162,6 +186,8 @@ def _extract_frames(
         "Video: %d total frames, fps_used=%.1f, sampling %d frames at %s",
         total, actual_fps, len(pil_frames), pil_frames[0].size,
     )
+    if return_fullres:
+        return pil_frames, fullres_frames
     return pil_frames
 
 
@@ -352,6 +378,236 @@ def _build_head_instance(
     }
 
 
+def _run_crop_sessions(crop_img: Image.Image, prompt_list: list[str]) -> dict:
+    """Run SAM 3 Video on a single cropped frame, one session per prompt.
+
+    Reuses the already-loaded global model — no extra load. Returns
+    {prompt_text: {"obj_id_to_mask": {oid: cpu_logits}, "obj_id_to_score": {}}}
+    for the one frame. Sessions are reset between prompts to keep the
+    allocator clean (same discipline as the main propagation loop).
+    """
+    import gc as _gc
+    import torch
+
+    out: dict = {}
+    for prompt_text in prompt_list:
+        session = _video_processor.init_video_session(
+            video=[crop_img], inference_device=_device
+        )
+        _video_processor.add_text_prompt(session, prompt_text)
+        frame_out = {"obj_id_to_mask": {}, "obj_id_to_score": {}}
+        for output in _video_model.propagate_in_video_iterator(
+            session, show_progress_bar=False
+        ):
+            frame_out = {
+                "obj_id_to_mask": {k: v.cpu() for k, v in output.obj_id_to_mask.items()},
+                "obj_id_to_score": dict(output.obj_id_to_score),
+            }
+            break  # single-frame video → one output
+        out[prompt_text] = frame_out
+        session.reset_inference_session()
+        del session
+        _gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    return out
+
+
+def _instance_needs_refine(
+    inst: dict, frame_w: int, frame_h: int,
+    conf_thresh: float = 0.55, min_head_frac: float = 0.10,
+    min_tip_base_sep: float = 6.0,
+) -> bool:
+    """Deterministic validators — no model in the loop, just thresholds on
+    what SAM already returned. True when the auto keypoints look weak enough
+    that a full-res crop re-run is worth the cost.
+
+    Flags: (1) low head confidence, (2) small head (detail lost at MAX_DIM
+    downscale), (3) any ear keypoint missing, (4) degenerate ear where tip
+    collapsed onto base.
+    """
+    if float(inst.get("head_confidence") or 0.0) < conf_thresh:
+        return True
+    bb = inst.get("head_bbox") or {}
+    area_frac = (bb.get("w", 0) * bb.get("h", 0)) / max(1, frame_w * frame_h)
+    if area_frac < min_head_frac:
+        return True
+    kps = inst.get("candidate_keypoints") or []
+    if len(kps) >= 5:
+        if any(int(kps[i].get("v", 0)) == 0 for i in (1, 2, 3, 4)):
+            return True
+        for base_i, tip_i in ((1, 3), (2, 4)):
+            b, t = kps[base_i], kps[tip_i]
+            if b.get("v", 0) and t.get("v", 0):
+                sep = ((b["x"] - t["x"]) ** 2 + (b["y"] - t["y"]) ** 2) ** 0.5
+                if sep < min_tip_base_sep:
+                    return True
+    return False
+
+
+def _refine_primary_keypoints_on_crops(
+    per_frame: list[dict],
+    fullres_frames: list[Image.Image],
+    subject: str,
+    full_pipeline: bool,
+    primary_head: Optional[int],
+    max_refine_frames: int = 8,
+    refine_dim: int = 512,
+    pad_frac: float = 0.30,
+) -> None:
+    """Deterministic crop-and-upscale refinement of the primary head's
+    keypoints. For each weak primary instance: crop the full-res frame
+    around the head bbox, upscale to refine_dim, re-run SAM, re-derive
+    keypoints with the SAME ear_angle geometry, map back to downscaled
+    frame coords, and overwrite candidate_keypoints in place.
+
+    Bounded to the primary subject and a hard frame cap so latency stays
+    under the RunPod proxy timeout. Mutates per_frame instances directly,
+    so _persist_label_artifacts picks up the refined points.
+    """
+    if primary_head is None or not fullres_frames:
+        return
+
+    head_key = f"{subject} head"
+    ear_key = f"{subject} ear"
+    nose_key = f"{subject} nose"
+    prompt_list = [head_key, ear_key, nose_key] if full_pipeline else [head_key, ear_key]
+
+    # Collect weak primary instances, weakest (lowest confidence) first.
+    candidates: list[tuple] = []
+    for fi, f in enumerate(per_frame):
+        fw, fh = f.get("frame_width"), f.get("frame_height")
+        if not fw or not fh:
+            continue
+        for inst in f.get("instances") or []:
+            if int(inst.get("obj_id", -1)) != int(primary_head):
+                continue
+            if _instance_needs_refine(inst, fw, fh):
+                candidates.append(
+                    (float(inst.get("head_confidence") or 0.0), fi, inst, fw, fh)
+                )
+            break  # only the primary instance per frame
+    if not candidates:
+        logger.info("Crop-refine: no primary instances flagged — nothing to do")
+        return
+    candidates.sort(key=lambda c: c[0])
+    candidates = candidates[:max_refine_frames]
+    logger.info("Crop-refine: %d flagged primary instance(s) within cap", len(candidates))
+
+    from backend.pipeline.ear_angle import _extract_ear_keypoints, _mask_centroid
+
+    refined = 0
+    for _conf, fi, inst, fw, fh in candidates:
+        full = fullres_frames[fi]
+        FW, FH = full.size
+        sx, sy = FW / fw, FH / fh  # downscaled → fullres
+        bb = inst.get("head_bbox") or {}
+        bx, by = bb.get("x", 0) * sx, bb.get("y", 0) * sy
+        bw, bh = bb.get("w", 0) * sx, bb.get("h", 0) * sy
+        if bw < 2 or bh < 2:
+            continue
+        x0 = max(0, int(bx - bw * pad_frac))
+        y0 = max(0, int(by - bh * pad_frac))
+        x1 = min(FW, int(bx + bw * (1 + pad_frac)))
+        y1 = min(FH, int(by + bh * (1 + pad_frac)))
+        if x1 - x0 < 4 or y1 - y0 < 4:
+            continue
+        crop = full.crop((x0, y0, x1, y1))
+        cw, ch = crop.size
+        u = refine_dim / max(cw, ch)  # crop → upscaled
+        crop_up = crop.resize((max(1, int(cw * u)), max(1, int(ch * u))), Image.LANCZOS)
+        up_w, up_h = crop_up.size
+
+        sess = _run_crop_sessions(crop_up, prompt_list)
+
+        # Head in crop: highest-scoring non-trivial mask (a tight crop makes
+        # _pick_primary_object's upper area bound reject the head, so pick here).
+        head_out = sess.get(head_key, {})
+        head_oid, best = None, -1.0
+        for oid, mt in head_out.get("obj_id_to_mask", {}).items():
+            if float((mt.squeeze(0) > 0).sum().item()) < 0.02 * up_h * up_w:
+                continue
+            s = float(head_out.get("obj_id_to_score", {}).get(oid, 0) or 0)
+            if s > best:
+                best, head_oid = s, oid
+        if head_oid is None:
+            continue
+        head_mask = _mask_from_logits(
+            head_out["obj_id_to_mask"][head_oid], target_size=(up_h, up_w)
+        )
+        head_centroid = _mask_centroid(head_mask > 127)
+        if head_centroid is None:
+            continue
+        dilated = cv2.dilate(head_mask, np.ones((15, 15), np.uint8), iterations=1) > 127
+
+        # Ears: up to 2 highest-scoring masks attached to the head.
+        ear_out = sess.get(ear_key, {})
+        ear_cands: list[tuple] = []
+        for oid, mt in ear_out.get("obj_id_to_mask", {}).items():
+            m = _mask_from_logits(mt, target_size=(up_h, up_w))
+            if m.sum() < 30:
+                continue
+            eb = m > 127
+            cs = np.where(eb)
+            cy, cx = int(cs[0].mean()), int(cs[1].mean())
+            if not dilated[cy, cx] and (eb & dilated).sum() / max(1, eb.sum()) < 0.15:
+                continue
+            score = float(ear_out.get("obj_id_to_score", {}).get(oid, 0) or 0)
+            ear_cands.append((score, float(cx), eb))
+        ear_cands.sort(key=lambda t: -t[0])
+        ear_cands = ear_cands[:2]
+        sl = sr = None
+        if len(ear_cands) == 2:
+            ear_cands.sort(key=lambda t: t[1])  # screen-x: left, right
+            sl, sr = ear_cands[0][2], ear_cands[1][2]
+        elif len(ear_cands) == 1:
+            sl, sr = (
+                (ear_cands[0][2], None) if ear_cands[0][1] < head_centroid[0]
+                else (None, ear_cands[0][2])
+            )
+
+        def to_ds(xc: float, yc: float) -> tuple[float, float]:
+            return (x0 + xc / u) / sx, (y0 + yc / u) / sy
+
+        kps = inst["candidate_keypoints"]
+
+        # Nose: centroid of a nose mask sitting on the head.
+        nose_out = sess.get(nose_key)
+        if nose_out is not None:
+            for oid, mt in nose_out.get("obj_id_to_mask", {}).items():
+                nm = _mask_from_logits(mt, target_size=(up_h, up_w))
+                mc = np.where(nm > 127)
+                if len(mc[0]) <= 15:
+                    continue
+                if dilated[int(mc[0].mean()), int(mc[1].mean())]:
+                    nc = _mask_centroid(nm > 127)
+                    if nc is not None:
+                        dx, dy = to_ds(nc[0], nc[1])
+                        kps[0] = {"x": dx, "y": dy, "v": 1}
+                    break
+
+        for mask, base_i, tip_i in ((sl, 1, 3), (sr, 2, 4)):
+            if mask is None:
+                continue
+            kp = _extract_ear_keypoints(mask, head_centroid)
+            if kp is None:
+                continue
+            (bx2, by2), (tx2, ty2) = kp
+            dbx, dby = to_ds(bx2, by2)
+            dtx, dty = to_ds(tx2, ty2)
+            kps[base_i] = {"x": dbx, "y": dby, "v": 1}
+            kps[tip_i] = {"x": dtx, "y": dty, "v": 1}
+
+        inst["candidate_keypoints"] = kps
+        inst["refined"] = True
+        refined += 1
+
+    logger.info(
+        "Crop-refine: refined %d/%d flagged primary instances",
+        refined, len(candidates),
+    )
+
+
 def analyze_video(
     video_path: Path,
     subject: str = "sheep",
@@ -390,7 +646,14 @@ def analyze_video(
     )
 
     start = time.time()
-    pil_frames = _extract_frames(video_path, max_frames=max_frames)
+    refine_crop = _crop_refine_enabled()
+    if refine_crop:
+        pil_frames, fullres_frames = _extract_frames(
+            video_path, max_frames=max_frames, return_fullres=True
+        )
+    else:
+        pil_frames = _extract_frames(video_path, max_frames=max_frames)
+        fullres_frames = None
     if not pil_frames:
         return {"error": "no frames extracted", "per_frame": []}
 
@@ -934,6 +1197,17 @@ def analyze_video(
         frame_data["tracking_gap"] = (len(instances) == 0)
 
         per_frame.append(frame_data)
+
+    # Deterministic crop-and-upscale refinement (opt-in, SHEEPSEG_REFINE_CROP=1).
+    # Wrapped so a refinement failure never breaks the main analyze — on error
+    # we keep the original SAM-derived keypoints.
+    if refine_crop:
+        try:
+            _refine_primary_keypoints_on_crops(
+                per_frame, fullres_frames, subject, full_pipeline, primary_head,
+            )
+        except Exception:
+            logger.exception("Crop-refine pass failed — keeping original keypoints")
 
     # Build an annotated GIF showing masks tracking across frames
     gif_url = _build_annotated_gif(

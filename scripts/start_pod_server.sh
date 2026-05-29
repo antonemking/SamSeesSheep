@@ -138,6 +138,10 @@ fi
 # 5. Start uvicorn
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export SHEEPSEG_FULL_PIPELINE=1
+# Deterministic crop-and-upscale keypoint refinement. Off by default (original
+# pipeline). Flip on the new pipeline by launching with:
+#   SHEEPSEG_REFINE_CROP=1 bash scripts/start_pod_server.sh
+export SHEEPSEG_REFINE_CROP="${SHEEPSEG_REFINE_CROP:-0}"
 
 echo ""
 echo "[startup] Starting uvicorn on 0.0.0.0:8000..."
