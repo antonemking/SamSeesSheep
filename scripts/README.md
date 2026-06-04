@@ -28,7 +28,7 @@ crosses the subdir boundary.
 
 | Location | Path | Responsibility |
 |---|---|---|
-| Pod (RunPod cloud GPU — 4090 / L40S / H100) | repo root | SAM 3 pipeline, labeling UI, dataset export, `yolo train` |
+| Pod (Vast.ai cloud GPU — 4090 / L40S / H100) | repo root | SAM 3 pipeline, labeling UI, dataset export, `yolo train` |
 | Laptop | `scripts/` (repo root) | Scripts that SSH the pod: trigger training, pull weights |
 | Laptop | `sheep-yolo/` subdir | Inference pipeline, σ benchmark, demo UI — consumes `best.pt` |
 
@@ -88,9 +88,10 @@ POD_IP=38.65.239.23
 POD_SSH_PORT=27921
 ```
 
-Update this file whenever the pod restarts (RunPod assigns a new IP/port on
-resume). All scripts that need SSH info read from this one place — no editing
-individual scripts on pod restart.
+Update this file whenever the instance's network identity changes (Vast
+assigns a new public IP / external port mapping when you stop→start or re-rent).
+All scripts that need SSH info read from this one place — no editing individual
+scripts when that happens.
 
 Pod-side `start_pod_server.sh` uses a different file, `.env.pod`, for things
 like `HF_HOME` and CUDA config. Only `.env.pod.example` is committed to the
@@ -100,38 +101,46 @@ separate: `.env.pod` is portable across pods (lives on the pod's disk);
 `~/.sheep-yolo.env` is laptop-local and tracks the pod instance you're
 pointing at today.
 
-## What happens after a pod restart (RunPod → Stop then Resume)
+## What happens after an instance stop→start (or re-rent)
 
-1. RunPod console → your pod → Resume. New public IP and SSH port.
-2. Update `~/.sheep-yolo.env` on the laptop with the new values.
+1. Vast console → your instance → start it (or rent a new one **on the same
+   host** if you want the volume back). Grab the new IP / external SSH port
+   from "IP Port Info".
+2. Update `~/.sheep-yolo.env` (and `.env.pod`) on the laptop with the new values.
 3. `./scripts/pod_ssh.sh` → you're in. `cd /workspace/SamSeesSheep && git pull`.
 4. `bash scripts/start_pod_server.sh` → labeling server back up.
 5. Resume labeling.
 
-Disk on the pod is persistent across Stop→Resume, so all prior labels, cached
-model weights, and run artifacts survive. Only the network identity changes.
+Container storage persists across stop→start of the *same* instance, so prior
+labels, cached weights, and run artifacts survive that. A **destroy** wipes
+container storage — only the attached Vast Volume (and your laptop mirror)
+carry the labels across a destroy.
 
 ## Durability — how the dataset stays alive
 
 The dataset is the one piece of state that represents unrecoverable human
 work. Two layers protect it:
 
-1. **RunPod Network Volume (on the pod).** `data/labels/` is a symlink to a
-   volume mounted at `LABELS_VOLUME` (default `/mnt/labels`). Network Volumes
-   survive Stop/Resume *and* Terminate and spot preemption — the container
-   disk doesn't. `start_pod_server.sh` sets up the symlink on first run and
+1. **Vast Volume (on the pod).** `data/labels/` is a symlink to a volume
+   mounted at `LABELS_VOLUME` (default `/workspace/labels`). A Vast Volume
+   survives instance **destroy** — but, unlike a RunPod Network Volume, it is
+   pinned to one physical machine and only reattaches to instances on that
+   same host. `start_pod_server.sh` sets up the symlink on first run and
    refuses to boot if the expected mount path isn't there (so labels can't
-   silently land on ephemeral disk). Volume is attached via the RunPod UI at
-   pod-deploy time — see `docs/CLOUD.md` for the setup steps.
-2. **Laptop rsync mirror (off the pod).** `backup_dataset.sh` mirrors the
-   pod's full `data/labels/` tree to `~/Backups/sheep-seg/labels/` via rsync
-   `--delete-after`. Covers the RunPod outage / volume-delete / billing-lapse
-   scenarios the volume alone can't. Run weekly by hand; docstring has a
-   cron snippet if you want it automated.
+   silently land on ephemeral disk). Create it in Console → Volumes and attach
+   at rent time — see `docs/CLOUD.md` for the setup steps.
+2. **Laptop rsync mirror (off the pod) — primary on Vast.** `backup_dataset.sh`
+   mirrors the pod's full `data/labels/` tree to `~/Backups/sheep-seg/labels/`
+   via rsync `--delete-after`. Because a Vast Volume can be stranded on a busy
+   host, this off-pod mirror is the real cross-machine guarantee, not just a
+   backstop. **Run it before you destroy an instance.** Covers host-unavailable
+   / volume-delete / billing-lapse scenarios the volume alone can't; docstring
+   has a cron snippet if you want it automated.
 
-If you terminate a pod without a volume attached (or with
-`LABELS_VOLUME_SKIP=1`), assume labels are gone. The whole point of these
-scripts is so you never have to think about that outcome.
+If you destroy an instance without a volume attached (or with
+`LABELS_VOLUME_SKIP=1`) and no fresh laptop mirror, assume labels are gone.
+The whole point of these scripts is so you never have to think about that
+outcome — on Vast that means keeping the mirror current.
 
 ## Dataset versioning
 
@@ -168,7 +177,7 @@ the sheep-yolo weights dir, and `YOLOE_MODEL=...` picks which one loads.
 | `Missing pod SSH info` | `~/.sheep-yolo.env` doesn't exist or has stale IP/port after a pod resume. |
 | `No best.pt found on pod` | `train_on_pod.sh` hasn't completed yet, or `DATASET` in your env doesn't match what was trained. |
 | Export step fails with 404 | Pod's labeling server isn't running. `start_pod_server.sh` on the pod. |
-| SSH times out | Pod is stopped, or RunPod assigned a new IP. Check the console, update `~/.sheep-yolo.env`. |
+| SSH times out | Instance is stopped, or Vast remapped the IP/port. Check the console (IP Port Info), update `~/.sheep-yolo.env`. |
 
 ## What sheep-yolo does with the weights
 

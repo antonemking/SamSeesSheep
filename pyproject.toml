@@ -14,14 +14,15 @@ dependencies = [
     # numpy<2 because torch 2.1.x was compiled against numpy 1.x; under
     # numpy 2.x torch emits "Failed to initialize NumPy: _ARRAY_API not found"
     # and subtle runtime mismatches. Stays here until we can bump torch to
-    # >=2.3 (which is numpy-2-safe) without breaking the pod's NCCL.
+    # >=2.3 (which is numpy-2-safe) without breaking the pinned torch above.
     "numpy>=1.26,<2",
-    # Pin torch to 2.5.x — transformers 5.x requires torch>=2.4 for SAM 3,
-    # and torch 2.11+ bundles NCCL that's missing symbols on RunPod's
-    # runpod-torch-v21 template (undefined symbol: ncclCommWindowDeregister).
-    # torch 2.5.1 + cu121 hits the narrow window: new enough for SAM 3, old
-    # enough that its bundled NCCL works on the pod. Verified working on
-    # RTX 4090 with driver 570.x / CUDA 12.8.
+    # Pin torch to 2.5.x — transformers 5.x requires torch>=2.4 for SAM 3.
+    # The upper bound originally dodged a NCCL symbol break (undefined symbol:
+    # ncclCommWindowDeregister) on RunPod's runpod-torch-v21 template; that
+    # template constraint no longer applies on Vast (you pick your own base
+    # image), but 2.5.1 + cu121 remains a known-good single-GPU config for SAM 3
+    # + Ultralytics, so the pin stays until there's a reason to bump. Verified
+    # on RTX 4090 / CUDA 12.8; re-verify torch.cuda on the first Vast image.
     "torch>=2.5,<2.6",
     "torchvision>=0.20,<0.21",
     "transformers>=4.40",
@@ -36,9 +37,9 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "httpx>=0.27"]
 
-# Pull torch from PyTorch's CUDA 12.1 index. cu121 wheels work on RunPod
-# RTX 4090 pods with CUDA 12.8 drivers (forward compat) and match the
-# transformers>=5 torch>=2.4 requirement. cu118 would also work for the
+# Pull torch from PyTorch's CUDA 12.1 index. cu121 wheels work on RTX 4090
+# pods with CUDA 12.8 drivers (forward compat — same on Vast hosts) and match
+# the transformers>=5 torch>=2.4 requirement. cu118 would also work for the
 # driver but torch 2.5+ cu118 is less common.
 [[tool.uv.index]]
 name = "pytorch-cu121"

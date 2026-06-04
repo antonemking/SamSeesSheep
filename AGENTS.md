@@ -7,7 +7,7 @@ short, command-oriented, and in sync with `scripts/README.md`.
 
 This repo owns the sheep keypoint labeling and training flywheel:
 
-1. Run SAM 3 + labeling UI on a RunPod GPU pod.
+1. Run SAM 3 + labeling UI on a Vast.ai GPU instance.
 2. Review sheep-head keypoints in the browser.
 3. Export reviewed `v=2` keypoints to YOLO-pose format.
 4. Train YOLO-pose on the pod GPU.
@@ -26,8 +26,10 @@ normal YOLO training on the laptop GPU.
 - Trained pod runs: `/workspace/runs/pose/<DATASET>.run/weights/best.pt`
 - Local synced weights: `sheep-yolo/weights/<DATASET>.pt`
 
-`data/labels/` on the pod should be backed by the RunPod Network Volume
-mounted at `LABELS_VOLUME` (default `/mnt/labels`). Treat labels as the most
+`data/labels/` on the pod should be backed by a Vast Volume mounted at
+`LABELS_VOLUME` (default `/workspace/labels`). The volume survives instance
+destroy but is pinned to one physical machine, so treat the laptop backup
+(`backup_dataset.sh`) as the real safety net. Treat labels as the most
 valuable project state.
 
 ## Config Files
@@ -44,8 +46,8 @@ There are currently two connection config conventions:
   - `scripts/fetch_dataset.sh`
 
 Both should contain current `POD_IP`, `POD_SSH_PORT`, and optionally `SSH_KEY`.
-After a RunPod Stop/Resume, update these values from the RunPod console before
-running laptop-side scripts.
+After stopping/starting or re-renting a Vast instance, update these values from
+the Vast console (IP Port Info) before running laptop-side scripts.
 
 Never commit secrets. `.env.pod` is gitignored; `.env.pod.example` is the
 template.

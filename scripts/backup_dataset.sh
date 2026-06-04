@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Laptop-side: rsync the pod's entire data/labels/ tree to a local backup dir.
 #
-# Why this exists: the pod's labels live on a RunPod Network Volume, which
-# survives Stop/Resume AND Terminate. But it's still a single point of
-# failure (RunPod outage, accidental volume delete, billing lapse). This
-# script is the second layer — an off-pod mirror on the laptop.
+# Why this exists: the pod's labels live on a Vast Volume, which survives
+# instance destroy — but ONLY reattaches on the same physical machine, and is
+# still a single point of failure (host unavailable, accidental volume delete,
+# billing lapse). On Vast this off-pod mirror is the PRIMARY durability layer,
+# not just a backup: run it before you destroy an instance.
 #
 # Covers the WHOLE labels tree, not just data/labels/exports/. That means
 # in-progress per-video JSON state (segmentations, keypoint reviews, etc.)

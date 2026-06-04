@@ -11,8 +11,16 @@ The training loop spans three places:
 | Where | What it owns |
 |---|---|
 | **Laptop** (this repo) | Orchestration scripts, the `sheep-yolo/` subdir (inference + σ benchmark), the off-pod backup mirror. |
-| **Pod** (RunPod 4090 / L40S / H100) | Labeling backend (SAM 3 + FastAPI UI), the dataset on a Network Volume, `yolo train` runs. |
-| **Network Volume** (mounted on the pod at `/workspace`) | Durable storage for labels, model cache, train runs. Survives Stop/Resume **and** Terminate. |
+| **Pod** (Vast.ai GPU instance — 4090 / L40S / H100) | Labeling backend (SAM 3 + FastAPI UI), the dataset on a Vast Volume, `yolo train` runs. |
+| **Vast Volume** (mounted on the instance at `/workspace/labels`) | Durable storage for labels, model cache, train runs. Survives instance **destroy** — but is pinned to one physical machine (see below). |
+
+> **Migrated off RunPod → Vast.ai.** Two consequences worth internalizing:
+> (1) A Vast Volume only reattaches on the **same host** it was created on, so
+> the laptop mirror (`backup_dataset.sh`) — not the volume — is the real
+> durability guarantee; back up before destroying an instance. (2) Vast has no
+> proxy: the UI is reached directly at `http://<public-ip>:<external-port>`
+> (port 8000 must be requested with `-p 8000:8000` in the instance's Docker
+> options; the external port is dynamic, see Vast "IP Port Info").
 
 Pod-side repo lives at `/workspace/SamSeesSheep` (not `sheep-seg`). Labels at
 `/workspace/SamSeesSheep/data/labels/` are a symlink to `/workspace/labels`.
@@ -75,11 +83,14 @@ download if HF cache isn't already on the volume).
 - **`pkill -f "uvicorn backend.main"` kills your own SSH session.** `pkill -f`
   matches against the full command line, and your SSH command contains the
   literal pattern. Use `fuser -k 8000/tcp` or grab the PID via `ss -tlnp` first.
-- **"Unexpected token '<', `<!DOCTYPE`... is not valid JSON" in the UI.** The
-  RunPod HTTP proxy in front of port 8000 has a ~60–100 s request timeout. SAM
-  3 propagation on the full head+ear+nose pipeline runs ~90 s and often
-  exceeds it. The backend succeeds and writes `review.json` either way — the
-  user can just refresh the page. Not a real error.
+- **"Unexpected token '<', `<!DOCTYPE`... is not valid JSON" in the UI.**
+  This was a *RunPod-proxy* artifact: its proxy in front of port 8000 had a
+  ~60–100 s timeout that SAM 3's ~90 s head+ear+nose propagation blew past
+  (backend still wrote `review.json`; a refresh fixed it). On **Vast** the port
+  is hit directly with no proxy, so this specific timeout is gone. If you see a
+  long-request hang on Vast now, suspect the host's own network or uvicorn, not
+  a proxy — the backend still writes `review.json`, so a refresh remains the
+  recovery.
 - **Pod branch drift.** `/workspace/SamSeesSheep` on the pod can be on a
   feature branch (e.g. `simplify`) while local is on `main`. Check
   `git rev-parse --abbrev-ref HEAD` on the pod before assuming code parity.

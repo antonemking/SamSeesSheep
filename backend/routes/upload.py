@@ -69,11 +69,12 @@ async def import_video(
 ) -> dict:
     """Register a video that's already on the pod's filesystem.
 
-    Workaround for RunPod's HTTP/2 proxy dropping large multipart uploads with
-    ERR_HTTP2_PROTOCOL_ERROR. Instead of uploading through the proxy, scp the
-    file to the pod, then call this endpoint with the path. Same downstream
-    effect as /upload_video — creates a video_id, copies the file into
-    UPLOAD_DIR, extracts the first-frame thumbnail.
+    Lets push_clip.sh avoid HTTP multipart uploads entirely: scp the file to
+    the pod, then call this endpoint with the path. Originally a workaround for
+    RunPod's HTTP/2 proxy dropping large uploads with ERR_HTTP2_PROTOCOL_ERROR;
+    still the preferred path on Vast (direct port, but big browser uploads are
+    flaky regardless). Same downstream effect as /upload_video — creates a
+    video_id, copies the file into UPLOAD_DIR, extracts the first-frame thumbnail.
 
     Call from the pod itself (localhost) OR from the browser — either works.
     """

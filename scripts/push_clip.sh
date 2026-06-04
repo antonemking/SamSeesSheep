@@ -2,7 +2,9 @@
 # Laptop-side: upload one or more .mov clips to the pod, register each with
 # the labeling server, and print the dashboard URL for each clip.
 #
-# Skips RunPod's HTTP/2 upload limit by going over SSH.
+# Uploads over SSH rather than HTTP, so it doesn't matter whether the host's
+# port mapping (RunPod proxy before, direct Vast port now) chokes on large
+# multipart uploads.
 #
 # Usage (with .env.pod populated):
 #   ./scripts/push_clip.sh ~/Downloads/clip.mov
@@ -126,7 +128,7 @@ for VIDEO in "$@"; do
   if [ -n "$POD_HTTP_URL" ]; then
     echo "[push] ${POD_HTTP_URL%/}/?video_id=$VIDEO_ID"
   else
-    echo "[push] https://<pod-id>-8000.proxy.runpod.net/?video_id=$VIDEO_ID"
+    echo "[push] set POD_HTTP_URL in .env.pod (http://<public-ip>:<external-port>) to print a clickable link · video_id=$VIDEO_ID"
   fi
   pushed=$((pushed + 1))
 done

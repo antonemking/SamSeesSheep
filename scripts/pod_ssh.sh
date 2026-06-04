@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Laptop-side: open an SSH session to the RunPod pod.
+# Laptop-side: open an SSH session to the Vast.ai instance.
 #
 # Two usages:
 #
@@ -37,7 +37,7 @@ Either put them in .env.pod (see .env.pod.example):
 Or pass on the command line:
   $0 <pod-ip> <pod-ssh-port>
 
-Get the current values from RunPod console → your pod → Connect → SSH over exposed TCP.
+Get the current values from Vast.ai console → your instance → IP Port Info (external port → internal 22).
 EOF
   exit 1
 fi

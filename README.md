@@ -94,7 +94,7 @@ The work splits across two repos:
 | **sheep-seg** (this one) | SAM 3 labeling UI, dataset export, on-pod YOLO-pose training, script-side orchestration |
 | **sheep-yolo** | Inference pipeline, σ-on-motionless-sheep benchmark, demo UI — consumes `best.pt` produced here |
 
-Heavy compute (SAM 3, YOLO training) runs on a cloud GPU pod (RunPod — 4090 / L40S / H100, whatever's available) that clones this repo. Inference runs locally on a 6 GB GTX 1660 Ti using the trained weights — which is the whole point: train once in the cloud, infer forever on hardware I own. [`scripts/README.md`](./scripts/README.md) explains the pod-side orchestration in detail.
+Heavy compute (SAM 3, YOLO training) runs on a cloud GPU pod (Vast.ai — 4090 / L40S / H100, whatever's available) that clones this repo. Inference runs locally on a 6 GB GTX 1660 Ti using the trained weights — which is the whole point: train once in the cloud, infer forever on hardware I own. [`scripts/README.md`](./scripts/README.md) explains the pod-side orchestration in detail.
 
 ## Run it — labeling
 
@@ -116,7 +116,7 @@ Open `http://localhost:8000`. Drop a sheep video. Wait 1–3 minutes for SAM 3 t
 Local 6 GB VRAM can't fit the YOLO training run (batch=8 imgsz=640). Training happens on a cloud GPU pod. End-to-end orchestration is in [`scripts/README.md`](./scripts/README.md); the short version:
 
 ```bash
-# On the pod (RunPod cloud GPU, SSH'd in):
+# On the pod (Vast.ai cloud GPU, SSH'd in):
 bash scripts/start_pod_server.sh        # labeling server
 
 # On the laptop (after dataset reaches ~100 reviewed frames):
@@ -130,8 +130,8 @@ Only `best.pt` (~10 MB) crosses the network. The dataset stays on the pod.
 
 The labeling work is the single most irreplaceable thing in this project. It's protected in two layers:
 
-1. **RunPod Network Volume.** On the pod, `data/labels/` is a symlink to a Network Volume (mount path `/mnt/labels`, attached via the RunPod UI at pod-deploy time). Volumes survive Stop/Resume *and* Terminate / spot preemption; container disk does not. `scripts/start_pod_server.sh` refuses to boot if the mount is missing, so labels never silently land on ephemeral disk. Setup in [`docs/CLOUD.md`](./docs/CLOUD.md#1a-create-the-network-volume-durable-labels-storage).
-2. **Laptop rsync mirror.** `./scripts/backup_dataset.sh` pulls the full `data/labels/` tree to `~/Backups/sheep-seg/labels/`. Manual, weekly. Covers RunPod-outage / volume-delete / billing-lapse scenarios the volume alone can't.
+1. **Vast Volume.** On the pod, `data/labels/` is a symlink to a Vast Volume (mount path `/workspace/labels`, created in Console → Volumes and attached at instance-rent time). A Vast Volume survives instance destroy — but only reattaches on the **same physical machine**, so it's not the datacenter-wide guarantee RunPod Network Volumes gave. `scripts/start_pod_server.sh` refuses to boot if the mount is missing, so labels never silently land on ephemeral disk. Setup in [`docs/CLOUD.md`](./docs/CLOUD.md).
+2. **Laptop rsync mirror — the real safety net.** `./scripts/backup_dataset.sh` pulls the full `data/labels/` tree to `~/Backups/sheep-seg/labels/`. On Vast this is primary, not optional: run it before destroying an instance, since the volume can be stranded on a busy host. Covers host-unavailable / volume-delete / billing-lapse scenarios the volume alone can't.
 
 ## The labeler's per-clip ear-angle chart
 
