@@ -91,6 +91,8 @@ data/results/
 /.dvc/cache
 /.dvc/tmp
 .env.pod
+.env.pod.runpod
+.env.pod.vast
 .pushed_clips.tsv
 
 # Claude Code session-local settings (machine-local)
@@ -103,3 +105,6 @@ sheep-yolo/test-clips/
 sheep-yolo/LinkedInPostArtifacts/
 sheep-yolo/mobileclip_blt.ts
 sheep-yolo/.sheep-yolo.env
+sheep-yolo/sheep-yolo.env
+sheep-yolo/sheep-yolo.env.runpod
+sheep-yolo/sheep-yolo.env.vast
