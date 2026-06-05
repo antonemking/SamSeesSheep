@@ -85,6 +85,17 @@ ssh "${SSH_OPTS[@]}" "root@$POD_IP" "echo ok && uname -a" || {
   exit 1
 }
 
+# 1b. Fix DNS + prefer IPv4. Some Vast hosts return bogus / IPv6-only answers
+# for huggingface.co specifically, which breaks `hf auth login` and the SAM 3
+# download (TLS EOF / no route). Public resolvers + IPv4 precedence fix it.
+echo ""
+echo "[boot] Fixing DNS (public resolvers + prefer IPv4)..."
+ssh "${SSH_OPTS[@]}" "root@$POD_IP" bash <<'REMOTE'
+printf "nameserver 1.1.1.1\nnameserver 8.8.8.8\n" > /etc/resolv.conf 2>/dev/null || echo "[boot-remote] WARN: could not write /etc/resolv.conf (read-only?)"
+grep -q "precedence ::ffff:0:0/96  100" /etc/gai.conf 2>/dev/null || echo "precedence ::ffff:0:0/96  100" >> /etc/gai.conf
+echo "[boot-remote] huggingface.co -> $(getent ahostsv4 huggingface.co | head -1 | awk '{print $1}')"
+REMOTE
+
 # 2. Clone or pull the repo
 echo ""
 echo "[boot] Cloning / updating ${REPO_DIR}..."
@@ -122,6 +133,23 @@ else
     "root@${POD_IP}:${LABELS_VOLUME%/}/"
 fi
 
+# 4b. Seed HF token from the laptop so SAM 3 authenticates without a manual
+# `hf auth login`. Lands in BOTH the default path and HF_HOME
+# (/workspace/.hf-cache), which is what start_pod_server.sh sources.
+if [ -f "$HOME/.cache/huggingface/token" ]; then
+  echo ""
+  echo "[boot] Seeding HF token from laptop -> pod..."
+  ssh "${SSH_OPTS[@]}" "root@$POD_IP" "mkdir -p /workspace/.hf-cache /root/.cache/huggingface"
+  scp -P "$POD_SSH_PORT" -i "$SSH_KEY" -o StrictHostKeyChecking=accept-new \
+    "$HOME/.cache/huggingface/token" "root@${POD_IP}:/workspace/.hf-cache/token"
+  scp -P "$POD_SSH_PORT" -i "$SSH_KEY" -o StrictHostKeyChecking=accept-new \
+    "$HOME/.cache/huggingface/token" "root@${POD_IP}:/root/.cache/huggingface/token"
+  echo "[boot] HF token seeded."
+else
+  echo ""
+  echo "[boot] No laptop HF token (~/.cache/huggingface/token) — log in on the box manually."
+fi
+
 # 5. Write pod-side .env.pod
 echo ""
 echo "[boot] Writing pod-side ${REPO_DIR}/.env.pod ..."
@@ -141,11 +169,10 @@ Remaining manual steps (one-time per fresh Vast instance):
   1. Point laptop scripts at Vast:
        ./scripts/use_cloud.sh vast
 
-  2. SSH in and log into HuggingFace (needed for SAM 3 download):
+  2. HuggingFace auth is auto-seeded from your laptop token (if present).
+     If bootstrap printed "No laptop HF token", log in once:
        ./scripts/pod_ssh.sh
-       cd ${REPO_DIR}
-       uv run hf auth login    # paste your HF token
-       exit
+       cd ${REPO_DIR} && uv run hf auth login   # paste token, then 'exit'
 
   3. Start the labeling server (detached, so the SSH session can close):
        ssh -p $POD_SSH_PORT -i $SSH_KEY root@$POD_IP \\
