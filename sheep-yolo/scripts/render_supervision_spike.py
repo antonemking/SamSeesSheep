@@ -41,6 +41,10 @@ ROI = (1220, 80, 1560, 390)
 MAGENTA = sv.Color(r=255, g=0, b=255)
 CYAN = sv.Color(r=0, g=200, b=255)
 KPT_TH = 0.4
+# supervision's EdgeAnnotator uses 1-based keypoint indices; our SKEL is
+# zero-based because the rest of SamSeesSheep indexes the five YOLO-pose points
+# directly as nose/l-base/r-base/l-tip/r-tip.
+SV_SKEL = [(a + 1, b + 1) for a, b in SKEL]
 
 
 def parse_args() -> argparse.Namespace:
@@ -58,6 +62,10 @@ def parse_args() -> argparse.Namespace:
                         "around frame ~380, so --start-frame 380 populates the zone")
     p.add_argument("--conf", type=float, default=0.25)
     p.add_argument("--imgsz", type=int, default=960)
+    p.add_argument("--raw-sv-keypoint-annotators", action="store_true",
+                   help="draw raw supervision keypoint annotators without the "
+                        "SamSeesSheep confidence filter; useful only for API "
+                        "inspection, not showcase output")
     return p.parse_args()
 
 
@@ -89,6 +97,43 @@ def ear_text(kpts_xy: np.ndarray, kpts_conf: np.ndarray) -> tuple[str, tuple[int
     return " ".join(parts), (int(k[0, 0]), int(k[0, 1]))
 
 
+def edge_safe_keypoints(keypoints: sv.KeyPoints) -> sv.KeyPoints:
+    """Return a copy with low-confidence points zeroed for EdgeAnnotator.
+
+    supervision's keypoint annotators are generic drawing helpers: they do not
+    apply our YOLO-pose confidence threshold. EdgeAnnotator skips zeroed points,
+    so this keeps low-confidence ears/noses from producing noisy skeleton lines.
+    """
+    if keypoints.confidence is None or len(keypoints) == 0:
+        return keypoints
+    xy = keypoints.xy.copy()
+    xy[keypoints.confidence <= KPT_TH] = 0
+    return sv.KeyPoints(
+        xy=xy,
+        class_id=keypoints.class_id,
+        confidence=keypoints.confidence,
+        data=keypoints.data,
+    )
+
+
+def draw_confident_vertices(scene: np.ndarray, keypoints: sv.KeyPoints) -> None:
+    """Draw only keypoints above SamSeesSheep's confidence threshold.
+
+    VertexAnnotator currently draws every xy coordinate it receives, regardless
+    of confidence. That made the first spike output look worse than the original
+    EKG renderer. Keep showcase visuals confidence-aware.
+    """
+    if len(keypoints) == 0:
+        return
+    conf = (keypoints.confidence if keypoints.confidence is not None
+            else np.ones(keypoints.xy.shape[:2]))
+    for pts, scores in zip(keypoints.xy, conf):
+        for (x, y), score in zip(pts, scores):
+            if score <= KPT_TH:
+                continue
+            cv2.circle(scene, (int(x), int(y)), 5, (255, 0, 255), -1)
+
+
 def main() -> None:
     args = parse_args()
     clip = resolve(args.clip)
@@ -112,7 +157,7 @@ def main() -> None:
 
     # --- supervision annotators ---
     vertex_annotator = sv.VertexAnnotator(color=MAGENTA, radius=5)
-    edge_annotator = sv.EdgeAnnotator(color=MAGENTA, thickness=2, edges=list(SKEL))
+    edge_annotator = sv.EdgeAnnotator(color=MAGENTA, thickness=2, edges=SV_SKEL)
     box_annotator = sv.BoxAnnotator(thickness=1)
 
     # --- supervision zone (ROI) evaluation ---
@@ -141,8 +186,14 @@ def main() -> None:
 
             annotated = frame.copy()
             annotated = box_annotator.annotate(annotated, detections)
-            annotated = edge_annotator.annotate(annotated, keypoints)
-            annotated = vertex_annotator.annotate(annotated, keypoints)
+            if args.raw_sv_keypoint_annotators:
+                # API inspection mode only: draws all keypoint xy values exactly
+                # as supervision receives them, without SamSeesSheep filtering.
+                annotated = edge_annotator.annotate(annotated, keypoints)
+                annotated = vertex_annotator.annotate(annotated, keypoints)
+            else:
+                annotated = edge_annotator.annotate(annotated, edge_safe_keypoints(keypoints))
+                draw_confident_vertices(annotated, keypoints)
             annotated = zone_annotator.annotate(annotated)
 
             # Overlay reused ear-angle readout for instances inside the ROI.

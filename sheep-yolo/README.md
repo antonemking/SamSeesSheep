@@ -108,6 +108,11 @@ surface anything that justifies a rewrite.
 - ❌ No keypoint *geometry* (we still own `ears()`/`ang()` — the actual signal);
   no equivalent of the crop + live matplotlib EKG panel; not worth a required
   dependency for the core paths.
+- ⚠️ The first spike output can look worse than the EKG renderer if drawn with
+  raw supervision keypoint annotators: they are generic drawing helpers and do
+  not apply SamSeesSheep's confidence threshold for us. The default script now
+  keeps showcase output confidence-filtered; `--raw-sv-keypoint-annotators` is
+  only for API inspection.
 - ⚠️ `sv.ByteTrack` is **deprecated** in 0.28.0 (tracking moving to a standalone
   `trackers` package). This spike does **no tracking**; the EKG renderer keeps
   Ultralytics' built-in ByteTrack. Do not migrate tracking here.
