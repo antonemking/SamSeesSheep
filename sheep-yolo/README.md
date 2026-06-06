@@ -79,6 +79,42 @@ Env knobs (`backend/config.py` for full list):
 - Run → annotated MP4 plays + one ear-angle trace per tracked sheep on the
   chart (solid = left, dashed = right) with SPFES up / neutral / down bands.
 
+## Optional: Roboflow `supervision` spike (LOR-123)
+
+`scripts/render_supervision_spike.py` is a throwaway probe of the Roboflow
+[`supervision`](https://supervision.roboflow.com) toolkit (v0.28.0). It runs
+v0.7 YOLO-pose over a bounded sample of `test-clips/IMG_3651.MOV` and renders an
+annotated MP4 into `artifacts/` (gitignored), exercising `sv.Detections` /
+`sv.KeyPoints.from_ultralytics`, supervision's video IO
+(`VideoInfo` / `get_video_frames_generator` / `VideoSink`), the
+`VertexAnnotator` / `EdgeAnnotator` keypoint annotators, and `PolygonZone` for
+ROI hit-counting. Ear-angle math is reused verbatim from `render_ekg.py`.
+
+supervision is intentionally **not** a dependency of this repo — run it one-off:
+
+```bash
+uv run --with supervision scripts/render_supervision_spike.py            # first 90 frames
+uv run --with supervision scripts/render_supervision_spike.py \
+    --start-frame 380 --max-frames 90                                    # ewe inside the ROI
+```
+
+**Recommendation: optional artifact / reporting layer only.** The spike did not
+surface anything that justifies a rewrite.
+
+- ✅ Cleaner video IO than the manual `cv2.VideoWriter` dance; `from_ultralytics`
+  converters remove boilerplate; `PolygonZone` is a real upgrade over the inline
+  center-in-box ROI test and is the piece worth promoting first if we build
+  multi-region paddock reports.
+- ❌ No keypoint *geometry* (we still own `ears()`/`ang()` — the actual signal);
+  no equivalent of the crop + live matplotlib EKG panel; not worth a required
+  dependency for the core paths.
+- ⚠️ `sv.ByteTrack` is **deprecated** in 0.28.0 (tracking moving to a standalone
+  `trackers` package). This spike does **no tracking**; the EKG renderer keeps
+  Ultralytics' built-in ByteTrack. Do not migrate tracking here.
+
+This README section is the durable tracked summary; generated MP4s and any
+expanded local notes stay ignored with the rest of `artifacts/` / `docs/`.
+
 ## What this is not
 
 Not a trained sheep-parts model. Not a welfare claim. Not a product. See
