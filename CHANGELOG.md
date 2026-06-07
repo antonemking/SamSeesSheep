@@ -32,6 +32,42 @@ Ear-angle residual σ on a 5-second motionless window: v0.2 6.7° / 6.1° → v0
 #### Changed
 - `README.md` — replaced the v0.3-vs-v0.2 hero section with a v0.4 section centered on the ear-angle chart and held-out framing.
 
+### Added — 2026-05-20 — v0.5 training run + Vast.ai migration
+
+Fifth YOLO26n-pose training run. Migrated GPU compute from RunPod to Vast.ai for cost flexibility. Same labeling workflow, same recipe, same held-out benchmark methodology. Left ear σ improved (4.06° → 3.66°), right ear σ slightly regressed (4.09° → 4.30°). ROI detections improved (149 → 153 of 155 frames).
+
+#### Added
+- `scripts/bootstrap_vast.sh` — Vast.ai instance bring-up script (CUDA drivers, uv, git clone, HF cache).
+- `.env.pod.vast` — Vast.ai connection config template.
+- `sheep-yolo/artifacts/bench_report-IMG_3651-v04v05.json` — v0.4 vs v0.5 held-out comparison.
+- `sheep-yolo/artifacts/v0.4-vs-v0.5-IMG_3651.mp4` — side-by-side comparison video.
+- `sheep-yolo/weights/sheep-pose-v0.5-yolo26n.pt` (gitignored).
+
+### Added — 2026-05-27 — v0.6 training run
+
+Sixth YOLO26n-pose training run. Mixed result: right ear σ at all-time best (3.55°) but left ear σ regressed to 4.65° (worst since v0.2). Demonstrates that more data doesn't monotonically improve all keypoints — per-keypoint coverage and per-session labeling consistency matter at least as much as instance count.
+
+#### Added
+- `sheep-yolo/artifacts/bench_report-IMG_3651-v04v05v06.json` — 3-way held-out comparison.
+- `sheep-yolo/artifacts/v0.4-vs-v0.5-vs-v0.6-IMG_3651.mp4` — 3-way comparison video.
+- `sheep-yolo/weights/sheep-pose-v0.6-yolo26n.pt` (gitignored).
+
+### Added — 2026-06-06 — v0.7 training run + flock ear-angle monitor + dedup tooling
+
+Seventh YOLO26n-pose training run. Left ear σ at 3.70° (second-best), right ear at 4.46°. Introduced keypoint-distance deduplication to handle overlapping NMS-survival detections (the "supervision spike" investigation confirmed ByteTrack's internal Kalman filter as the right dedup layer; supervision PolygonZone used for ROI filtering in bench renders). Added multi-sheep flock ear-angle monitor — six ewes tracked simultaneously with one live ear-angle lane each.
+
+#### Added
+- `sheep-yolo/scripts/render_ekg.py` — multi-lane flock ear-angle EKG renderer.
+- `sheep-yolo/scripts/render_dedup.py` — keypoint-distance deduplication renderer.
+- `sheep-yolo/scripts/render_supervision_spike.py` — supervision library integration spike.
+- `sheep-yolo/docs/supervision-spike.md` — technical decision record for the spike.
+- `sheep-yolo/artifacts/bench_report-IMG_3651-v04v05v07.json` — 3-way held-out comparison.
+- `sheep-yolo/artifacts/v0.4-vs-v0.5-vs-v0.7-IMG_3651.mp4` — 3-way comparison video.
+- `sheep-yolo/artifacts/synced-lanes-6ewes-IMG_3651.mp4` — 6-ewe flock ear monitor.
+- `sheep-yolo/artifacts/flock-multi-ear-ekg-IMG_3651.mp4` — multi-sheep simultaneous EKG.
+- `assets/v0.7-flock-ear-monitor.webp` — flock monitor hero still for README.
+- `sheep-yolo/weights/sheep-pose-v0.7-yolo26n.pt` (gitignored).
+
 ### Changed — 2026-04-17 — Scope reset to visualization artifact
 
 v0 descoped from *welfare instrument* to *visualization artifact*. A peer review flagged that the pipeline had drifted into capability-breadth rather than applied rigor — multiple segmentation backbones, multiple trackers, VLM orchestrators generating a constant, a depth-mesh feature off the critical path. The simplify branch cut ~3,700 lines to leave a single-backbone pipeline (SAM 3 Video → head-PCA midline → ear angles → chart). See `VALIDATION.md` §"Scope reset" for the claim implications.

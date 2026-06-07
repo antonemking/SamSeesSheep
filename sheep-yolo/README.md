@@ -123,7 +123,7 @@ expanded local notes stay ignored with the rest of `artifacts/` / `docs/`.
 ## What this is not
 
 Not a trained sheep-parts model. Not a welfare claim. Not a product. See
-`docs/linkedin-post-draft.md` and `sheep-chat.md` for the framing.
+the project [`README.md`](../README.md) and [`VALIDATION.md`](../VALIDATION.md) for scope and framing.
 
 ## Validation references
 
