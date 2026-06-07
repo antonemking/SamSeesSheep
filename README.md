@@ -8,6 +8,15 @@ Built and validated against a single Katahdin flock in Middletown, DE. Generaliz
 
 > Part of an ongoing series applying AI to small-flock animal welfare.
 
+### The whole flock's ears, live (v0.7)
+
+<p align="center">
+  <img src="assets/v0.7-flock-ear-monitor.webp" width="100%"
+       alt="Six ewes tracked simultaneously in one clip — each with a live ear-angle lane" />
+</p>
+
+*v0.7 reads every sheep facing the camera at once — six ewes here, one live ear-angle lane each (a lane fills only while that ewe faces the camera). Identity is per-track and human-confirmed; re-identifying look-alike sheep across clips is unsolved — an ear tag is the honest answer. A measurement instrument, not a welfare readout.*
+
 ![Ear angle on a stationary sheep across three model versions — IMG_3651, 5-second held-out motionless window](docs/v0.4-ear-angle-chart.png)
 
 *A sheep standing still should produce a flat ear-angle line. v0.2 bounces 6–7° on both ears. v0.4 holds within ~4°. The clip is held-out — never pushed to the labeler, never reviewed, NCC < 0.23 vs every training video.*
