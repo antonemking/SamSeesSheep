@@ -54,9 +54,8 @@ data/video/
 *.heic
 !docs/**/*.png
 !docs/**/*.jpg
-# Keep all data and docs local
+# Keep all data local
 data/
-docs/
 
 # Annotations (commit only the schema, not the labels themselves until reviewed)
 data/annotations/
@@ -83,9 +82,7 @@ logs/
 *.log
 reports/runs/
 
-# Runtime data
-data/uploads/
-data/results/
+# Runtime data (already covered by data/ above, kept as explicit docs)
 
 # DVC (if added later)
 /.dvc/cache

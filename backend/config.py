@@ -2,13 +2,6 @@
 
 from pathlib import Path
 
-# Load .env if present (for ANTHROPIC_API_KEY and any other secrets)
-try:
-    from dotenv import load_dotenv
-    load_dotenv(Path(__file__).parent.parent / ".env")
-except ImportError:
-    pass
-
 # Register HEIC support globally
 try:
     from pillow_heif import register_heif_opener
@@ -22,13 +15,10 @@ DATA_DIR = PROJECT_ROOT / "data"
 UPLOAD_DIR = DATA_DIR / "uploads"
 RESULTS_DIR = DATA_DIR / "results"
 LABELS_DIR = DATA_DIR / "labels"
-WEIGHTS_DIR = PROJECT_ROOT / "weights"
-
 # Ensure directories exist
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 LABELS_DIR.mkdir(parents=True, exist_ok=True)
-WEIGHTS_DIR.mkdir(parents=True, exist_ok=True)
 
 # Ear angle thresholds (derived from SPFES literature)
 # McLennan et al. 2019, Reefmann et al. 2009
@@ -41,9 +31,6 @@ EAR_DOWN_THRESHOLD_DEG = -10.0
 
 # Minimum contour area (fraction of image area) to consider a mask valid
 MIN_MASK_AREA_FRACTION = 0.001
-
-# Claude API
-CLAUDE_MODEL = "claude-sonnet-4-20250514"
 
 # Server
 HOST = "0.0.0.0"
