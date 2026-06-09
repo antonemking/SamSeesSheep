@@ -97,6 +97,17 @@ CLIPS = {
         "window": (367, 522),           # 155 frames ≈ 5.1 s @ 30 fps
         "roi": (1220, 80, 1560, 390),
     },
+    "Test_Clip_Morning": {
+        # HELD OUT — lives in test-clips/. Calibrated with v0.7 YOLO-pose
+        # + ByteTrack. Best calm target is track id=215, a background tan
+        # sheep isolated near the fence. Window: frames 742..891 (5.0 s),
+        # target detected on 148/150 frames; centroid std cx=48 cy=25.
+        # ROI padded ~half-head around centroid range cx [1393,1560]
+        # cy [360,445] to exclude foreground neighbours.
+        "path": ROOT.parent / "test-clips" / "Test_Clip_Morning.mov",
+        "window": (742, 892),           # 150 frames ≈ 5.0 s @ 30 fps
+        "roi": (1234, 267, 1719, 538),
+    },
 }
 
 # Selected via CLI: `python bench_v02_v03.py IMG_3601`. Defaults to IMG_3583.
@@ -534,8 +545,13 @@ def main() -> None:
     stills_path = ART / f"v0.2-vs-v0.3-{CLIP.stem}.png"
     make_stills_grid(v02_target, v03_target, v02_all, v03_all, stills_path)
 
+    try:
+        clip_label = str(CLIP.relative_to(ROOT))
+    except ValueError:
+        clip_label = str(CLIP.relative_to(ROOT.parent))
+
     report = {
-        "clip": str(CLIP.relative_to(ROOT)),
+        "clip": clip_label,
         "training_set_v0.2": ["6f689b79", "7e53dfab", "d6873739"],
         "training_set_v0.3": ["6f689b79", "7e53dfab", "d6873739",
                               "00d25853", "0d1655d2", "c74474f9"],
