@@ -23,7 +23,7 @@
 #   LOCAL_LABELS=...   (default: ~/Backups/sheep-seg/labels)
 #   SEED_SKIP=1        skip the labels rsync (use when re-running after labels already seeded)
 
-set -e
+set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
@@ -38,8 +38,8 @@ if [ -f .env.pod.vast ]; then
   set +a
 fi
 
-POD_IP="${1:-$POD_IP}"
-POD_SSH_PORT="${2:-$POD_SSH_PORT}"
+POD_IP="${1:-${POD_IP:-}}"
+POD_SSH_PORT="${2:-${POD_SSH_PORT:-}}"
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/id_ed25519}"
 REPO_URL="${REPO_URL:-$(git config --get remote.origin.url 2>/dev/null || echo)}"
 LABELS_VOLUME="${LABELS_VOLUME:-/workspace/labels}"
@@ -100,7 +100,7 @@ REMOTE
 echo ""
 echo "[boot] Cloning / updating ${REPO_DIR}..."
 ssh "${SSH_OPTS[@]}" "root@$POD_IP" bash <<REMOTE
-set -e
+set -euo pipefail
 mkdir -p /workspace
 if [ -d "$REPO_DIR/.git" ]; then
   cd "$REPO_DIR"

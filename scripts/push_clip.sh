@@ -26,7 +26,7 @@
 # Overrides (use env vars, not positional args):
 #   POD_IP=... POD_SSH_PORT=... ./scripts/push_clip.sh clip.mov
 
-set -e
+set -euo pipefail
 
 cd "$(dirname "$0")/.."
 

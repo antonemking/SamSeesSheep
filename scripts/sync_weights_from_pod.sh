@@ -19,7 +19,7 @@
 #   DATASET=sheep-pose-v0.1
 #   LOCAL_WEIGHTS_DIR=<repo-root>/sheep-yolo/weights
 
-set -e
+set -euo pipefail
 
 # Locate the repo root from the script's own location — lets the default
 # weights/datasets paths resolve to the in-repo sheep-yolo subdir
@@ -40,15 +40,15 @@ SSH_KEY="${SSH_KEY:-$HOME/.ssh/id_ed25519}"
 DATASET="${1:-${DATASET:-sheep-pose-v0.1}}"
 LOCAL_WEIGHTS_DIR="${LOCAL_WEIGHTS_DIR:-$REPO_ROOT/sheep-yolo/weights}"
 
-POD_IP="${2:-$POD_IP}"
-POD_SSH_PORT="${3:-$POD_SSH_PORT}"
+POD_IP="${2:-${POD_IP:-}}"
+POD_SSH_PORT="${3:-${POD_SSH_PORT:-}}"
 
 if [ -z "$POD_IP" ] || [ -z "$POD_SSH_PORT" ]; then
   cat >&2 <<EOF
 Missing pod SSH info. Either put in ~/.sheep-yolo.env:
 
-  POD_IP=38.65.239.23
-  POD_SSH_PORT=27921
+  POD_IP=203.0.113.1
+  POD_SSH_PORT=2222
 
 Or pass on CLI:
   $0 [dataset-name] <pod-ip> <pod-ssh-port>

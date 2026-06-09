@@ -24,7 +24,7 @@
 #
 # Override any of those in .sheep-yolo.env or export them before calling.
 
-set -e
+set -euo pipefail
 
 if [ -f "$HOME/.sheep-yolo.env" ]; then
   set -a
@@ -42,22 +42,22 @@ EPOCHS="${EPOCHS:-100}"
 IMGSZ="${IMGSZ:-640}"
 BATCH="${BATCH:-8}"
 
+POD_IP="${1:-${POD_IP:-}}"
+POD_SSH_PORT="${2:-${POD_SSH_PORT:-}}"
+DATASET="${3:-$DATASET}"
+
 if [ -z "$POD_IP" ] || [ -z "$POD_SSH_PORT" ]; then
   cat >&2 <<EOF
 Missing pod SSH info. Either put in ~/.sheep-yolo.env:
 
-  POD_IP=38.65.239.23
-  POD_SSH_PORT=27921
+  POD_IP=203.0.113.1
+  POD_SSH_PORT=2222
 
 Or pass on CLI:
   $0 <pod-ip> <pod-ssh-port> [dataset-name]
 EOF
   exit 1
 fi
-
-POD_IP="${1:-$POD_IP}"
-POD_SSH_PORT="${2:-$POD_SSH_PORT}"
-DATASET="${3:-$DATASET}"
 
 # Namespace the run dir by dataset name so sheep-pose-v0.1.run and
 # sheep-pose-v0.2.run don't clobber each other. Pod-side runs live at
@@ -86,12 +86,12 @@ echo "[train] Pod working dir: /workspace/SamSeesSheep/data/labels/exports/${DAT
 echo ""
 
 ssh -t -p "$POD_SSH_PORT" -i "$SSH_KEY" "root@$POD_IP" bash <<REMOTE
-set -e
+set -euo pipefail
 cd /workspace/SamSeesSheep
 source \$HOME/.local/bin/env 2>/dev/null || true
 
 # Pre-flight: validate the exported dataset before burning GPU time.
-# validate_dataset.py exits non-zero on structural/format errors; set -e
+# validate_dataset.py exits non-zero on structural/format errors; set -euo pipefail
 # aborts the whole training run in that case.
 echo "[train] Validating dataset ${DATASET}..."
 uv run python scripts/validate_dataset.py --dataset ${DATASET}

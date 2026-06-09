@@ -4,7 +4,7 @@
 
 Built and validated against a single Katahdin flock in Middletown, DE. Generalization to other breeds and conditions is future work.
 
-*v0.7 · 405 reviewed instances · ~4° ear-angle σ on a held-out clip · stock YOLO produces zero keypoints*
+*v0.7 · 523 reviewed instances · σ_avg 2.84° ear-angle on a held-out clip · stock YOLO produces zero keypoints*
 
 <p align="center">
   <img src="assets/v0.7-flock-ear-monitor.webp" width="100%"
@@ -33,20 +33,25 @@ Ear-angle residual σ on a held-out clip — never pushed to the labeler, never 
 |---|---|---|
 | v0.2 | 6.71° | 6.07° |
 | v0.3 | 4.82° | 4.21° |
-| **v0.4** | **4.06°** | **4.09°** |
+| v0.4 | 4.06° | 4.09° |
+| v0.5 | 3.66° | 4.30° |
+| v0.6 | 4.65° ⚠️ | 3.55° |
+| **v0.7** | **3.70°** | **4.46°** |
+
+*This table is on the IMG_3651 held-out clip (never seen by labeler or trainer). On a second held-out clip (Test_Clip_Morning, different lighting and flock arrangement), v0.7 achieves σ_avg = 2.84° (left 2.39°, right 3.29°) — ~7.1% of the SPFES 40° classification band. ⚠️ v0.6 shows right ear at best-ever 3.55° but left ear regressed to 4.65° — more data does not monotonically improve every keypoint.*
 
 ![Ear angle on a stationary sheep across three model versions](docs/v0.4-ear-angle-chart.png)
 
-*A sheep standing still should produce a flat ear-angle line. v0.2 bounces 6–7° on both ears. v0.4 holds within ~4°.*
+*A sheep standing still should produce a flat ear-angle line. v0.2 bounces 6–7° on both ears. v0.4 holds within ~4°. v0.7 achieves σ_avg = 2.84° on a second held-out clip with different lighting.*
 
 Training progression — same model architecture (YOLO26n-pose, 2.5 M params), same recipe, only labeled-data scale changes:
 
-| | v0.2 | v0.3 | v0.4 |
-|---|---|---|---|
-| Training instances | 98 | 313 | **405** |
-| Training videos | 3 | 6 | **8** |
-| val mAP50-95 (pose) | 0.479 | 0.643 | **0.732** |
-| Residual σ (mean, 5 kpts) | 10.89 px | 8.90 px | **7.70 px** |
+| | v0.2 | v0.3 | v0.4 | v0.5 | v0.6 | v0.7 |
+|---|---|---|---|---|---|---|
+| Training instances | 98 | 313 | 405 | 428 | 471 | **523** |
+| Training videos | 3 | 6 | 8 | 9 | 10 | **11** |
+| val mAP50-95 (pose) | 0.479 | 0.643 | 0.732 | — | — | — |
+| Residual σ (mean, 5 kpts) | 10.89 px | 8.90 px | 7.70 px | — | — | — |
 
 Stock `yolo26n.pt` produces zero keypoints on the same clip. The keypoint head is something you grow against your own animals.
 
@@ -108,7 +113,7 @@ best.pt → sheep-yolo/weights/ → inference + σ benchmark on 6 GB local GPU
 
 ## Scope — what this is / what this is not
 
-**What this is:** a labeling and training pipeline for sheep head keypoints. SAM 3 auto-places candidates. A human reviews them. Reviewed frames export to a YOLO-pose dataset. A small model trains on a cloud GPU. Weights ship to a separate inference repo.
+**What this is:** a labeling and training pipeline for sheep head keypoints. SAM 3 auto-places candidates. A human reviews them. Reviewed frames export to a YOLO-pose dataset. A small model trains on a cloud GPU. Weights live in `sheep-yolo/weights/` within this monorepo, which also owns inference and benchmarking.
 
 **What this is not:** a welfare instrument. A pain detector. A validated dataset against stress events. A cross-flock generalizer. The ear-angle thresholds shown in the labeler come from published clinical literature — applying them to ambient pasture observation is a real and unresolved gap.
 
@@ -127,7 +132,7 @@ best.pt → sheep-yolo/weights/ → inference + σ benchmark on 6 GB local GPU
 
 - McLennan, K.M. & Mahmoud, M. (2019). [Development of an Automated Pain Facial Expression Detection System for Sheep](https://pmc.ncbi.nlm.nih.gov/articles/PMC6523241/). *Animals*, 9(4), 196.
 - Reefmann, N. et al. (2009). Ear and tail postures as indicators of emotional valence in sheep. *Applied Animal Behaviour Science*.
-- Boissy, A. et al. (2011). Ear postures as indicators of emotional valence in sheep. *Physiology & Behavior*.
+- Boissy, A. et al. (2011). Cognitive sciences to relate ear postures to emotions in sheep. *Animal Welfare*.
 - Ravi, N. et al. (2024/25). [SAM 2 / SAM 3](https://ai.meta.com/sam). Meta AI.
 - [Ultralytics YOLO](https://github.com/ultralytics/ultralytics) — training and inference for YOLO-pose.
 

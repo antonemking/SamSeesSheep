@@ -84,8 +84,8 @@ labeled frames stay on the pod.
 All laptop-side scripts load `~/.sheep-yolo.env`:
 
 ```
-POD_IP=38.65.239.23
-POD_SSH_PORT=27921
+POD_IP=203.0.113.1
+POD_SSH_PORT=2222
 ```
 
 Update this file whenever the pod restarts (RunPod assigns a new IP/port on

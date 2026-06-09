@@ -12,12 +12,12 @@
 #
 # Usage:
 #   ./scripts/backup_dataset.sh                        # uses .env.pod defaults
-#   ./scripts/backup_dataset.sh 38.65.239.23 27921     # override connection
+#   ./scripts/backup_dataset.sh 203.0.113.1 2222     # override connection
 #   BACKUP_DIR=/path/to/dst ./scripts/backup_dataset.sh
 #
 # Config (via .env.pod in project root — same as push_clip.sh / pod_ssh.sh):
-#   POD_IP=38.65.239.23
-#   POD_SSH_PORT=27921
+#   POD_IP=203.0.113.1
+#   POD_SSH_PORT=2222
 #   SSH_KEY=~/.ssh/id_ed25519                          # defaults to this
 #   BACKUP_DIR=~/Backups/sheep-seg/labels              # defaults to this
 #
@@ -32,7 +32,7 @@
 # timestamped dir yourself; deliberate defaults here favor a clean mirror
 # over archive-style history.
 
-set -e
+set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
@@ -44,8 +44,8 @@ if [ -f .env.pod ]; then
   set +a
 fi
 
-POD_IP="${1:-$POD_IP}"
-POD_SSH_PORT="${2:-$POD_SSH_PORT}"
+POD_IP="${1:-${POD_IP:-}}"
+POD_SSH_PORT="${2:-${POD_SSH_PORT:-}}"
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/id_ed25519}"
 BACKUP_DIR="${BACKUP_DIR:-$HOME/Backups/sheep-seg/labels}"
 
@@ -54,8 +54,8 @@ if [ -z "$POD_IP" ] || [ -z "$POD_SSH_PORT" ]; then
 Missing POD_IP / POD_SSH_PORT.
 
 Either put them in .env.pod (see .env.pod.example):
-  POD_IP=38.65.239.23
-  POD_SSH_PORT=27921
+  POD_IP=203.0.113.1
+  POD_SSH_PORT=2222
 
 Or pass on the command line:
   $0 <pod-ip> <pod-ssh-port>

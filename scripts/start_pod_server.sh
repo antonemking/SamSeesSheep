@@ -12,7 +12,7 @@
 #
 # Idempotent — safe to re-run.
 
-set -e
+set -euo pipefail
 
 cd "$(dirname "$0")/.."
 

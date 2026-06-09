@@ -98,7 +98,9 @@ reports/runs/
 # sheep-yolo subdir — inference artifacts, weights, raw clips
 sheep-yolo/artifacts/
 sheep-yolo/footage/
-sheep-yolo/test-clips/
+sheep-yolo/test-clips/*
+!sheep-yolo/test-clips/
+!sheep-yolo/test-clips/README.md
 sheep-yolo/LinkedInPostArtifacts/
 sheep-yolo/mobileclip_blt.ts
 sheep-yolo/.sheep-yolo.env

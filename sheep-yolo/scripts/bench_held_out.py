@@ -22,7 +22,7 @@ benchmarks are 2-way (latest vs last posted). This script is the one-off
 bridge from the v0.3 post (which left a clean-held-out IOU outstanding)
 to the v0.4 post.
 
-Reuses pure helpers from bench_v02_v03.py to avoid duplication.
+Reuses pure helpers from scripts/archive/bench_v02_v03.py to avoid duplication.
 """
 from __future__ import annotations
 import json
@@ -43,7 +43,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ART = ROOT / "artifacts"
 ART.mkdir(exist_ok=True)
 
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent / "archive"))
 from bench_v02_v03 import (  # noqa: E402
     _transcode,
     _overlay_kpts_multi,

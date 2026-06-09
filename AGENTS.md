@@ -19,7 +19,7 @@ normal YOLO training on the laptop GPU.
 
 ## Important Paths
 
-- Repo root on laptop: `/home/toneking/dev/lorewood-advisors/sheep-seg`
+- Repo root on laptop: `sheep-seg/` (this repo)
 - Repo root on pod: `/workspace/SamSeesSheep`
 - Pod labels source of truth: `/workspace/SamSeesSheep/data/labels/`
 - Local labels backup: `~/Backups/sheep-seg/labels/`

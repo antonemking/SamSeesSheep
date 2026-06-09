@@ -1,94 +1,79 @@
 # sheep-yolo
 
-Out-of-the-box YOLO benchmark for sheep ear-angle welfare monitoring — v2 of
-[sheep-seg](../sheep-seg).
+**Inference engine and sigma benchmark for trained sheep-head keypoint models from [SamSeesSheep](../).**
 
-## Why a v2
+Runs YOLO-pose models (YOLO26n-pose, 2.5 M params, ~10 MB) on a 6 GB local GPU. Produces per-keypoint residual σ benchmarks on genuinely held-out clips and multi-sheep flock ear-angle charts. The models are trained in the parent repo via the SAM 3 → labeling → export → cloud-GPU pipeline; this directory is where they land and get measured.
 
-`sheep-seg` used SAM 3 Video at inference time: strong masks, but slow (≈5–8
-s/frame) and VRAM-hungry, which capped usable clips at ~10 seconds on a GTX
-1660 Ti. This repo tests whether the Ultralytics-pitched alternative —
-**YOLOE-seg with text prompts for sheep head/ear/nose, no fine-tuning** —
-actually works on our footage.
+## What's here
 
-The architectural tradeoff is discussed in `sheep-chat.md`. Short version:
+| Path | What |
+|---|---|
+| `weights/` | Trained `.pt` files synced from the pod (`sheep-pose-v0.N-yolo26n.pt`) |
+| `scripts/` | Benchmark scripts, EKG renderer, supervision spike, dedup tooling |
+| `backend/` | FastAPI inference server + UI (`python -m backend.main`) |
+| `artifacts/` | Benchmark JSON, comparison MP4s, EKG renders (gitignored) |
+| `test-clips/README.md` | Note pointing benchmark users to repo-level `../test-clips/` |
 
-- **SAM 3** is an annotation-time tool. Keep it for labeling.
-- **YOLO** is the inference-time tool. This repo is a straight OOB probe — no
-  training — to see how far the open-vocab path gets us on real flock
-  footage before we commit to a training pipeline.
-
-If YOLOE finds zero `sheep ear` detections, that's a valid result: the OOB
-model doesn't know this anatomy and fine-tuning becomes the next task. The UI
-surfaces that outcome clearly instead of silently failing.
-
-### First-run result on `footage/Screencast from 2026-04-14 11-00-08.webm`
-
-Probing YOLOE-v8l-seg at conf ≥ 0.10 on frame 0:
-
-| prompt        | best confidence | notes                         |
-|---------------|----------------:|-------------------------------|
-| `sheep`       | 0.94            | finds both whole animals      |
-| `sheep head`  | 0.30            | detected, below default conf  |
-| `nose`        | 0.17            | marginal                      |
-| `sheep ear`   | —               | **no detections at any conf** |
-
-**Conclusion: out-of-the-box YOLOE cannot measure sheep ear angle on this
-footage.** Whole-sheep detection works; parts don't. This matches what
-Ultralytics hinted at in `sheep-chat.md` — the SOTA open-vocab model is fine
-for common classes but specialization (fine-tuning on ~300–500 labeled sheep
-images) is required for anatomical parts. Next step per the chat: SAM-based
-auto-annotation → YOLO26-pose training in a sibling repo.
-
-## Architecture
-
-```
-upload video → YOLOE-seg (text: head / ear / nose) → Ultralytics ByteTrack
-              → match parts to heads → ear-angle geometry (same as v1)
-              → annotated MP4 + per-sheep ear-angle timeseries + SPFES bands
-```
-
-- One model, one pass. No SAM at inference.
-- `model.track(persist=True)` gives stable per-sheep track IDs — ByteTrack is
-  built in, so there's no ear-locking logic like v1 had.
-- The ear-angle math (`backend/pipeline/ear_angle.py`) is a direct port of
-  v1's geometry so chart bands stay comparable.
-
-## Run
+## Quickstart
 
 ```bash
-cd ~/dev/lorewood-advisors/sheep-yolo
-python -m venv .venv && source .venv/bin/activate
-pip install -e .
-# First run downloads yoloe-v8l-seg.pt (~350 MB) into the ultralytics cache.
-python -m backend.main
-# open http://localhost:8000
+cd sheep-yolo
+uv sync
+export YOLOE_MODEL=weights/sheep-pose-v0.7-yolo26n.pt
+uv run python -m backend.main
+# Open http://localhost:8000
 ```
 
-Env knobs (`backend/config.py` for full list):
+The `YOLOE_MODEL` env var points to a trained YOLO-pose checkpoint. Stock `yolo26n.pt` has no keypoint head — it produces sheep bounding boxes but zero keypoints. Use a trained weight.
 
-- `YOLOE_MODEL` — default `yoloe-v8l-seg.pt`. Use `yoloe-v8s-seg.pt` for faster/smaller.
-- `MAX_FRAMES` — default 600. Long clips are now cheap.
-- `INFER_IMGSZ` — default 960.
-- `TRACKER_YAML` — default `bytetrack.yaml`. `botsort.yaml` if ReID helps.
+Benchmark scripts read repo-level `../test-clips/` from inside `sheep-yolo/`. Drop new `.mov`/`.mp4` files there and refresh.
 
-## UI
+## Benchmark script
 
-- Upload a video.
-- Pick **Track all sheep** (default) or **Click to select one**.
-- Run → annotated MP4 plays + one ear-angle trace per tracked sheep on the
-  chart (solid = left, dashed = right) with SPFES up / neutral / down bands.
+`scripts/bench_held_out.py` is the canonical reproducible held-out sigma
+benchmark. Superseded version-comparison scripts live under `scripts/archive/`
+for provenance only.
 
-## Optional: Roboflow `supervision` spike (LOR-123)
+```bash
+uv run python scripts/bench_held_out.py IMG_3651          # 3-way: v0.2 vs v0.3 vs v0.4
+```
 
-`scripts/render_supervision_spike.py` is a throwaway probe of the Roboflow
-[`supervision`](https://supervision.roboflow.com) toolkit (v0.28.0). It runs
-v0.7 YOLO-pose over a bounded sample of `test-clips/IMG_3651.MOV` and renders an
-annotated MP4 into `artifacts/` (gitignored), exercising `sv.Detections` /
-`sv.KeyPoints.from_ultralytics`, supervision's video IO
-(`VideoInfo` / `get_video_frames_generator` / `VideoSink`), the
-`VertexAnnotator` / `EdgeAnnotator` keypoint annotators, and `PolygonZone` for
-ROI hit-counting. Ear-angle math is reused verbatim from `render_ekg.py`.
+The canonical script:
+1. Runs inference across all specified model versions on the clip (cached to `artifacts/_cache/`)
+2. Finds a motionless target window (sheep centroid σ ~30 px) via ByteTrack
+3. Computes per-keypoint residual σ (detrended with rolling-median-7)
+4. Derives ear-angle σ from keypoint geometry
+5. Writes `artifacts/bench_report-*.json` + renders comparison MP4s
+
+The residual σ metric strips slow head drift (property of the sheep) and isolates frame-to-frame jitter — the welfare-measurement-relevant signal.
+
+## EKG renderer (multi-sheep flock)
+
+```bash
+uv run python scripts/render_ekg.py Test_Clip_Morning
+```
+
+Produces a synced multi-lane ear-angle chart — one trace per tracked sheep, with SPFES alert bands and circle-crop face thumbnails. Renders to `artifacts/synced-lanes-*.mp4`.
+
+With the pro renderer:
+
+```bash
+uv run python artifacts/render_synced_pro_TCM.py
+```
+
+Additional per-sheep cropping and lane styling. See inline comments in the script.
+
+## Sigma computation (standalone)
+
+```bash
+uv run python artifacts/compute_sigma.py
+```
+
+Reads the benchmark JSON and computes ear-angle σ from per-frame keypoint arrays — the same math as the bench scripts, without the inference pass.
+
+## Supervision spike (LOR-123)
+
+`scripts/render_supervision_spike.py` is a throwaway probe of the Roboflow [`supervision`](https://supervision.roboflow.com) toolkit (v0.28.0). It runs v0.7 YOLO-pose over a bounded sample of `../test-clips/IMG_3651.MOV` and renders an annotated MP4 into `artifacts/` (gitignored), exercising `sv.Detections` / `sv.KeyPoints.from_ultralytics`, supervision's video IO (`VideoInfo` / `get_video_frames_generator` / `VideoSink`), the `VertexAnnotator` / `EdgeAnnotator` keypoint annotators, and `PolygonZone` for ROI hit-counting. Ear-angle math is reused verbatim from `render_ekg.py`.
 
 supervision is intentionally **not** a dependency of this repo — run it one-off:
 
@@ -98,38 +83,36 @@ uv run --with supervision scripts/render_supervision_spike.py \
     --start-frame 380 --max-frames 90                                    # ewe inside the ROI
 ```
 
-**Recommendation: optional artifact / reporting layer only.** The spike did not
-surface anything that justifies a rewrite.
+**Recommendation: optional artifact / reporting layer only.** The spike did not surface anything that justifies a rewrite.
 
-- ✅ Cleaner video IO than the manual `cv2.VideoWriter` dance; `from_ultralytics`
-  converters remove boilerplate; `PolygonZone` is a real upgrade over the inline
-  center-in-box ROI test and is the piece worth promoting first if we build
-  multi-region paddock reports.
-- ❌ No keypoint *geometry* (we still own `ears()`/`ang()` — the actual signal);
-  no equivalent of the crop + live matplotlib EKG panel; not worth a required
-  dependency for the core paths.
-- ⚠️ The first spike output can look worse than the EKG renderer if drawn with
-  raw supervision keypoint annotators: they are generic drawing helpers and do
-  not apply SamSeesSheep's confidence threshold for us. The default script now
-  keeps showcase output confidence-filtered; `--raw-sv-keypoint-annotators` is
-  only for API inspection.
-- ⚠️ `sv.ByteTrack` is **deprecated** in 0.28.0 (tracking moving to a standalone
-  `trackers` package). This spike does **no tracking**; the EKG renderer keeps
-  Ultralytics' built-in ByteTrack. Do not migrate tracking here.
+- ✅ Cleaner video IO than the manual `cv2.VideoWriter` dance; `from_ultralytics` converters remove boilerplate; `PolygonZone` is a real upgrade over the inline center-in-box ROI test and is the piece worth promoting first if we build multi-region paddock reports.
+- ❌ No keypoint *geometry* (we still own `ears()`/`ang()` — the actual signal); no equivalent of the crop + live matplotlib EKG panel; not worth a required dependency for the core paths.
+- ⚠️ The first spike output can look worse than the EKG renderer if drawn with raw supervision keypoint annotators: they are generic drawing helpers and do not apply SamSeesSheep's confidence threshold for us. The default script now keeps showcase output confidence-filtered; `--raw-sv-keypoint-annotators` is only for API inspection.
+- ⚠️ `sv.ByteTrack` is **deprecated** in 0.28.0 (tracking moving to a standalone `trackers` package). This spike does **no tracking**; the EKG renderer keeps Ultralytics' built-in ByteTrack. Do not migrate tracking here.
 
-This README section is the durable tracked summary; generated MP4s and any
-expanded local notes stay ignored with the rest of `artifacts/` / `docs/`.
+This README section is the durable tracked summary; generated MP4s and any expanded local notes stay ignored with the rest of `artifacts/` / `docs/`.
 
-## What this is not
+## Env knobs
 
-Not a trained sheep-parts model. Not a welfare claim. Not a product. See
-the project [`README.md`](../README.md) and [`VALIDATION.md`](../VALIDATION.md) for scope and framing.
+See `backend/config.py` for the full list:
+
+- `YOLOE_MODEL` — path to trained YOLO-pose checkpoint (default: `yoloe-v8l-seg.pt`, but trained checkpoints override via env)
+- `MAX_FRAMES` — default 600
+- `INFER_IMGSZ` — default 960
+- `DETECTION_CONF` — confidence floor, default 0.25
+- `TRACKER_YAML` — `bytetrack.yaml` (default) or `botsort.yaml`
+- `TRACK_COVERAGE_FLOOR` — drop tracks seen for less than this fraction of frames (default 0.15)
+
+## What this is / what this is not
+
+**What this is:** the inference and benchmarking half of the SamSeesSheep pipeline. Trained YOLO-pose weights land here from the cloud GPU. Local inference produces (a) per-keypoint residual σ on held-out clips, (b) multi-sheep ear-angle charts, and (c) detection-rate baselines against stock YOLO.
+
+**What this is not:** a trained sheep-parts model by itself. Not a welfare claim. Not a product. Not an OOB YOLOE probe — that was the original intent, but the investigation showed YOLOE cannot measure ear angle without fine-tuning. See the project [`README.md`](../README.md) and [`VALIDATION.md`](../VALIDATION.md) for scope and framing.
 
 ## Validation references
 
-- McLennan &amp; Mahmoud 2019 — Sheep Pain Facial Expression Scale (SPFES)
+- McLennan & Mahmoud 2019 — Sheep Pain Facial Expression Scale (SPFES)
 - Reefmann et al. 2009 — ear posture taxonomy
-- Boissy et al. 2011 — ear posture as emotional valence indicator
+- Boissy et al. 2011 — cognitive sciences, ear postures, emotions in sheep
 
-Thresholds used: `EAR_UP > 30°`, `EAR_DOWN < -10°` relative to dorsal head
-axis (nose → ear-midpoint). Same values as v1.
+Thresholds used: `EAR_UP > 30°`, `EAR_DOWN < -10°` relative to dorsal head axis (nose → ear-midpoint). Same values as the parent pipeline.

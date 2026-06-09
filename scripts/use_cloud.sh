@@ -8,7 +8,7 @@
 #   ./scripts/use_cloud.sh vast
 #   ./scripts/use_cloud.sh            # print current active cloud
 
-set -e
+set -euo pipefail
 
 cd "$(dirname "$0")/.."
 

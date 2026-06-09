@@ -7,9 +7,9 @@
 #        ./scripts/pod_ssh.sh
 #
 #   2. Override on the CLI (useful after pod restart gives new IP/port):
-#        ./scripts/pod_ssh.sh 38.65.239.23 27921
+#        ./scripts/pod_ssh.sh 203.0.113.1 2222
 
-set -e
+set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
@@ -22,8 +22,8 @@ if [ -f .env.pod ]; then
 fi
 
 # CLI args override env vars
-POD_IP="${1:-$POD_IP}"
-POD_SSH_PORT="${2:-$POD_SSH_PORT}"
+POD_IP="${1:-${POD_IP:-}}"
+POD_SSH_PORT="${2:-${POD_SSH_PORT:-}}"
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/id_ed25519}"
 
 if [ -z "$POD_IP" ] || [ -z "$POD_SSH_PORT" ]; then
@@ -31,8 +31,8 @@ if [ -z "$POD_IP" ] || [ -z "$POD_SSH_PORT" ]; then
 Missing pod connection info.
 
 Either put them in .env.pod (see .env.pod.example):
-  POD_IP=38.65.239.23
-  POD_SSH_PORT=27921
+  POD_IP=203.0.113.1
+  POD_SSH_PORT=2222
 
 Or pass on the command line:
   $0 <pod-ip> <pod-ssh-port>

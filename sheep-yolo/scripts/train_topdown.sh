@@ -14,7 +14,7 @@
 # Output: weights/_topdown/<RUN>/weights/best.pt
 # Promote a winner with:
 #   cp weights/_topdown/<RUN>/weights/best.pt weights/sheep-pose-v0.7-topdown-yolo26n.pt
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SHEEP_YOLO="$(cd "$SCRIPT_DIR/.." && pwd)"

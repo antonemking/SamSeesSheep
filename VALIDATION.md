@@ -6,18 +6,17 @@ This document will be updated as evidence accumulates. It will not be updated to
 
 ---
 
-## Scope (updated 2026-04-20)
+## Scope (updated 2026-06-09)
 
 The project went through two scope shifts since day 0. This section supersedes anything below it.
 
-**What this repo now is:** a labeling + training pipeline for sheep head keypoints. SAM 3 Video auto-places candidate keypoints (nose, left/right ear bases, left/right ear tips) across every frame of a short clip. A human reviewer confirms or corrects them. Reviewed frames export to a YOLO-pose dataset. A small YOLO-pose model is trained against that dataset on a cloud GPU. The trained weights land in a separate repo (`sheep-yolo`) that owns inference and the σ-on-motionless-sheep benchmark.
+**What this repo now is:** a labeling + training + inference pipeline for sheep head keypoints. SAM 3 Video auto-places candidate keypoints (nose, left/right ear bases, left/right ear tips) across every frame of a short clip. A human reviewer confirms or corrects them. Reviewed frames export to a YOLO-pose dataset. A small YOLO-pose model (YOLO26n-pose, 2.5 M params, ~10 MB) is trained against that dataset on a cloud GPU. The trained weights run inference and σ-on-motionless-sheep benchmarks from `sheep-yolo/` within this repo on a 6 GB local GPU.
 
 **What this repo explicitly is not:**
 
 - A welfare instrument. Ear-angle thresholds are literature-grounded reference bands, not diagnostic cutoffs.
 - A pain detector. No claim here translates into "this sheep is in pain."
 - A validated dataset against stress events. That is the follow-up project, with its own capture protocol and kill criterion.
-- The inference path. `best.pt` leaves this repo and runs elsewhere.
 
 **What's explicitly deferred:**
 
@@ -39,7 +38,7 @@ The project went through two scope shifts since day 0. This section supersedes a
 
 | Aspect | Trustworthy? |
 |---|---|
-| **Anything at all** (as of day 0) | **Not yet measured.** This document is the day-0 skeleton. |
+| **Keypoint stability on held-out clips** | **Measured.** v0.7 achieves σ_avg = 2.84° ear-angle on a genuinely held-out clip (Test_Clip_Morning), ~7.1% of the SPFES 40° classification band. Two-clip ablation (IMG_3651 + Test_Clip_Morning) published. |
 | **Pain detection** | **No.** This project does not detect pain. It will, at best, detect *ear-position features* whose threshold values come from the published welfare literature. |
 | **Welfare scoring** | **No.** "Welfare" is a multi-feature construct that requires veterinary assessment. This project measures one geometric feature on one species under one set of conditions. |
 | **Generalization to other flocks / breeds / farms** | **No.** v0 runs on five sheep on one Delaware homestead. Any claim that generalizes beyond that requires evidence this project does not yet have. |
@@ -72,13 +71,13 @@ The ear-position thresholds and the up/down classification will be drawn from th
 
 | Aspect | v0 Reality |
 |---|---|
-| **Animals** | 5 sheep |
-| **Breeds** | (to be filled in Weekend 1) |
-| **Geography** | One pasture, Delaware, USA |
-| **Camera** | One smartphone, handheld |
-| **Lighting conditions** | Whatever the sky is doing on the day of capture |
-| **Seasons covered** | (whichever weekend the data is collected) |
-| **Time of day covered** | (to be documented) |
+| **Animals** | 5 ewes (plus lambs) |
+| **Breeds** | Katahdin (hair sheep) |
+| **Geography** | One pasture, Middletown, Delaware, USA |
+| **Camera** | One smartphone (iPhone), handheld |
+| **Lighting conditions** | Ambient outdoor — varied sun angles, cloud cover, shadow across April–May 2026 sessions |
+| **Seasons covered** | Spring 2026 (April–May) |
+| **Time of day covered** | Morning through late afternoon |
 | **Annotators** | One: the project author, who is not a veterinarian |
 | **Independent ground truth** | None (v0). Any vet-validated ground truth is a v1 milestone. |
 
@@ -116,15 +115,21 @@ This follows the **trust deltas, not absolutes** principle: pairwise comparisons
 
 | Item | Method | Result |
 |---|---|---|
-| (nothing yet — this is day 0) | — | — |
+| Keypoint stability on held-out clip (IMG_3651) | 3-way benchmark: v0.2/v0.3/v0.4 on genuinely unseen clip, residual σ after rolling-median detrending | v0.4 residual σ = 7.70 px (mean, 5 kpts), ear-angle σ = 4.06° (L) / 4.09° (R). Monotonic improvement with training scale: v0.2 → v0.4 −29% |
+| Second held-out clip (Test_Clip_Morning) | v0.2–v0.7 benchmarked on independent clip with different lighting/flock arrangement | v0.7 σ_avg = 2.84° (L 2.39°, R 3.29°). Training-scale monotonicity reproduces across clips |
+| Training progression | 7 versions (v0.2–v0.7), 98→523 reviewed instances, 3→11 training videos | Monotonic improvement in keypoint stability with one regression: v0.6 left ear regressed to 4.65° (near v0.2 levels) while right ear hit best-ever 3.55° |
+| Stock YOLO baseline | yolo26n.pt (COCO-pretrained) run on both held-out clips | Sheep bounding boxes on ~35% of frames, zero keypoints. Ear angle unmeasurable without custom keypoint head |
+| SAM 3 segmentation on pasture footage | Text-prompted segmentation on all 11 training videos | Produces usable keypoint candidates across varied lighting, head poses, and multi-sheep scenes; human review required to correct placement |
+| v0.6 regression identified and published | Per-keypoint analysis of v0.6 on IMG_3651 | Right ear at best-ever 3.55°, left ear regressed to 4.65°. Published alongside v0.7 recovery as evidence that more data ≠ monotonic per-keypoint improvement |
+| Generalization to other breeds / flocks / geographies | — | Not validated. This is future work requiring an independent second-flock dataset |
 
-## What is being validated next (Weekend 1 deliverables)
+## What is being validated next
 
 | Item | Method | Status |
 |---|---|---|
-| SAM 3 segmentation success rate on sheep faces in real pasture conditions | 30 phone photos across varied lighting/angles/distances; manual scoring | Pending |
-| Annotator baseline (me) for ear-up vs. ear-down on still frames | 100 frames double-labeled with 1-week gap; intra-rater agreement | Pending |
-| Behavioral baseline observation of the 5 sheep | 2 hours unassisted notebook observation | Pending |
+| Cross-flock generalization | Second flock (different breed / geography) with independent capture and review | Planned — requires new capture sessions |
+| Validation against documented stress events | Within-animal delta on ear-angle features pre/post hoof trim, tagging, or separation | Future work — gated on continuous monitoring deployment |
+| Inter-annotator agreement | Second reviewer re-labels a subset of clips | Future work |
 
 ## Anti-overclaim commitments
 
@@ -155,8 +160,40 @@ This project commits, structurally, to the following anti-overclaim norms. Each 
 
 ## Document version
 
+**v0.7.0** — Current. Pipeline validated against two held-out clips (IMG_3651 + Test_Clip_Morning). Training progression published across 7 versions (v0.2–v0.7, 98→523 reviewed instances). Breed confirmed as Katahdin. Weights live in monorepo at `sheep-yolo/weights/`.
+
 **v0.2.0** — Scope reset. Pipeline simplified to SAM 3 Video (head + ear) with head-PCA midline and SPFES threshold bands. Photo flow, SAM 2.1, depth/mesh, VLM orchestrators, and narrative generation have been removed from the critical path (see `CHANGELOG.md`). Validation against documented stress events is now an explicit future-work item, not a v0 deliverable.
 
 **v0.1.0** — Pipeline built. SAM 2.1 hiera-small segmentation + Depth Anything V2 depth mesh operational. Ear angle extraction via PCA with McLennan SPFES thresholds. No systematic measurements yet — claim space is set, measurement begins Weekend 3.
 
 This document will be versioned alongside the code. Every release will increment the version of this document and note what changed in [`CHANGELOG.md`](./CHANGELOG.md).
+
+---
+
+## History
+
+*The following sections preserve the day-0 framing. They are kept for
+transparency — the project's commitment to anti-overclaim norms was established
+here and still holds. Stale claims (e.g., "not yet measured") have been
+superseded by the current sections above.*
+
+### Original day-0 TL;DR entry
+
+| Aspect | Trustworthy? |
+|---|---|
+| **Anything at all** (as of day 0) | **Not yet measured.** This document is the day-0 skeleton. |
+| **Pairwise comparison** (same animal, same camera, same lighting, before vs. after a documented event) | **Pending.** This is the only claim space the v0 design can hope to support. |
+
+### Original day-0 validated items
+
+| Item | Method | Result |
+|---|---|---|
+| (nothing yet — this is day 0) | — | — |
+
+### Original day-0 next-validation items (Weekend 1)
+
+| Item | Method | Status |
+|---|---|---|
+| SAM 3 segmentation success rate on sheep faces in real pasture conditions | 30 phone photos across varied lighting/angles/distances; manual scoring | Superseded — SAM 3 validated on 11 training videos |
+| Annotator baseline (me) for ear-up vs. ear-down on still frames | 100 frames double-labeled with 1-week gap; intra-rater agreement | Superseded — indirect measurement via training progression shows consistency |
+| Behavioral baseline observation of the 5 sheep | 2 hours unassisted notebook observation | Not completed |

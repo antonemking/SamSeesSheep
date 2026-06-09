@@ -51,7 +51,7 @@ The critical gap we address is the absence of an automated measurement pipeline.
 
 ### 2.2 Foundation Models for Agriculture
 
-The Segment Anything Model (SAM) family \cite{kirillov2023segment, ravi2024sam2, ravi2025sam3} has demonstrated remarkable zero-shot segmentation capabilities. SAM~3 Video extends this to the temporal domain, tracking objects across frames from text or click prompts. In agricultural applications, foundation models have been applied to crop monitoring, weed detection, and livestock identification \cite{xu2023livestock, wang2024agriculture}. However, most agricultural CV work uses foundation models for direct inference rather than as annotation tools for training domain-specific edge models. Our pipeline inverts this: SAM~3 Video is the annotation backbone, producing the labeled data that trains a lightweight deployment model.
+The Segment Anything Model (SAM) family \cite{kirillov2023segment, ravi2024sam2, ravi2025sam3} has demonstrated remarkable zero-shot segmentation capabilities. SAM~3 Video extends this to the temporal domain, tracking objects across frames from text or click prompts. In agricultural applications, foundation models have been applied to crop monitoring, weed detection, and livestock identification \cite{li2024foundation}. However, most agricultural CV work uses foundation models for direct inference rather than as annotation tools for training domain-specific edge models. Our pipeline inverts this: SAM~3 Video is the annotation backbone, producing the labeled data that trains a lightweight deployment model.
 
 ### 2.3 Keypoint Detection and YOLO-Pose
 
@@ -365,6 +365,30 @@ The author thanks the Katahdin ewes of Middletown, Delaware, for their patience 
 
 ## References
 
+<!--
+CITATION AUDIT (2026-06-09) — Every entry checked against actual publications:
+
+✓ mclennan2019   — verified; McLennan & Mahmoud 2019, Animals 9(4):196
+✓ reefmann2009   — verified; Reefmann et al. 2009, Applied Animal Behaviour Science
+✓ boissy2011     — verified; Boissy et al. 2011, Animal Welfare 20(1):47-56
+                  (NOTE: root README incorrectly cites "Physiology & Behavior" — fixed)
+✓ kirillov2023segment — verified; Kirillov et al. 2023, ICCV
+✓ ravi2024sam2   — verified; Ravi et al. 2024, arXiv:2408.00714
+✓ ravi2025sam3   — FIXED: replaced with correct author list (Carion et al., 38 authors), correct title "Segment Anything with Concepts", correct arXiv ID 2511.16719.
+✓ xu2023livestock — REMOVED: fabricated entry deleted. 
+✓ wang2024agriculture — REMOVED: fabricated entry deleted. Replaced with real li2024foundation (Li et al. 2024, CEA 222:109032).
+✓ maji2022yolopose — verified; Maji et al. 2022, CVPR Workshops
+✓ mathis2018deeplabcut — verified; Mathis et al. 2018, Nature Neuroscience
+✓ graving2019deepposekit — verified; Graving et al. 2019, eLife
+✓ pereira2022sleap — verified; Pereira et al. 2022, Nature Methods
+✓ berckmans2014precision — verified; Berckmans 2014, Rev. Sci. Tech. OIE
+✓ v03benchmark   — self-citation; internal repo doc
+
+Entries marked ✗ were FABRICATED. All have been fixed: ravi2025sam3
+replaced with correct author list (Carion et al.), xu2023livestock removed,
+wang2024agriculture replaced with real li2024foundation (Li et al. 2024).
+-->
+
 \bibitem{mclennan2019}
 K.~M. McLennan and M.~Mahmoud.
 Development of an automated pain facial expression detection system for sheep (SPFES).
@@ -391,9 +415,9 @@ SAM~2: Segment anything in images and videos.
 \emph{arXiv preprint arXiv:2408.00714}, 2024.
 
 \bibitem{ravi2025sam3}
-N.~Ravi, V.~Gabeur, Y.-T.~Hu, R.~Hu, C.~Ryali, T.~Ma, H.~Khedr, R.~R{\"a}dle, C.~Rolland, L.~Gustafson, E.~Mintun, J.~Pan, K.~V.~Alwala, N.~Carion, C.-Y.~Wu, P.~Doll{\'a}r, and C.~Feichtenhofer.
-SAM~3: Segment anything with temporal prompting.
-\emph{arXiv preprint}, 2025.
+N.~Carion, L.~Gustafson, Y.-T.~Hu, S.~Debnath, R.~Hu, D.~Suris, C.~Ryali, K.~V.~Alwala, H.~Khedr, A.~Huang, J.~Lei, T.~Ma, B.~Guo, A.~Kalla, M.~Marks, J.~Greer, M.~Wang, P.~Sun, R.~R{\"a}dle, T.~Afouras, E.~Mavroudi, K.~Xu, T.-H.~Wu, Y.~Zhou, L.~Momeni, R.~Hazra, S.~Ding, S.~Vaze, F.~Porcher, F.~Li, S.~Li, A.~Kamath, H.~K.~Cheng, P.~Doll{\'a}r, N.~Ravi, K.~Saenko, P.~Zhang, and C.~Feichtenhofer.
+SAM~3: Segment anything with concepts.
+\emph{arXiv preprint arXiv:2511.16719}, 2025.
 
 \bibitem{maji2022yolopose}
 D.~Maji, S.~Nagori, M.~Mathew, and D.~Poddar.
@@ -420,15 +444,10 @@ D.~Berckmans.
 Precision livestock farming technologies for welfare management in intensive livestock systems.
 \emph{Revue Scientifique et Technique (International Office of Epizootics)}, 33(1):189--196, 2014.
 
-\bibitem{wang2024agriculture}
-Y.~Wang, Z.~Chen, J.~Li, and S.~Liu.
-Foundation models in agriculture: a survey.
-\emph{Computers and Electronics in Agriculture}, 217:108556, 2024.
-
-\bibitem{xu2023livestock}
-B.~Xu, W.~Wang, L.~Guo, G.~Chen, Y.~Li, Z.~Cao, and S.~Wu.
-Livestock monitoring with computer vision: a review.
-\emph{Computers and Electronics in Agriculture}, 214:108286, 2023.
+\bibitem{li2024foundation}
+J.~Li, M.~Xu, L.~Xiang, D.~Chen, W.~Zhuang, X.~Yin, and Z.~Li.
+Foundation models in smart agriculture: Basics, opportunities, and challenges.
+\emph{Computers and Electronics in Agriculture}, 222:109032, 2024.
 
 \bibitem{v03benchmark}
 A.~King.

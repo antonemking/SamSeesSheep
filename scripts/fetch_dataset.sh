@@ -23,15 +23,15 @@
 #
 # Config: put pod connection info in ~/.sheep-yolo.env OR pass on CLI.
 #
-#   POD_IP=38.65.239.23
-#   POD_SSH_PORT=27921
+#   POD_IP=203.0.113.1
+#   POD_SSH_PORT=2222
 #   SSH_KEY=~/.ssh/id_ed25519           # defaults to this
 #   DATASET=sheep-pose-v0.1               # default dataset name
 #   LOCAL_DATASETS_DIR=<repo-root>/sheep-yolo/datasets   # default
 #
 # CLI override order: args > env > ~/.sheep-yolo.env defaults.
 
-set -e
+set -euo pipefail
 
 # Locate the repo root from the script's own location — lets the default
 # datasets path resolve to the in-repo sheep-yolo subdir regardless of cwd.
@@ -53,16 +53,16 @@ DATASET="${DATASET:-sheep-pose-v0.1}"
 LOCAL_DATASETS_DIR="${LOCAL_DATASETS_DIR:-$REPO_ROOT/sheep-yolo/datasets}"
 
 # Positional overrides
-POD_IP="${1:-$POD_IP}"
-POD_SSH_PORT="${2:-$POD_SSH_PORT}"
+POD_IP="${1:-${POD_IP:-}}"
+POD_SSH_PORT="${2:-${POD_SSH_PORT:-}}"
 DATASET="${3:-$DATASET}"
 
 if [ -z "$POD_IP" ] || [ -z "$POD_SSH_PORT" ]; then
   cat >&2 <<EOF
 Missing pod SSH info. Either put in ~/.sheep-yolo.env:
 
-  POD_IP=38.65.239.23
-  POD_SSH_PORT=27921
+  POD_IP=203.0.113.1
+  POD_SSH_PORT=2222
 
 Or pass on CLI:
   $0 <pod-ip> <pod-ssh-port> [dataset-name]

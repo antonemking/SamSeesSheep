@@ -24,9 +24,9 @@ Ear-angle residual σ on a 5-second motionless window: v0.2 6.7° / 6.1° → v0
 - `sheep-yolo/scripts/bench_held_out.py` — 3-way held-out benchmark script. PyAV libx264 (CRF 18) video writer replaces cv2 mp4v default-bitrate output. Keypoint-distance dedupe handles overlapping NMS-survival detections. Pickle cache for per-model predictions so re-render iterations skip the ~3-min-per-model CPU inference.
 - `docs/v0.4-benchmark.md` — full 3-way held-out report with per-keypoint σ tables, ear-angle σ, and stock-baseline numbers.
 - `docs/v0.4-ear-angle-chart.png` — the flat-line chart Post 2 promised.
-- `docs/linkedin-post-draft-ep3-v2.md` — Part 3 v2 (full v0.2 → v0.3 → v0.4 curve framing). v1 preserved.
-- `sheep-yolo/weights/sheep-pose-v0.4-yolo26n.pt` (gitignored; produced by `train_on_pod.sh`).
-- `sheep-yolo/test-clips` symlink so the bench scripts find clips after the monorepo move.
+- Part 3 v2 LinkedIn draft — archived outside the current tree (full v0.2 → v0.3 → v0.4 curve framing). v1 preserved.
+- `sheep-yolo/weights/sheep-pose-v0.4-yolo26n.pt` (gitignored; produced by `scripts/train_on_pod.sh`).
+- `sheep-yolo/test-clips/README.md` — points bench users to repo-level `test-clips/` after the monorepo move without committing a fragile symlink.
 - `CLAUDE.md` and `AGENTS.md` — operational notes for code agents (env-file split, pod paths, gotchas, label-count snippets).
 
 #### Changed
@@ -73,6 +73,10 @@ Seventh YOLO26n-pose training run. Left ear σ at 3.70° (second-best), right ea
 v0 descoped from *welfare instrument* to *visualization artifact*. A peer review flagged that the pipeline had drifted into capability-breadth rather than applied rigor — multiple segmentation backbones, multiple trackers, VLM orchestrators generating a constant, a depth-mesh feature off the critical path. The simplify branch cut ~3,700 lines to leave a single-backbone pipeline (SAM 3 Video → head-PCA midline → ear angles → chart). See `VALIDATION.md` §"Scope reset" for the claim implications.
 
 ### Removed
+
+The removed-file entries below intentionally name files that no longer exist in
+the current tree.
+
 - `backend/pipeline/segment.py` — SAM 2.1 loader and all photo segmentation entry points. One backbone (SAM 3 Video) now.
 - `backend/pipeline/depth.py`, `backend/pipeline/mesh3d.py` — Depth Anything V2 and Open3D Poisson mesh reconstruction. Not on the measurement path.
 - `backend/pipeline/orchestrator.py`, `backend/pipeline/local_orchestrator.py` — Claude and Gemma 4 VLMs. The orchestrator was generating the constant prompt list `["sheep head", "sheep ear", "sheep nose"]` for every clip.
@@ -94,7 +98,7 @@ v0 descoped from *welfare instrument* to *visualization artifact*. A peer review
 - 2 hours of unassisted observation of the flock with a notebook only
 - 30 phone photos across varied lighting/angles/distances
 - Run Meta SAM 3 against the 30 photos and measure segmentation success rate honestly
-- One-page v0 plan committed to `docs/v0-plan.md`
+- One-page v0 plan committed (archived outside the current tree)
 
 ### Planned (Weekend 2 — Build)
 - Architecture decision: tiny custom keypoint model vs. SAM 3 + published thresholds
