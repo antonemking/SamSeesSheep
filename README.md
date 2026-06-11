@@ -7,8 +7,10 @@ Built and validated against a single Katahdin flock in Middletown, DE. Generaliz
 *v0.7 · 523 reviewed instances · σ_avg 2.84° ear-angle on a held-out clip · stock YOLO produces zero keypoints*
 
 <p align="center">
-  <img src="assets/v0.7-flock-ear-monitor.webp" width="100%"
-       alt="Six ewes tracked simultaneously — one live ear-angle lane each" />
+  <video src="assets/synced-lanes-6ewes-pro-Test_Clip_Morning.mp4" width="100%"
+       controls muted loop
+       poster="assets/v0.7-flock-ear-monitor.webp">
+  </video>
 </p>
 
 *v0.7 reads every sheep facing the camera at once — six ewes here, one live ear-angle lane each. A measurement instrument, not a welfare readout.*
