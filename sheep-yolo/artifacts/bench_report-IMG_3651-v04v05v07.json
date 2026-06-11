@@ -1,0 +1,17 @@
+{
+  "v0.4": {
+    "roi_detections": 149,
+    "sigma_L": 4.06,
+    "sigma_R": 4.09
+  },
+  "v0.5": {
+    "roi_detections": 153,
+    "sigma_L": 3.66,
+    "sigma_R": 4.3
+  },
+  "v0.7": {
+    "roi_detections": 153,
+    "sigma_L": 3.7,
+    "sigma_R": 4.46
+  }
+}

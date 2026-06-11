@@ -1,0 +1,28 @@
+{
+  "clip": "IMG_3651.MOV",
+  "window": [
+    367,
+    522
+  ],
+  "roi": [
+    1220,
+    80,
+    1560,
+    390
+  ],
+  "detector": "sheep-pose-v0.5-yolo26n.pt",
+  "crop_pose": "best.pt",
+  "margin": 0.3,
+  "crop_imgsz": 256,
+  "v0.5_single_shot": {
+    "sigma_L": 3.655940726304644,
+    "sigma_R": 4.295280958164131,
+    "in_roi": "153/155",
+    "source": "cache"
+  },
+  "top_down": {
+    "sigma_L": 4.171419734220998,
+    "sigma_R": 4.120108326972399,
+    "in_roi": "332/933"
+  }
+}

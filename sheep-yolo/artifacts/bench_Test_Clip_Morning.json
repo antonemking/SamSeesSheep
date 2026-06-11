@@ -1,0 +1,43 @@
+{
+  "clip": "Test_Clip_Morning",
+  "clip_path": "test-clips/Test_Clip_Morning.mov",
+  "model": "v0.7",
+  "model_path": "sheep-yolo/weights/sheep-pose-v0.7-yolo26n.pt",
+  "detections_source": "sheep-yolo/artifacts/calibration/Test_Clip_Morning.v07.bytetrack.detections.json",
+  "conf": 0.25,
+  "window": [
+    742,
+    892
+  ],
+  "window_len": 150,
+  "roi": [
+    1234,
+    267,
+    1719,
+    538
+  ],
+  "target_track_id": 215,
+  "method": "signed ear angle from 5 keypoints; 7-frame running median on visible samples; residual std-dev; calibrated ByteTrack track target",
+  "running_median_window": 7,
+  "in_roi_target_detection_rate": "148/150",
+  "v0.7": {
+    "sigma_left": 2.385527094734766,
+    "sigma_right": 3.287560423539073,
+    "sigma_avg": 2.8365437591369194,
+    "n_left": 148,
+    "n_right": 148
+  },
+  "qa_roi_nearest_bench_v07_style": {
+    "sigma_left": 2.385468148065936,
+    "sigma_right": 3.2405110834228545,
+    "sigma_avg": 2.812989615744395,
+    "n_left": 148,
+    "n_right": 148,
+    "in_roi_detection_rate": "148/150",
+    "selected_track_counts": {
+      "215": 147,
+      "232": 1,
+      "None": 2
+    }
+  }
+}

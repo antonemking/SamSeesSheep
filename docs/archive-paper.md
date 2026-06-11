@@ -7,9 +7,20 @@ antone@lorewood.dev
 
 ---
 
+> **Note (2026-06-11):** This Markdown file is the working draft. The
+> **canonical, arXiv-ready** version is the LaTeX project in `../paper/`
+> (`paper/paper.tex` + `paper/paper.bib`). The peer review that drove the
+> final revisions is in `fable5-peer-review.md`. The load-bearing factual
+> corrections (monotonicity bounded to v0.2→v0.4 with an explicit post-v0.4
+> plateau; the cross-clip 2.84° framed as a noise floor rather than a
+> v0.4→v0.7 improvement; the stock baseline reported as sheep-class detection
+> on both clips) have been applied below so this draft is not misleading, but
+> the LaTeX version is authoritative and adds bootstrap CIs, a data-availability
+> statement, and resolved figure/table cross-references.
+
 ## Abstract
 
-The Sheep Pain Facial Expression Scale (SPFES) \cite{mclennan2019} requires trained human observers to score pain frame-by-frame from video. This is a bottleneck that limits the scale and reproducibility of ovine welfare research. No automated system currently exists to extract the relevant ear-angle measurements from ambient pasture video. I present SamSeesSheep, a measurement pipeline that uses a foundation video segmentation model (SAM~3 Video) as an annotation tool, a human-in-the-loop review interface, and a lightweight edge-runnable keypoint detector (YOLO-pose, 2.5M parameters, ~10 MB) trained on the reviewed output. The pipeline produces per-keypoint residual standard deviation benchmarks on genuinely held-out clips. On a clip never seen by the labeler or trainer (NCC $<$ 0.23 versus all training videos), v0.4 achieves $\sigma = 4.06^{\circ}$ (left ear) and $4.09^{\circ}$ (right ear) for ear angle. On a second held-out clip with different flock arrangement and lighting, v0.7 achieves $\sigma_{\text{avg}} = 2.84^{\circ}$ (left $2.39^{\circ}$, right $3.29^{\circ}$). Both ear-angle metrics are derived from five head keypoints (nose, left/right ear bases, left/right ear tips). Stock YOLO (yolo26n.pt) produces zero keypoints on both clips. The training progression from 98 to 523 reviewed instances across 3 to 11 training videos demonstrates monotonically improving keypoint stability. I explicitly do not claim pain detection or welfare scoring; the pipeline is a measurement instrument designed to lower the data-collection barrier for researchers who need reproducible ear-angle features from ambient footage.
+The Sheep Pain Facial Expression Scale (SPFES) \cite{mclennan2019} requires trained human observers to score pain frame-by-frame from video. This is a bottleneck that limits the scale and reproducibility of ovine welfare research. No automated system currently exists to extract the relevant ear-angle measurements from ambient pasture video. I present SamSeesSheep, a measurement pipeline that uses a foundation video segmentation model (SAM~3 Video) as an annotation tool, a human-in-the-loop review interface, and a lightweight edge-runnable keypoint detector (YOLO-pose, 2.5M parameters, ~10 MB) trained on the reviewed output. The pipeline produces per-keypoint residual standard deviation benchmarks on genuinely held-out clips. On a clip never seen by the labeler or trainer (NCC $<$ 0.23 versus all training videos), v0.4 achieves $\sigma = 4.06^{\circ}$ (left ear) and $4.09^{\circ}$ (right ear) for ear angle. On a second held-out clip with different flock arrangement and lighting, v0.7 achieves $\sigma_{\text{avg}} = 2.84^{\circ}$ (left $2.39^{\circ}$, right $3.29^{\circ}$). Both ear-angle metrics are derived from five head keypoints (nose, left/right ear bases, left/right ear tips). The difference between the two clips reflects clip characteristics rather than a model improvement (on matched clips, v0.7 and v0.4 are statistically indistinguishable). Stock YOLO (yolo26n.pt) produces zero keypoints on both clips. The training progression from 98 to 405 reviewed instances across 3 to 8 training videos (v0.2--v0.4) shows monotonically improving keypoint stability; beyond that, through 523 instances and 11 videos (v0.7), stability plateaus at the clip noise floor, with a documented per-keypoint regression at v0.6. I explicitly do not claim pain detection or welfare scoring; the pipeline is a measurement instrument designed to lower the data-collection barrier for researchers who need reproducible ear-angle features from ambient footage.
 
 ---
 
@@ -32,7 +43,7 @@ My contributions are:
 1. A complete, open-source pipeline that converts ambient pasture video into a reviewed sheep-head keypoint dataset using a foundation model as the annotation engine and a human as the reviewer.
 2. A trained edge-runnable keypoint detector (YOLO26n-pose, 2.5M parameters, $\sim$10 MB) that places five keypoints on every detected sheep head, achieving $\sim$$4^{\circ}$ ear-angle $\sigma$ on a held-out clip.
 3. A reproducible benchmark protocol using genuinely held-out clips (NCC $<$ 0.23 versus all training videos) with per-keypoint residual $\sigma$, derived ear-angle $\sigma$, and a stock-YOLO baseline. The protocol has been applied to two independent held-out clips (IMG\_3651 and Test\_Clip\_Morning) spanning different flock arrangements, lighting conditions, and model versions.
-4. A documented training progression (v0.2 $\rightarrow$ v0.7) across 98 to 523 reviewed instances showing monotonic improvement in keypoint stability. v0.7 achieves $\sigma_{\text{avg}} = 2.84^{\circ}$ on the second held-out clip, a 30\% improvement over v0.4's $\sim$$4.08^{\circ}$ on the first held-out clip. The progression also includes a regression case (v0.6) that illustrates the role of per-keypoint labeling consistency.
+4. A documented training progression (v0.2 $\rightarrow$ v0.7). Keypoint stability improves monotonically from 98 to 405 reviewed instances (3 to 8 videos, v0.2 $\rightarrow$ v0.4); beyond that it plateaus at the clip noise floor, and the progression includes a regression case (v0.6) that isolates per-keypoint labeling consistency from raw instance count. v0.7 reaches $\sigma_{\text{avg}} = 2.84^{\circ}$ on the second held-out clip — a noise-floor measurement on a different, easier clip, not an improvement over v0.4 (on matched clips the two are statistically indistinguishable; Section 5.6.4).
 5. A measurement instrument, not a pain detector, not a welfare scorer, but designed to reduce the data-collection barrier for researchers who need reproducible ear-angle features from ambient pasture footage.
 
 I am explicit about what this work is not. It is not a pain detection system. It is not a welfare assessment tool. It has not been validated against documented stress events. It runs on a single Katahdin flock on one farm in Delaware, USA, with one smartphone camera, and has been annotated by a single non-veterinarian operator. Generalization to other breeds, flocks, geographies, or clinical contexts is future work and requires independent validation. This paper describes a measurement instrument that extracts ear-angle features with quantified stability and the pipeline that built it.
@@ -241,12 +252,12 @@ Table~\ref{tab:morningheadline} reports the primary results on Test\_Clip\_Morni
 
 | Metric | Stock YOLO | v0.2 | v0.3 | v0.4 |
 |--------|------------|------|------|------|
-| Any detection (full clip, 986 frames) | 986 (100\%) | 929 (94\%) | 986 (100\%) | 986 (100\%) |
+| Sheep-class detection (full clip, 986 frames) | 118 (12\%) | 929 (94\%) | 986 (100\%) | 986 (100\%) |
 | In-ROI detection (window, 150 frames) | 0 kpts | 132 (88\%) | 149 (99\%) | 150 (100\%) |
 | Residual $\sigma$ (mean, 5 kpts, px) | \- | 6.73 | 4.22 | 3.85 |
 | Raw $\sigma$ (mean, 5 kpts, px) | \- | 41.53 | 56.09 | 58.35 |
 
-All three trained models detect the target sheep; the detection rate climbs from 88\% (v0.2) to 100\% (v0.4). Stock YOLO produces bounding boxes on the full clip but zero keypoints, consistent with its lack of a keypoint head.
+All three trained models detect the target sheep; the detection rate climbs from 88\% (v0.2) to 100\% (v0.4). Stock YOLO fires some box on every frame, but only 118/986 (12\%) are sheep-class — the remainder are misclassifications (predominantly COCO "dog") — and it produces zero keypoints, consistent with its lack of a keypoint head. (The 35\% sheep-class rate quoted for IMG\_3651 in Section 5.1 and the 12\% here are the honest, comparable detection figures; an "any-class" rate would read 100\% on this clip but be dominated by non-sheep boxes.)
 
 Residual $\sigma$ drops monotonically with training scale: 6.73 px (v0.2) $\rightarrow$ 4.22 px (v0.3, $-37\%$) $\rightarrow$ 3.85 px (v0.4, $-9\%$ from v0.3, $-43\%$ from v0.2). The training-scale signal observed on IMG\_3651 reproduces on Test\_Clip\_Morning with the same monotonic pattern. Raw $\sigma$ varies from 41--58 px across models, driven by the sheep's lateral head drift ($\sigma_{\text{cx}} = 47.6$ px, $\sigma_{\text{cy}} = 25.3$ px) rather than model noise, consistent with the residual metric correctly isolating jitter from physical motion.
 
@@ -347,7 +358,7 @@ This work deliberately publishes negative results. The stock YOLO baseline (zero
 
 ## 7. Conclusion
 
-I have presented SamSeesSheep, a measurement pipeline that converts ambient pasture video into quantified ear-angle features using a foundation-model annotation flywheel. The pipeline produces a small edge-runnable model (2.5M parameters, $\sim$10 MB) that places five keypoints on every detected sheep head and achieves ear-angle residual $\sigma_{\text{avg}}$ of $4.08^{\circ}$ (v0.4) and $2.84^{\circ}$ (v0.7) on two genuinely held-out clips, a metric that is literally unmeasurable with off-the-shelf object detectors. The training progression from 98 to 523 reviewed instances across 3 to 11 training videos demonstrates monotonic improvement in keypoint stability, and the benchmark protocol — now applied to two independent held-out clips — provides a reproducible methodology for quantifying measurement quality.
+I have presented SamSeesSheep, a measurement pipeline that converts ambient pasture video into quantified ear-angle features using a foundation-model annotation flywheel. The pipeline produces a small edge-runnable model (2.5M parameters, $\sim$10 MB) that places five keypoints on every detected sheep head and achieves ear-angle residual $\sigma_{\text{avg}}$ of $4.08^{\circ}$ (v0.4) and $2.84^{\circ}$ (v0.7) on two genuinely held-out clips, a metric that is literally unmeasurable with off-the-shelf object detectors. The training progression shows monotonic improvement in keypoint stability from 98 to 405 reviewed instances (v0.2 to v0.4), then a plateau at the clip noise floor with a documented v0.6 regression; the benchmark protocol — now applied to two independent held-out clips — provides a reproducible methodology for quantifying measurement quality.
 
 I am being explicit about the boundary: this is a measurement instrument, not a pain detector or welfare scorer. It measures ear-angle features with quantified stability. Whether those features are welfare-informative is a question for the follow-up validation study that this instrument is designed to enable.
 
@@ -364,30 +375,6 @@ The author thanks the Katahdin ewes of Middletown, Delaware, for their patience 
 ---
 
 ## References
-
-<!--
-CITATION AUDIT (2026-06-09) — Every entry checked against actual publications:
-
-✓ mclennan2019   — verified; McLennan & Mahmoud 2019, Animals 9(4):196
-✓ reefmann2009   — verified; Reefmann et al. 2009, Applied Animal Behaviour Science
-✓ boissy2011     — verified; Boissy et al. 2011, Animal Welfare 20(1):47-56
-                  (NOTE: root README incorrectly cites "Physiology & Behavior" — fixed)
-✓ kirillov2023segment — verified; Kirillov et al. 2023, ICCV
-✓ ravi2024sam2   — verified; Ravi et al. 2024, arXiv:2408.00714
-✓ ravi2025sam3   — FIXED: replaced with correct author list (Carion et al., 38 authors), correct title "Segment Anything with Concepts", correct arXiv ID 2511.16719.
-✓ xu2023livestock — REMOVED: fabricated entry deleted. 
-✓ wang2024agriculture — REMOVED: fabricated entry deleted. Replaced with real li2024foundation (Li et al. 2024, CEA 222:109032).
-✓ maji2022yolopose — verified; Maji et al. 2022, CVPR Workshops
-✓ mathis2018deeplabcut — verified; Mathis et al. 2018, Nature Neuroscience
-✓ graving2019deepposekit — verified; Graving et al. 2019, eLife
-✓ pereira2022sleap — verified; Pereira et al. 2022, Nature Methods
-✓ berckmans2014precision — verified; Berckmans 2014, Rev. Sci. Tech. OIE
-✓ v03benchmark   — self-citation; internal repo doc
-
-Entries marked ✗ were FABRICATED. All have been fixed: ravi2025sam3
-replaced with correct author list (Carion et al.), xu2023livestock removed,
-wang2024agriculture replaced with real li2024foundation (Li et al. 2024).
--->
 
 \bibitem{mclennan2019}
 K.~M. McLennan and M.~Mahmoud.

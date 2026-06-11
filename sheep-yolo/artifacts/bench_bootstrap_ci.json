@@ -1,0 +1,76 @@
+{
+  "method": "moving-block bootstrap (block=10 frames, 5000 resamples, seed=12345) on rolling-median-7 detrended ear-angle residuals; 95% percentile CI",
+  "note": "Within-window sampling CI only. Does NOT capture single-clip / single-sheep / single-window structural uncertainty.",
+  "results": {
+    "v0.2|IMG_3651": {
+      "sigma_L": 6.71,
+      "ci_L": [
+        5.56,
+        8.04
+      ],
+      "sigma_R": 6.07,
+      "ci_R": [
+        4.65,
+        7.6
+      ],
+      "sigma_avg": 6.39,
+      "n": 145
+    },
+    "v0.4|IMG_3651": {
+      "sigma_L": 4.06,
+      "ci_L": [
+        2.97,
+        4.99
+      ],
+      "sigma_R": 4.09,
+      "ci_R": [
+        2.83,
+        5.26
+      ],
+      "sigma_avg": 4.07,
+      "n": 149
+    },
+    "v0.7|IMG_3651": {
+      "sigma_L": 3.7,
+      "ci_L": [
+        2.96,
+        4.1
+      ],
+      "sigma_R": 4.46,
+      "ci_R": [
+        3.08,
+        5.64
+      ],
+      "sigma_avg": 4.08,
+      "n": 153
+    },
+    "v0.2|Test_Clip_Morning": {
+      "sigma_L": 5.37,
+      "ci_L": [
+        1.31,
+        8.82
+      ],
+      "sigma_R": 2.24,
+      "ci_R": [
+        0.95,
+        3.09
+      ],
+      "sigma_avg": 3.81,
+      "n": 132
+    },
+    "v0.4|Test_Clip_Morning": {
+      "sigma_L": 2.5,
+      "ci_L": [
+        1.15,
+        3.35
+      ],
+      "sigma_R": 2.72,
+      "ci_R": [
+        1.22,
+        3.69
+      ],
+      "sigma_avg": 2.61,
+      "n": 150
+    }
+  }
+}

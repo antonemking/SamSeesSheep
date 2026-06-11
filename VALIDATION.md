@@ -30,7 +30,7 @@ The project went through two scope shifts since day 0. This section supersedes a
 
 - **v0 (day 0)** — Intended as a welfare-scoring pipeline against SPFES thresholds. Unrealistic at our evidence level.
 - **v0.1 (2026-04 simplify branch)** — Descoped to "visualization artifact": SAM 3 Video → per-frame ear angles → smoothed EKG chart. No welfare claim. Clean but narrow.
-- **v0.2 (2026-04 current)** — Re-scoped again after peer review. SAM 3 is the **annotation backbone** (not the inference backbone). The project's outputs are (a) a growing reviewed-keypoint dataset and (b) a trained YOLO-pose model small enough to run at the edge. The visualization chart persists as a labeling-QA view.
+- **v0.2 (2026-04)** — Re-scoped again after peer review. SAM 3 is the **annotation backbone** (not the inference backbone). The project's outputs are (a) a growing reviewed-keypoint dataset and (b) a trained YOLO-pose model small enough to run at the edge. The visualization chart persists as a labeling-QA view.
 
 ---
 

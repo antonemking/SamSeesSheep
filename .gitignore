@@ -54,6 +54,9 @@ data/video/
 *.heic
 !docs/**/*.png
 !docs/**/*.jpg
+# Paper figures must ship with the LaTeX source (arXiv build assets)
+!paper/figures/*.png
+!paper/figures/*.jpg
 # Keep all data local
 data/
 
@@ -95,8 +98,12 @@ reports/runs/
 # Claude Code session-local settings (machine-local)
 .claude/
 
-# sheep-yolo subdir — inference artifacts, weights, raw clips
-sheep-yolo/artifacts/
+# sheep-yolo subdir — inference artifacts, weights, raw clips.
+# Ignore the heavy outputs (videos, PNG grids, pickle caches) but TRACK the
+# small machine-readable benchmark JSONs so verify_paper_claims.py runs on a
+# fresh clone. (Must ignore contents, not the dir, for the negation to apply.)
+sheep-yolo/artifacts/*
+!sheep-yolo/artifacts/*.json
 sheep-yolo/footage/
 sheep-yolo/test-clips/*
 !sheep-yolo/test-clips/

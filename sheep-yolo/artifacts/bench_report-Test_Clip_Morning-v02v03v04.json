@@ -1,0 +1,292 @@
+{
+  "clip": "test-clips/Test_Clip_Morning.mov",
+  "held_out": true,
+  "window_frames": [
+    742,
+    892
+  ],
+  "window_seconds": 5.0,
+  "roi": [
+    1234,
+    267,
+    1719,
+    538
+  ],
+  "target_track_id": 215,
+  "conf_threshold": 0.25,
+  "running_median_window": 7,
+  "method": "residual sigma = std(kpt - rolling_median_7(kpt)); signed ear angle via head-midline geometry; cached predictions only",
+  "detection_rate": {
+    "v0.2": "132/150 (88%)",
+    "v0.3": "149/150 (99%)",
+    "v0.4": "150/150 (100%)"
+  },
+  "residual_sigma": {
+    "v0.2": {
+      "per_kpt": {
+        "nose": {
+          "sigma_px": 4.07,
+          "sigma_x": 2.91,
+          "sigma_y": 2.84,
+          "n_visible": 132
+        },
+        "L_ear_base": {
+          "sigma_px": 3.46,
+          "sigma_x": 2.58,
+          "sigma_y": 2.3,
+          "n_visible": 132
+        },
+        "R_ear_base": {
+          "sigma_px": 8.1,
+          "sigma_x": 7.91,
+          "sigma_y": 1.75,
+          "n_visible": 132
+        },
+        "L_ear_tip": {
+          "sigma_px": 6.21,
+          "sigma_x": 5.31,
+          "sigma_y": 3.22,
+          "n_visible": 132
+        },
+        "R_ear_tip": {
+          "sigma_px": 11.79,
+          "sigma_x": 11.31,
+          "sigma_y": 3.34,
+          "n_visible": 132
+        }
+      },
+      "mean_sigma": 6.73
+    },
+    "v0.3": {
+      "per_kpt": {
+        "nose": {
+          "sigma_px": 3.75,
+          "sigma_x": 2.91,
+          "sigma_y": 2.37,
+          "n_visible": 149
+        },
+        "L_ear_base": {
+          "sigma_px": 2.54,
+          "sigma_x": 1.75,
+          "sigma_y": 1.84,
+          "n_visible": 149
+        },
+        "R_ear_base": {
+          "sigma_px": 2.91,
+          "sigma_x": 1.82,
+          "sigma_y": 2.28,
+          "n_visible": 149
+        },
+        "L_ear_tip": {
+          "sigma_px": 6.12,
+          "sigma_x": 5.55,
+          "sigma_y": 2.58,
+          "n_visible": 149
+        },
+        "R_ear_tip": {
+          "sigma_px": 5.79,
+          "sigma_x": 2.69,
+          "sigma_y": 5.13,
+          "n_visible": 149
+        }
+      },
+      "mean_sigma": 4.22
+    },
+    "v0.4": {
+      "per_kpt": {
+        "nose": {
+          "sigma_px": 4.18,
+          "sigma_x": 3.15,
+          "sigma_y": 2.76,
+          "n_visible": 150
+        },
+        "L_ear_base": {
+          "sigma_px": 2.36,
+          "sigma_x": 1.67,
+          "sigma_y": 1.67,
+          "n_visible": 150
+        },
+        "R_ear_base": {
+          "sigma_px": 2.63,
+          "sigma_x": 1.42,
+          "sigma_y": 2.21,
+          "n_visible": 150
+        },
+        "L_ear_tip": {
+          "sigma_px": 4.38,
+          "sigma_x": 3.21,
+          "sigma_y": 2.98,
+          "n_visible": 150
+        },
+        "R_ear_tip": {
+          "sigma_px": 5.69,
+          "sigma_x": 2.24,
+          "sigma_y": 5.23,
+          "n_visible": 150
+        }
+      },
+      "mean_sigma": 3.85
+    }
+  },
+  "own_frames_raw_sigma": {
+    "v0.2": {
+      "per_kpt": {
+        "nose": {
+          "sigma_px": 46.49,
+          "sigma_x": 40.69,
+          "sigma_y": 22.47,
+          "n_visible": 132
+        },
+        "L_ear_base": {
+          "sigma_px": 37.6,
+          "sigma_x": 29.9,
+          "sigma_y": 22.81,
+          "n_visible": 132
+        },
+        "R_ear_base": {
+          "sigma_px": 44.26,
+          "sigma_x": 40.23,
+          "sigma_y": 18.46,
+          "n_visible": 132
+        },
+        "L_ear_tip": {
+          "sigma_px": 30.97,
+          "sigma_x": 26.13,
+          "sigma_y": 16.63,
+          "n_visible": 132
+        },
+        "R_ear_tip": {
+          "sigma_px": 48.34,
+          "sigma_x": 45.01,
+          "sigma_y": 17.62,
+          "n_visible": 132
+        }
+      },
+      "mean_sigma": 41.53
+    },
+    "v0.3": {
+      "per_kpt": {
+        "nose": {
+          "sigma_px": 72.95,
+          "sigma_x": 67.72,
+          "sigma_y": 27.12,
+          "n_visible": 149
+        },
+        "L_ear_base": {
+          "sigma_px": 47.2,
+          "sigma_x": 42.17,
+          "sigma_y": 21.2,
+          "n_visible": 149
+        },
+        "R_ear_base": {
+          "sigma_px": 56.27,
+          "sigma_x": 51.94,
+          "sigma_y": 21.63,
+          "n_visible": 149
+        },
+        "L_ear_tip": {
+          "sigma_px": 38.39,
+          "sigma_x": 30.84,
+          "sigma_y": 22.86,
+          "n_visible": 149
+        },
+        "R_ear_tip": {
+          "sigma_px": 65.65,
+          "sigma_x": 61.33,
+          "sigma_y": 23.43,
+          "n_visible": 149
+        }
+      },
+      "mean_sigma": 56.09
+    },
+    "v0.4": {
+      "per_kpt": {
+        "nose": {
+          "sigma_px": 80.05,
+          "sigma_x": 74.77,
+          "sigma_y": 28.6,
+          "n_visible": 150
+        },
+        "L_ear_base": {
+          "sigma_px": 47.77,
+          "sigma_x": 42.89,
+          "sigma_y": 21.04,
+          "n_visible": 150
+        },
+        "R_ear_base": {
+          "sigma_px": 57.62,
+          "sigma_x": 52.74,
+          "sigma_y": 23.2,
+          "n_visible": 150
+        },
+        "L_ear_tip": {
+          "sigma_px": 41.13,
+          "sigma_x": 34.87,
+          "sigma_y": 21.81,
+          "n_visible": 150
+        },
+        "R_ear_tip": {
+          "sigma_px": 65.16,
+          "sigma_x": 59.29,
+          "sigma_y": 27.01,
+          "n_visible": 150
+        }
+      },
+      "mean_sigma": 58.35
+    }
+  },
+  "ear_angle_residual_sigma_deg": {
+    "v0.2": {
+      "L_ear_residual_sigma_deg": 5.372334835968998,
+      "R_ear_residual_sigma_deg": 2.2406937795707407,
+      "n_L_visible": 132,
+      "n_R_visible": 132
+    },
+    "v0.3": {
+      "L_ear_residual_sigma_deg": 2.491432640367565,
+      "R_ear_residual_sigma_deg": 2.075524210311517,
+      "n_L_visible": 149,
+      "n_R_visible": 149
+    },
+    "v0.4": {
+      "L_ear_residual_sigma_deg": 2.5036912961823914,
+      "R_ear_residual_sigma_deg": 2.7193199175568137,
+      "n_L_visible": 150,
+      "n_R_visible": 150
+    }
+  },
+  "headline": {
+    "residual_sigma_mean_px": {
+      "v0.2": 6.73,
+      "v0.3": 4.22,
+      "v0.4": 3.85
+    },
+    "raw_sigma_mean_px": {
+      "v0.2": 41.53,
+      "v0.3": 56.09,
+      "v0.4": 58.35
+    },
+    "ear_angle_residual_sigma_deg": {
+      "v0.2": {
+        "L": 5.37,
+        "R": 2.24
+      },
+      "v0.3": {
+        "L": 2.49,
+        "R": 2.08
+      },
+      "v0.4": {
+        "L": 2.5,
+        "R": 2.72
+      }
+    }
+  },
+  "stock_baseline": {
+    "model": "yolo26n.pt",
+    "n_frames": 986,
+    "any_class_detection_frames": 986,
+    "sheep_class_detections": 118,
+    "keypoints_produced": 0,
+    "ear_angle_measurable": false
+  }
+}
