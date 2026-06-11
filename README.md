@@ -58,7 +58,7 @@ Stock `yolo26n.pt` produces zero keypoints on the same clip. The keypoint head i
 
 *v0.7 on the held-out IMG_3651 clip: five keypoints lock onto the head (left) while the left and right ear angles are read out frame by frame (right). A near-stationary sheep yields a roughly flat trace — the residual jitter around it is the measurement noise floor (σ ≈ 4° on this clip).*
 
-Full benchmark report with per-keypoint σ tables and methodology: [`docs/v0.4-benchmark.md`](docs/v0.4-benchmark.md).
+Current v0.7 held-out benchmark — full training progression, both held-out clips, and the two-clip comparison: [`docs/v0.7-benchmark.md`](docs/v0.7-benchmark.md). Per-keypoint σ tables and the residual-σ methodology are in the v0.2→v0.4 report: [`docs/v0.4-benchmark.md`](docs/v0.4-benchmark.md).
 
 ## How it works
 
@@ -120,7 +120,8 @@ best.pt → sheep-yolo/weights/ → inference + σ benchmark on 6 GB local GPU
 - **[SETUP.md](./SETUP.md)** — complete reproducibility guide (prerequisites, local labeling, cloud GPU training, inference)
 - **[ARCHITECTURE.md](./ARCHITECTURE.md)** — detailed technical architecture for researchers and engineers
 - **[DATA_FORMAT.md](./DATA_FORMAT.md)** — review.json schema, YOLO-pose export format, keypoint v-flag semantics
-- **[docs/v0.4-benchmark.md](./docs/v0.4-benchmark.md)** — full 3-way held-out benchmark report
+- **[docs/v0.7-benchmark.md](./docs/v0.7-benchmark.md)** — current held-out benchmark (v0.7, two clips, training progression)
+- **[docs/v0.4-benchmark.md](./docs/v0.4-benchmark.md)** — 3-way (v0.2→v0.4) report with per-keypoint σ tables + residual-σ methodology
 - **[VALIDATION.md](./VALIDATION.md)** — what this project claims and what it explicitly does not
 - **[LICENSE](./LICENSE)** — MIT
 
