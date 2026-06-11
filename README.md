@@ -27,7 +27,7 @@ Off-the-shelf object detectors can find a sheep bounding box on ~35% of frames, 
 
 ## Results
 
-Ear-angle residual σ on a held-out clip — never pushed to the labeler, never reviewed, NCC < 0.23 vs every training video:
+Ear-angle residual σ on a held-out clip — never pushed to the labeler, never reviewed, visually distinct from every training clip:
 
 | | left ear σ | right ear σ |
 |---|---|---|

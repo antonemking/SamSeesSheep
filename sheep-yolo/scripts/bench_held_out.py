@@ -1,7 +1,7 @@
 """Held-out 3-way benchmark: sheep-pose v0.2 vs v0.3 vs v0.4 on IMG_3651.
 
 Runs all three models against test-clips/IMG_3651.MOV — a clip in NEITHER
-training set (never pushed to the labeler, NCC < 0.23 vs every training video).
+training set (never pushed to the labeler; held out from every training video).
 
 Outputs into ./artifacts:
 

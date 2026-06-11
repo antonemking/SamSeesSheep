@@ -1,0 +1,46 @@
+{
+  "clip": "test-clips/IMG_3651.MOV",
+  "paper_id": "HO-1",
+  "window_frames": [
+    367,
+    522
+  ],
+  "window_len": 155,
+  "method": "residual sigma px per kpt = hypot(std(x - rollmed7(x)), std(y - rollmed7(y))) on visible (conf>0) samples; mean over 5 kpts. Recomputed from artifacts/_cache/*.pkl; reproduces the committed v0.2/v0.3/v0.4 values in bench_report-IMG_3651-3way.json.",
+  "residual_sigma_mean_px": {
+    "v0.4": 7.7,
+    "v0.5": 7.83,
+    "v0.6": 8.09,
+    "v0.7": 7.9
+  },
+  "per_kpt_residual_sigma_px": {
+    "v0.4": {
+      "nose": 8.0,
+      "L_ear_base": 6.03,
+      "R_ear_base": 7.03,
+      "L_ear_tip": 7.66,
+      "R_ear_tip": 9.78
+    },
+    "v0.5": {
+      "nose": 7.89,
+      "L_ear_base": 5.19,
+      "R_ear_base": 6.48,
+      "L_ear_tip": 8.39,
+      "R_ear_tip": 11.2
+    },
+    "v0.6": {
+      "nose": 8.19,
+      "L_ear_base": 5.94,
+      "R_ear_base": 6.86,
+      "L_ear_tip": 8.3,
+      "R_ear_tip": 11.17
+    },
+    "v0.7": {
+      "nose": 7.94,
+      "L_ear_base": 5.8,
+      "R_ear_base": 6.27,
+      "L_ear_tip": 8.69,
+      "R_ear_tip": 10.79
+    }
+  }
+}

@@ -68,7 +68,7 @@ PHONE CAPTURE (1080p, 15–30 s, .MOV)
 │         ▼                                                   │
 │  σ BENCHMARK (sheep-yolo/scripts/bench_held_out.py)         │
 │    residual σ = std(kpt − rolling_median_7_of_kpt)          │
-│    measured on held-out clips (NCC < 0.23 vs training)      │
+│    measured on held-out clips (unseen during training)      │
 │    per-keypoint + derived ear-angle σ reported               │
 │    pickle cache for per-model predictions                   │
 │         │                                                   │
@@ -201,7 +201,7 @@ These bands are QA aids, not diagnostic cutoffs. Trust deltas, not absolutes.
 
 The `sheep-yolo/scripts/bench_held_out.py` script measures keypoint stability on a held-out clip. The methodology:
 
-1. **Clip selection**: A clip whose normalized cross-correlation with every training video is < 0.23 — genuinely unseen.
+1. **Clip selection**: A clip held out from training — never pushed to the labeler and visually distinct from every training video — i.e., genuinely unseen.
 2. **Target window**: A ~5 s segment where a target sheep's head is roughly stationary. Centroid std ~30 px. ROI padding excludes neighbouring sheep.
 3. **Residual σ**: `std(kpt − rolling_median_7_of_kpt)`. Strips slow head drift (the sheep's actual motion); leaves the frame-to-frame jitter that matters for welfare estimation.
 4. **Raw σ**: `std(kpt)` over the window. Expected to be ~45 px for all models (dominated by the sheep's actual head sway, not model noise). Serves as a sanity check.

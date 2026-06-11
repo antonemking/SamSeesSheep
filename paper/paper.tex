@@ -61,8 +61,8 @@ researchers who need reproducible ear-angle features from ambient footage.
 \begin{figure}[t]
   \centering
   \includegraphics[width=\textwidth]{hero.png}
-  \caption{SamSeesSheep pipeline output on the held-out \texttt{Test\_Clip\_Morning}
-  clip: simultaneous ear-angle monitoring of six animals. \emph{Left:} the
+  \caption{SamSeesSheep pipeline output on held-out clip HO-2
+  (Table~\ref{tab:clipmap}): simultaneous ear-angle monitoring of six animals. \emph{Left:} the
   supervision-annotated flock with bounding boxes, per-animal labels (including
   left/right ear angles in degrees), and five-keypoint skeletons (nose, ear
   bases, ear tips). \emph{Right:} a six-lane synchronized ear-angle chart with
@@ -131,8 +131,8 @@ against a stock-YOLO baseline that produces zero keypoints.
   \item A reproducible benchmark protocol using genuinely held-out clips with
   per-keypoint residual $\sigma$, derived ear-angle $\sigma$, bootstrap
   confidence intervals, and a stock-YOLO baseline. The protocol is applied to
-  two independent held-out clips (\texttt{IMG\_3651} and
-  \texttt{Test\_Clip\_Morning}) spanning different flock arrangements, lighting,
+  two independent held-out clips (HO-1 and HO-2; Table~\ref{tab:clipmap})
+  spanning different flock arrangements, lighting,
   and model versions.
   \item A documented training progression (v0.2 $\rightarrow$ v0.7). Keypoint
   stability improves monotonically from 98 to 405 reviewed instances (3 to 8
@@ -346,7 +346,7 @@ labeled-data scale and scene diversity.
   \centering
   \caption{Dataset growth across versions. Validation mAP is reported from the
   Ultralytics training logs (see Data Availability); pixel residual $\sigma$ is
-  on the \texttt{IMG\_3651} held-out clip.}
+  on the HO-1 held-out clip.}
   \label{tab:dataset}
   \begin{tabular}{lcccc}
     \toprule
@@ -363,10 +363,30 @@ labeled-data scale and scene diversity.
 \end{table}
 
 \subsection{Held-Out Clips}
-Two clips were held out from all labeling and training: \texttt{IMG\_3651} (v0.2--v0.7
-benchmarks) and \texttt{Test\_Clip\_Morning} (calibrated for v0.7).
+\label{sec:heldout}
+Two clips were held out from all labeling and training: HO-1 (benchmarked
+v0.2--v0.7) and HO-2 (calibrated for v0.7). Both were filmed on the same pasture
+with the same flock but were never pushed to the labeling pod and never reviewed.
+Table~\ref{tab:clipmap} maps each paper ID to its original capture filename; the
+released benchmark artifacts and scripts retain those capture IDs.
 
-\paragraph{IMG\_3651.}
+\begin{table}[t]
+  \centering
+  \caption{Held-out clip identities. The paper IDs HO-1 and HO-2 map to the
+  original capture filenames used throughout the released benchmark artifacts and
+  scripts (e.g.\ \texttt{bench\_report-IMG\_3651-3way.json}).}
+  \label{tab:clipmap}
+  \begin{tabular}{llll}
+    \toprule
+    Paper ID & Capture file & Lighting / time & Target sheep \\
+    \midrule
+    HO-1 & \texttt{IMG\_3651.MOV}           & Afternoon & Foreground-dominant ewe (track 34) \\
+    HO-2 & \texttt{Test\_Clip\_Morning.mov} & Morning   & Background ewe near fence (track 215) \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\paragraph{HO-1 (\texttt{IMG\_3651}).}
 Filmed on the same pasture with the same flock, never pushed to the labeling pod
 and never reviewed. The target window spans frames 367--521 (155 frames,
 $\approx 5.17$\,s at 30\,fps), with a single dominant foreground sheep
@@ -376,43 +396,44 @@ Head-centroid standard deviation within the window is ${\sim}30$\,px in both $x$
 and $y$ --- not perfectly still, but the calmest 5\,s segment available with a
 large foreground head.
 
-\paragraph{Test\_Clip\_Morning.}
+\paragraph{HO-2 (\texttt{Test\_Clip\_Morning}).}
 $1920\times1080$, 986 frames, ${\sim}30$\,fps, 61\,MB, filmed on the same pasture
-with the same flock under morning lighting distinct from IMG\_3651's afternoon
+with the same flock under morning lighting distinct from HO-1's afternoon
 light; never pushed to the pod and never reviewed. The target window spans
 frames 742--892 (150 frames $=5.0$\,s), with the target being track 215, a
 background tan sheep near the fence line. The ROI $(1234, 267, 1719, 538)$
 isolates track 215. Head-centroid movement is $\sigma_{cx}=47.6$\,px,
 $\sigma_{cy}=25.3$\,px (total $53.9$\,px) --- somewhat more motion than the
-IMG\_3651 window. v0.7 detection rate within the window is 148/150 (98.7\%).
+HO-1 window. v0.7 detection rate within the window is 148/150 (98.7\%).
 
 \subsection{Stock YOLO Baseline}
 \label{sec:stock}
 \texttt{yolo26n.pt} (COCO-pretrained, identical backbone but no sheep-keypoint
 head) was run on both clips at confidence 0.25. It produces COCO-class
-\texttt{sheep} boxes on 323/933 frames (35\%) for IMG\_3651 and 118/986 frames
-(12\%) for Test\_Clip\_Morning, but \emph{zero keypoints} on either clip; ear
-angle is unmeasurable without a keypoint head. (On Test\_Clip\_Morning the model
-fires \emph{some} box on every frame, but the overwhelming majority are
-misclassifications --- predominantly COCO ``dog'' --- so the sheep-class rate,
-not the any-class rate, is the honest detection figure.)
+\texttt{sheep} boxes on 323/933 frames (35\%) for HO-1 and 118/986 frames
+(12\%) for HO-2, but \emph{zero keypoints} on either clip; ear angle is
+unmeasurable without a keypoint head. We report the COCO-\texttt{sheep}-class
+frame rate rather than an any-class rate: \texttt{yolo26n.pt} emits boxes across
+several COCO classes per clip, so an any-class rate would read higher without
+indicating that a sheep --- let alone its ear keypoints --- was localized.
 
 \section{Results}
 
-\subsection{Detection and Keypoint Stability (IMG\_3651)}
-Table~\ref{tab:headline} reports the primary results on IMG\_3651 for v0.2--v0.4
+\subsection{Detection and Keypoint Stability (HO-1)}
+Table~\ref{tab:headline} reports the primary results on HO-1 for v0.2--v0.4
 plus the stock baseline.
 
 \begin{table}[t]
   \centering
-  \caption{IMG\_3651 held-out results. Stock-YOLO detection is the sheep-class
-  rate (Section~\ref{sec:stock}); it produces no keypoints.}
+  \caption{HO-1 held-out results. Stock-YOLO detection is the COCO-sheep-class
+  rate (Section~\ref{sec:stock}); the trained models have a single
+  \texttt{sheep\_head} class. Stock produces no keypoints.}
   \label{tab:headline}
   \begin{tabular}{lcccc}
     \toprule
     Metric & Stock YOLO & v0.2 & v0.3 & v0.4 \\
     \midrule
-    Any detection (full clip, 933 frames)   & 323 (35\%) & 909 (97\%) & 931 (99.8\%) & 933 (100\%) \\
+    Sheep-class detection (full clip, 933 frames) & 323 (35\%) & 909 (97\%) & 931 (99.8\%) & 933 (100\%) \\
     In-ROI detection (window, 155 frames)    & 0 kpts     & 145 (94\%) & 150 (97\%)   & 149 (96\%) \\
     Residual $\sigma$ (mean, 5 kpts, px)     & ---        & 10.89      & 8.90         & 7.70 \\
     Raw $\sigma$ (mean, 5 kpts, px)          & ---        & 49.44      & 46.90        & 46.60 \\
@@ -431,7 +452,7 @@ $-29\%$ from v0.2). Raw $\sigma$ stays flat at ${\sim}46$--$49$\,px, confirming
 that physical head sway dominates the raw measurement and that the residual
 metric isolates model noise.
 
-\subsection{Per-Keypoint Residual $\sigma$ (IMG\_3651)}
+\subsection{Per-Keypoint Residual $\sigma$ (HO-1)}
 Table~\ref{tab:perkpt} reports residual $\sigma$ per keypoint. v0.4 improves on
 every keypoint. The largest gains are on ear tips --- the keypoints v0.2
 historically struggled to place anatomically, and the most distal from the head
@@ -441,7 +462,7 @@ of head width, down from v0.2's $5.3$--$5.4\%$.
 
 \begin{table}[t]
   \centering
-  \caption{Per-keypoint residual $\sigma$ (px) on IMG\_3651.}
+  \caption{Per-keypoint residual $\sigma$ (px) on HO-1.}
   \label{tab:perkpt}
   \begin{tabular}{lcccc}
     \toprule
@@ -458,9 +479,9 @@ of head width, down from v0.2's $5.3$--$5.4\%$.
   \end{tabular}
 \end{table}
 
-\subsection{Ear-Angle Stability (IMG\_3651)}
+\subsection{Ear-Angle Stability (HO-1)}
 Table~\ref{tab:earangle} reports the derived ear-angle residual $\sigma$. This is
-the welfare-relevant scalar: a stationary sheep should produce a flat ear-angle
+the pipeline's output scalar: a stationary sheep should produce a flat ear-angle
 trace, and the deviation from flatness is the measurement noise floor
 (Figure~\ref{fig:earangle}). v0.4 achieves ${\sim}4\dgr$ jitter on both ears, a
 39\% (left) and 33\% (right) reduction from v0.2. For reference, the SPFES
@@ -472,7 +493,7 @@ produces zero keypoints and therefore no ear-angle measurement at all.
 
 \begin{table}[t]
   \centering
-  \caption{Ear-angle residual $\sigma$ (degrees) on IMG\_3651.}
+  \caption{Ear-angle residual $\sigma$ (degrees) on HO-1.}
   \label{tab:earangle}
   \begin{tabular}{lcc}
     \toprule
@@ -488,7 +509,7 @@ produces zero keypoints and therefore no ear-angle measurement at all.
 \begin{figure}[t]
   \centering
   \includegraphics[width=0.92\textwidth]{earangle-img3651.png}
-  \caption{Ear angle over the motionless window on IMG\_3651 for v0.2, v0.3,
+  \caption{Ear angle over the motionless window on HO-1 for v0.2, v0.3,
   v0.4, and v0.7. Flatter traces indicate a more stable measurement; noisier
   traces indicate keypoint jitter. The large v0.2$\rightarrow$v0.4 improvement is
   visible, while v0.7 overlaps v0.4 --- consistent with the post-v0.4 plateau
@@ -502,20 +523,20 @@ produces zero keypoints and therefore no ear-angle measurement at all.
 \subsection{Training Progression and the v0.6 Regression}
 \label{sec:progression}
 Subsequent versions (v0.5--v0.7) continued the labeling flywheel, all
-benchmarked on IMG\_3651 (Table~\ref{tab:progression}). The monotonic
+benchmarked on HO-1 (Table~\ref{tab:progression}). The monotonic
 improvement of v0.2$\rightarrow$v0.4 does \emph{not} continue: from v0.4 onward
 both the mean residual $\sigma$ and the ear-angle $\sigavg$ plateau near the
 clip's noise floor. v0.5 reaches left $3.66\dgr$ / right $4.30\dgr$. v0.6 is a
-mixed regression --- right ear $3.55\dgr$ (best recorded on IMG\_3651) but left
+mixed regression --- right ear $3.55\dgr$ (best recorded on HO-1) but left
 ear $4.65\dgr$ (back to near-v0.2 levels) --- showing that per-keypoint labeling
 consistency, not just instance count, drives stability. v0.7 recovers left to
-$3.70\dgr$ (right $4.46\dgr$). Across all versions on IMG\_3651, $\sigavg$
+$3.70\dgr$ (right $4.46\dgr$). Across all versions on HO-1, $\sigavg$
 improves from $6.39\dgr$ (v0.2) to $4.08\dgr$ (v0.4, $-36\%$) and then oscillates
 within ${\sim}0.1\dgr$ of $4.0\dgr$ --- a plateau, not continued improvement.
 
 \begin{table}[t]
   \centering
-  \caption{Full progression on IMG\_3651. Improvement is monotonic only through
+  \caption{Full progression on HO-1. Improvement is monotonic only through
   v0.4; v0.5--v0.7 plateau, with v0.6 a per-keypoint regression.}
   \label{tab:progression}
   \begin{tabular}{lcccc}
@@ -558,16 +579,17 @@ window can estimate.
     \toprule
     Clip & Version & Left ear $\sigma$ (95\% CI) & Right ear $\sigma$ (95\% CI) \\
     \midrule
-    IMG\_3651 & v0.2 & 6.71 [5.56, 8.04] & 6.07 [4.65, 7.60] \\
-    IMG\_3651 & v0.4 & 4.06 [2.97, 4.99] & 4.09 [2.83, 5.26] \\
-    IMG\_3651 & v0.7 & 3.70 [2.96, 4.10] & 4.46 [3.08, 5.64] \\
-    Test\_Clip\_Morning & v0.2 & 5.37 [1.31, 8.82] & 2.24 [0.95, 3.09] \\
-    Test\_Clip\_Morning & v0.4 & 2.50 [1.15, 3.35] & 2.72 [1.22, 3.69] \\
+    HO-1 & v0.2 & 6.71 [5.56, 8.04] & 6.07 [4.65, 7.60] \\
+    HO-1 & v0.4 & 4.06 [2.97, 4.99] & 4.09 [2.83, 5.26] \\
+    HO-1 & v0.7 & 3.70 [2.96, 4.10] & 4.46 [3.08, 5.64] \\
+    HO-2 & v0.2 & 5.37 [1.31, 8.82] & 2.24 [0.95, 3.09] \\
+    HO-2 & v0.4 & 2.50 [1.15, 3.35] & 2.72 [1.22, 3.69] \\
     \bottomrule
   \end{tabular}
 \end{table}
 
 \subsection{v0.4 on Held-Out versus In-Distribution}
+\label{sec:indist}
 v0.4's held-out residual $\sigma$ of 7.70\,px approaches v0.3's in-distribution
 numbers on its own training clips (4.10--5.92\,px, reported in the v0.3 benchmark
 \citep{v03benchmark}). The ${\sim}1.8$--$3.6$\,px gap between in-distribution and
@@ -575,10 +597,10 @@ held-out performance is the generalization cost for an unseen scene; that this
 gap is quantifiable at all was unavailable from the earlier within-distribution
 benchmarks.
 
-\subsection{Second Held-Out Clip: Test\_Clip\_Morning}
+\subsection{Second Held-Out Clip: HO-2}
 \label{sec:morning}
 The second clip provides a cross-clip validation point, testing whether the
-training-scale monotonicity observed on IMG\_3651 (v0.2$\rightarrow$v0.4)
+training-scale monotonicity observed on HO-1 (v0.2$\rightarrow$v0.4)
 reproduces on an independently selected clip with different flock arrangement,
 lighting, and target. Figure~\ref{fig:hero} shows the pipeline's multi-animal
 output on this clip.
@@ -588,14 +610,14 @@ Table~\ref{tab:morningheadline} reports results for v0.2--v0.4 plus the stock
 baseline. The detection rate climbs from 88\% (v0.2) to 100\% (v0.4). Residual
 $\sigma$ drops monotonically: $6.73 \rightarrow 4.22$ ($-37\%$) $\rightarrow 3.85$\,px
 ($-9\%$ from v0.3, $-43\%$ from v0.2) --- the same monotonic v0.2$\rightarrow$v0.4
-pattern as IMG\_3651. Raw $\sigma$ varies 41--58\,px, driven by lateral head
+pattern as HO-1. Raw $\sigma$ varies 41--58\,px, driven by lateral head
 drift rather than model noise.
 
 \begin{table}[t]
   \centering
-  \caption{Test\_Clip\_Morning held-out results. Stock-YOLO detection is the
-  sheep-class rate (Section~\ref{sec:stock}); the any-class rate is 100\% but is
-  dominated by non-sheep misclassifications.}
+  \caption{HO-2 held-out results. Stock-YOLO detection is the COCO-sheep-class
+  rate (Section~\ref{sec:stock}); the any-class rate (100\%) is not reported as a
+  detection figure because it does not reflect sheep localization.}
   \label{tab:morningheadline}
   \begin{tabular}{lcccc}
     \toprule
@@ -611,20 +633,20 @@ drift rather than model noise.
 
 \subsubsection{Per-Keypoint Residual $\sigma$}
 Table~\ref{tab:morningperkpt} reports per-keypoint residual $\sigma$. The pattern
-differs from IMG\_3651: v0.2's largest variance is on the right ear (base
+differs from HO-1: v0.2's largest variance is on the right ear (base
 8.10\,px, tip 11.79\,px), while the left side and nose are already reasonably
 stable at 98 instances. This asymmetry likely reflects the target's pose and the
 morning lighting angle. By v0.3 the right-ear asymmetry largely resolves, and by
 v0.4 left/right ear-base $\sigma$ are nearly identical (2.36 vs.\ 2.63\,px),
 suggesting the model has learned symmetric ear placement from diverse views.
 v0.4's ear-tip $\sigma$ of 4.38--5.69\,px on a 316-px-wide head is
-${\sim}1.4$--$1.8\%$ of head width, versus $3.3$--$4.2\%$ on IMG\_3651's
+${\sim}1.4$--$1.8\%$ of head width, versus $3.3$--$4.2\%$ on HO-1's
 234-px-wide head; the larger apparent head (${\sim}1.35\times$) partly but not
 fully explains the lower pixel $\sigma$.
 
 \begin{table}[t]
   \centering
-  \caption{Per-keypoint residual $\sigma$ (px) on Test\_Clip\_Morning.}
+  \caption{Per-keypoint residual $\sigma$ (px) on HO-2.}
   \label{tab:morningperkpt}
   \begin{tabular}{lcccc}
     \toprule
@@ -643,7 +665,7 @@ fully explains the lower pixel $\sigma$.
 
 \subsubsection{Ear-Angle Stability}
 Table~\ref{tab:morningearangle} reports ear-angle residual $\sigma$. On
-IMG\_3651 the left/right $\sigma$ were roughly symmetric; here v0.2 shows a
+HO-1 the left/right $\sigma$ were roughly symmetric; here v0.2 shows a
 pronounced asymmetry ($5.37\dgr$ left vs.\ $2.24\dgr$ right) that resolves by v0.3
 and re-emerges smaller in v0.4 and v0.7. This may reflect genuine anatomical
 asymmetry in this sheep's ear carriage or a systematic left/right bias from the
@@ -654,7 +676,7 @@ v0.7's $2.84\dgr$; the two are within each other's bootstrap intervals
 
 \begin{table}[t]
   \centering
-  \caption{Ear-angle residual $\sigma$ (degrees) on Test\_Clip\_Morning.}
+  \caption{Ear-angle residual $\sigma$ (degrees) on HO-2.}
   \label{tab:morningearangle}
   \begin{tabular}{lcc}
     \toprule
@@ -672,13 +694,13 @@ v0.7's $2.84\dgr$; the two are within each other's bootstrap intervals
 \label{sec:crossclip}
 Table~\ref{tab:crossclip} compares ear-angle $\sigavg$ across the two clips at
 equivalent training scale. At identical scale (405 instances, 8 videos), v0.4
-achieves $\sigavg = 4.08\dgr$ on IMG\_3651 and $2.61\dgr$ on Test\_Clip\_Morning
+achieves $\sigavg = 4.08\dgr$ on HO-1 and $2.61\dgr$ on HO-2
 --- a 36\% difference attributable to the clip, not the model. Three factors
-likely contribute: the larger apparent head on Test\_Clip\_Morning
+likely contribute: the larger apparent head on HO-2
 (${\sim}1.35\times$ wider) reduces pixel $\sigma$ for a fixed angular jitter; the
 target is more isolated; and the morning lighting gives higher tan-on-green
 contrast. This is precisely why the cross-clip number must not be read as a
-version improvement: \textbf{the $2.84\dgr$ reached by v0.7 on Test\_Clip\_Morning
+version improvement: \textbf{the $2.84\dgr$ reached by v0.7 on HO-2
 is a noise-floor measurement on an easier clip, and on matched clips v0.7 and
 v0.4 are statistically indistinguishable} (Table~\ref{tab:ci}). A single
 held-out clip provides a lower bound rather than a point estimate of model
@@ -686,12 +708,12 @@ performance; the two-clip comparison makes this explicit.
 
 \begin{table}[t]
   \centering
-  \caption{Cross-clip comparison of ear-angle $\sigavg$. The IMG\_3651 vs.\
-  Test\_Clip\_Morning gap is a clip-difficulty effect, not a model improvement.}
+  \caption{Cross-clip comparison of ear-angle $\sigavg$. The HO-1 vs.\
+  HO-2 gap is a clip-difficulty effect, not a model improvement.}
   \label{tab:crossclip}
   \begin{tabular}{lccc}
     \toprule
-    Metric & v0.4 on IMG\_3651 & v0.4 on Test\_Clip\_Morning & v0.7 on Test\_Clip\_Morning \\
+    Metric & v0.4 on HO-1 & v0.4 on HO-2 & v0.7 on HO-2 \\
     \midrule
     Window size                       & 155 fr (5.2 s)        & 150 fr (5.0 s)        & 150 fr (5.0 s) \\
     Target head size (approx.)         & $234\times169$\,px     & $316\times185$\,px     & $316\times185$\,px \\
@@ -712,8 +734,8 @@ performance; the two-clip comparison makes this explicit.
 \section{Discussion}
 
 \subsection{What the Numbers Mean}
-The headline result --- ${\sim}4.08\dgr$ ear-angle $\sigavg$ on IMG\_3651 (v0.4)
-and ${\sim}2.84\dgr$ on Test\_Clip\_Morning (v0.7) --- establishes a noise floor
+The headline result --- ${\sim}4.08\dgr$ ear-angle $\sigavg$ on HO-1 (v0.4)
+and ${\sim}2.84\dgr$ on HO-2 (v0.7) --- establishes a noise floor
 for automated ear-angle measurement from ambient pasture video. Whether
 $2.8$--$4.1\dgr$ is ``good enough'' depends entirely on the application. For
 detecting gross ear-position changes (a sustained shift from $+30\dgr$ alert to
@@ -811,8 +833,8 @@ I have presented SamSeesSheep, a measurement pipeline that converts ambient
 pasture video into quantified ear-angle features using a foundation-model
 annotation flywheel. The pipeline produces a small edge-runnable model (2.5\,M
 parameters, ${\sim}10$\,MB) that places five keypoints on every detected sheep
-head and achieves ear-angle residual $\sigavg$ of $4.08\dgr$ (v0.4 on IMG\_3651)
-and $2.84\dgr$ (v0.7 on Test\_Clip\_Morning) --- a metric literally unmeasurable
+head and achieves ear-angle residual $\sigavg$ of $4.08\dgr$ (v0.4 on HO-1)
+and $2.84\dgr$ (v0.7 on HO-2) --- a metric literally unmeasurable
 with off-the-shelf object detectors. The training progression shows monotonic
 improvement in keypoint stability from 98 to 405 reviewed instances (v0.2 to
 v0.4), then a plateau at the clip noise floor with a documented v0.6 regression;
@@ -832,29 +854,51 @@ handling chutes, where sustained ear-position patterns become the unit of
 measurement.
 
 \section*{Data and Code Availability}
-The code, dataset exports, trained weights, benchmark scripts, and full
-documentation are available under the MIT License at
-\url{https://github.com/antonemking/SamSeesSheep}. Every $\sigma$, detection
-rate, and per-keypoint number in this paper is reproducible from saved JSON
-artifacts under \texttt{sheep-yolo/artifacts/}, checkable in one command via
-\texttt{sheep-yolo/scripts/verify\_paper\_claims.py} (36/36 checks pass against
-the artifacts). The per-frame model predictions used for every benchmark are
-cached in \texttt{sheep-yolo/artifacts/\_cache/}, and the held-out benchmark
-JSONs can be regenerated from them
-(\texttt{gen\_bench\_Test\_Clip\_Morning.py}; the archived
-\texttt{bench\_v02\_v03.py} / \texttt{bench\_v04\_v05\_v0\{6,7\}.py}). The
-bootstrap confidence intervals of Table~\ref{tab:ci} are in
-\texttt{bench\_bootstrap\_ci.json}. The hero video of Figure~\ref{fig:hero} is
-\texttt{sheep-yolo/artifacts/synced-lanes-6ewes-pro-Test\_Clip\_Morning.mp4}.
+The code, benchmark scripts, machine-readable benchmark artifacts, paper source,
+and documentation are available under the MIT License at
+\url{https://github.com/antonemking/SamSeesSheep}. Reproducibility is layered, so
+each headline number can be re-derived at the level a reader is equipped for.
 
-Two figures are reported from sources outside this repository and are not
-checkable by the verification script: the validation mAP50-95 values
-(Table~\ref{tab:dataset}) come from the Ultralytics training logs produced on the
-cloud GPU, and the clip-similarity screening used to select held-out clips was
-performed at capture time (the held-out clips were additionally never pushed to
-the labeler, enforced by per-file checksum dedup). Raw video and the full
-reviewed-keypoint dataset are retained off-repository to limit size and are
-available from the author on request.
+\paragraph{In the repository (clone and verify).} Every $\sigma$, detection rate,
+and per-keypoint number in this paper is stored in committed JSON artifacts under
+\texttt{sheep-yolo/artifacts/} and is checkable in one command with
+\texttt{sheep-yolo/scripts/verify\_paper\_claims.py}, which reads only those JSONs
+and re-validates each value against the paper (44/44 checks pass on a fresh
+clone). The bootstrap confidence intervals of Table~\ref{tab:ci} are in
+\texttt{bench\_bootstrap\_ci.json}.
+
+\paragraph{Companion archive (regenerate from cached predictions).} To keep the
+git tree small, the per-frame model-prediction caches
+(\texttt{sheep-yolo/artifacts/\_cache/*.pkl}, ${\sim}3$\,MB total) and the trained
+per-version weights are \emph{not} tracked in git; they are published as an asset
+on a tagged GitHub release of the same repository [persistent archive DOI to be
+minted on Zenodo: \texttt{<DOI placeholder>}]. With the caches, every committed
+benchmark JSON can be regenerated from scratch
+(\texttt{gen\_bench\_Test\_Clip\_Morning.py} for HO-2; the archived
+\texttt{bench\_v02\_v03.py} / \texttt{bench\_v04\_v05\_v0\{6,7\}.py} for HO-1), and
+the ear-angle chart of Figure~\ref{fig:earangle} can be regenerated with
+\texttt{gen\_ear\_angle\_chart.py}. The hero still of Figure~\ref{fig:hero} is a
+frame from \texttt{synced-lanes-6ewes-pro-Test\_Clip\_Morning.mp4}, also in the
+archive.
+
+\paragraph{Available on request (raw video and dataset).} The held-out clips
+(HO-1, HO-2) and the full reviewed-keypoint training dataset are retained
+off-repository for size and to limit redistribution of identifiable homestead
+footage; they are available from the author on request. A reader with the raw
+clips and the released weights can reproduce the cached predictions themselves;
+a reader without them reproduces every published number from the caches onward.
+
+\paragraph{Reported from outside the verification harness.} Three figures are
+sourced outside the repository artifacts and are disclosed as such: the validation
+mAP50-95 values (Table~\ref{tab:dataset}) come from the Ultralytics training logs
+produced on the cloud GPU (only the weights, not the logs, return to the laptop);
+the in-distribution $4.10$--$5.92$\,px residual-$\sigma$ range
+(Section~\ref{sec:indist}) is quoted from the prior v0.3 benchmark
+report~\citep{v03benchmark}, whose per-clip JSONs are training-set data held
+off-repository; and the held-out clips were screened for low visual similarity to
+the training videos at capture time and were never pushed to the labeler
+(enforced by per-file checksum dedup) --- an author attestation the public
+artifacts cannot independently re-derive.
 
 \section*{Acknowledgments}
 I thank the open-source computer-vision community whose tools made a
