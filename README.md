@@ -54,11 +54,11 @@ Training progression — same model architecture (YOLO26n-pose, 2.5 M params), s
 Stock `yolo26n.pt` produces zero keypoints on the same clip. The keypoint head is something you grow against your own animals.
 
 <p align="center">
-  <img src="docs/v0.4-loop.webp" width="32%" alt="v0.4 keypoints" />
-  <img src="docs/v0.2-vs-v0.4-loop.webp" width="65%" alt="v0.2 vs v0.4 comparison" />
+  <img src="docs/v0.7-loop.webp" width="48%" alt="v0.7 keypoints tracking" />
+  <img src="docs/v0.2-vs-v0.4-loop.webp" width="48%" alt="v0.2 vs v0.4 comparison" />
 </p>
 
-*Left: v0.4 alone — keypoints lock onto anatomy frame after frame. Right: v0.2 (orange) vs v0.4 (magenta) — v0.2 places ear tips in mid-air; v0.4 lands every keypoint.*
+*Left: v0.7 — bounding boxes and keypoints lock onto every sheep, frame after frame. Right: v0.2 (orange) vs v0.4 (magenta) — v0.2 places ear tips in mid-air; v0.4 lands every keypoint.*
 
 Full benchmark report with per-keypoint σ tables and methodology: [`docs/v0.4-benchmark.md`](docs/v0.4-benchmark.md).
 
