@@ -268,7 +268,7 @@ def _per_kpt_residual(kpts: np.ndarray) -> dict:
     """Per-keypoint *residual* σ: subtract a 7-frame rolling-median trajectory
     before std-dev, so slow sheep motion is removed and only jitter remains.
 
-    This is the welfare-measurement-relevant number: how stable is the kpt
+    This is the stability-relevant number: how stable is the kpt
     *relative to its own slow drift*. Detection rate doesn't bias it the
     way raw σ does — each model is compared against its own smoothed
     trajectory, so v0.2 firing on only 17 of 158 frames is judged on the

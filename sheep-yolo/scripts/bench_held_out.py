@@ -232,9 +232,9 @@ def make_ear_angle_chart(targets: dict[str, np.ndarray], fps: float,
                           out_path: Path) -> Path:
     """Two-row matplotlib time series: left ear (top) and right ear (bottom).
     Each row overlays v0.2/v0.3/v0.4. The point is visual: v0.4's line is
-    flat, v0.2's bounces. SPFES bands (green/amber/red) drawn behind for
-    welfare context — they're not measurement thresholds in this clip, just
-    a reading aid that matches the labeler dashboard."""
+    flat, v0.2's bounces. SPFES bands (green/amber/red) drawn behind as
+    literature reference context — they're not measurement thresholds in this
+    clip, just a reading aid that matches the labeler dashboard."""
     a, b = WINDOW
     n = b - a
     t = np.arange(n) / fps
@@ -670,7 +670,7 @@ def main() -> None:
         out_path=ear_angle_png,
     )
 
-    # Per-model ear-angle residual σ (degrees) — the welfare-relevant scalar.
+    # Per-model ear-angle residual σ (degrees) — the headline stability scalar.
     ear_sigmas = {}
     for label, arr in {"v0.2": v02_t, "v0.3": v03_t, "v0.4": v04_t}.items():
         L, R = ear_angle_series(arr)

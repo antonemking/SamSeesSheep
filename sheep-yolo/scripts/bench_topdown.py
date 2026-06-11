@@ -336,7 +336,7 @@ def run_val(pose_path):
     print(f"\nClean keypoint precision: top-down {clean:+.1f}% vs single-shot "
           f"({'better' if clean > 0 else 'worse'})")
     print("Detection misses inflate the end-to-end gap; the σ bench (clip mode)"
-          " is the welfare-relevant read.")
+          " is the stability read.")
 
 
 def main():

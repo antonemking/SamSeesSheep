@@ -40,6 +40,13 @@ Ear-angle residual σ on a held-out clip — never pushed to the labeler, never 
 
 *This table is on the IMG_3651 held-out clip (never seen by labeler or trainer). On a second held-out clip (Test_Clip_Morning, different lighting and flock arrangement), v0.7 achieves σ_avg = 2.84° (left 2.39°, right 3.29°) — ~7.1% of the SPFES 40° classification band. ⚠️ v0.6 shows right ear at best-ever 3.55° but left ear regressed to 4.65° — more data does not monotonically improve every keypoint.*
 
+<p align="center">
+  <img src="docs/v0.7-ear-angle-chart.png" width="92%"
+       alt="Ear angle on a stationary held-out sheep — v0.2/v0.3/v0.4/v0.7 on IMG_3651" />
+</p>
+
+*A stationary sheep should produce a flat ear-angle trace; deviation from flat is the measurement noise floor. v0.2 (orange) bounces 6–7°; by v0.4 (magenta) both ears hold ~4°, and v0.7 (teal) overlaps v0.4 — the gain saturates after v0.4 rather than improving indefinitely.*
+
 Training progression — same model architecture (YOLO26n-pose, 2.5 M params), same recipe, only labeled-data scale changes:
 
 | | v0.2 | v0.3 | v0.4 | v0.5 | v0.6 | v0.7 |
