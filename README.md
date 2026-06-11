@@ -7,10 +7,8 @@ Built and validated against a single Katahdin flock in Middletown, DE. Generaliz
 *v0.7 · 523 reviewed instances · σ_avg 2.84° ear-angle on a held-out clip · stock YOLO produces zero keypoints*
 
 <p align="center">
-  <video src="assets/synced-lanes-6ewes-pro-Test_Clip_Morning.mp4" width="100%"
-       controls muted loop
-       poster="assets/v0.7-flock-ear-monitor.webp">
-  </video>
+  <img src="assets/synced-lanes-6ewes-pro-Test_Clip_Morning.webp" width="100%"
+       alt="Six ewes tracked simultaneously on a held-out clip — one live ear-angle lane each" />
 </p>
 
 *v0.7 reads every sheep facing the camera at once — six ewes here, one live ear-angle lane each. A measurement instrument, not a welfare readout.*
@@ -54,11 +52,11 @@ Training progression — same model architecture (YOLO26n-pose, 2.5 M params), s
 Stock `yolo26n.pt` produces zero keypoints on the same clip. The keypoint head is something you grow against your own animals.
 
 <p align="center">
-  <img src="docs/v0.7-loop.webp" width="48%" alt="v0.7 keypoints tracking" />
-  <img src="docs/v0.2-vs-v0.4-loop.webp" width="48%" alt="v0.2 vs v0.4 comparison" />
+  <img src="assets/v0.7-ear-angle-ekg-IMG_3651-long.webp" width="100%"
+       alt="v0.7 live ear-angle extraction on a held-out clip — keypoints left, per-ear angle trace right" />
 </p>
 
-*Left: v0.7 — bounding boxes and keypoints lock onto every sheep, frame after frame. Right: v0.2 (orange) vs v0.4 (magenta) — v0.2 places ear tips in mid-air; v0.4 lands every keypoint.*
+*v0.7 on the held-out IMG_3651 clip: five keypoints lock onto the head (left) while the left and right ear angles are read out frame by frame (right). A near-stationary sheep yields a roughly flat trace — the residual jitter around it is the measurement noise floor (σ ≈ 4° on this clip).*
 
 Full benchmark report with per-keypoint σ tables and methodology: [`docs/v0.4-benchmark.md`](docs/v0.4-benchmark.md).
 
