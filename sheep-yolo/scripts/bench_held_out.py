@@ -259,7 +259,7 @@ def make_ear_angle_chart(targets: dict[str, np.ndarray], fps: float,
     axes[-1].set_xlabel(f"Time in motionless window (s)  ·  clip: {CLIP.stem}")
     fig.suptitle(
         "Ear angle on a stationary held-out sheep — same clip, three models\n"
-        "Flatter = usable welfare signal · noisier = jitter masking the signal",
+        "Flatter = more stable measurement · noisier = jitter masking the signal",
         fontsize=12,
     )
     plt.tight_layout(rect=(0, 0, 1, 0.96))

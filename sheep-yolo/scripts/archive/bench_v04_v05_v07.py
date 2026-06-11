@@ -190,7 +190,7 @@ def make_ear_angle_chart(targets: dict, fps: float, out_path: Path):
     axes[-1].set_xlabel(f"Time in motionless window (s)  ·  clip: {CLIP.stem}")
     fig.suptitle(
         "Ear angle — v0.4 vs v0.5 vs v0.7 on held-out IMG_3651\n"
-        "Flatter = usable welfare signal · noisier = jitter masking the signal",
+        "Flatter = more stable measurement · noisier = jitter masking the signal",
         fontsize=12,
     )
     plt.tight_layout(rect=(0, 0, 1, 0.96))

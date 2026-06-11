@@ -1,0 +1,37 @@
+{
+  "weights": "weights/sheep-pose-v0.7-yolo26n.pt",
+  "output": "artifacts/blacksheep-cross-session-ekg.mp4",
+  "subject_label": "black ewe",
+  "fps": 30,
+  "panel": 540,
+  "chart_width": 760,
+  "crop_side": 560,
+  "max_frames_per_session": 140,
+  "title": "same ewe · cross-session measurement record",
+  "sessions": [
+    {
+      "name": "IMG_3583",
+      "clip": "~/Downloads/IMG_3583.MOV",
+      "select": "darkest",
+      "min_frames": 15
+    },
+    {
+      "name": "IMG_3654",
+      "clip": "~/Downloads/Sheep Clips/IMG_3654.MOV",
+      "select": "darkest",
+      "min_frames": 15
+    },
+    {
+      "name": "IMG_3656",
+      "clip": "~/Downloads/IMG_3656.MOV",
+      "select": "darkest",
+      "min_frames": 15
+    },
+    {
+      "name": "IMG_3679",
+      "clip": "~/Downloads/IMG_3679.MOV",
+      "select": "darkest",
+      "min_frames": 15
+    }
+  ]
+}

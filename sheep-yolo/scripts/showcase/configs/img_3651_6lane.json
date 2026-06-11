@@ -1,0 +1,19 @@
+{
+  "clip": "../test-clips/IMG_3651.MOV",
+  "weights": "weights/sheep-pose-v0.7-yolo26n.pt",
+  "cache": "artifacts/cache/IMG_3651-tracks.pkl",
+  "output": "artifacts/synced-lanes-6ewes-pro-IMG_3651.mp4",
+  "window": [708, 933],
+  "fps": 30,
+  "height": 640,
+  "chart_width": 900,
+  "title": "ear angle · 6 ewes read at once  (— L, - - R)",
+  "subjects": [
+    {"track_id": 2, "label": "ewe 2"},
+    {"track_id": 213, "label": "tagged"},
+    {"track_id": 226, "label": "ewe 226"},
+    {"track_id": 238, "label": "ewe 238"},
+    {"track_id": 244, "label": "ewe 244"},
+    {"track_id": 253, "label": "black ewe"}
+  ]
+}
