@@ -45,7 +45,7 @@ The canonical script:
 4. Derives ear-angle σ from keypoint geometry
 5. Writes `artifacts/bench_report-*.json` + renders comparison MP4s
 
-The residual σ metric strips slow head drift (property of the sheep) and isolates frame-to-frame jitter — the welfare-measurement-relevant signal.
+The residual σ metric strips slow head drift (property of the sheep) and isolates frame-to-frame jitter — the measurement-relevant signal.
 
 ## EKG renderer (multi-sheep flock)
 
