@@ -118,7 +118,9 @@ auto-segments sheep in short phone-captured clips; a labeling UI presents
 machine-generated keypoint candidates for human review; reviewed frames export
 to a YOLO-pose dataset; a small model (YOLO26n-pose, 2.5\,M parameters) trains
 on a cloud GPU; and the resulting weights (${\sim}6$\,MB) run inference on a
-consumer-grade edge GPU (6\,GB). The pipeline produces per-keypoint residual
+single consumer GPU. That small footprint is deliberate: low-power edge
+deployment is the design target (a roadmap goal), and the benchmarks here use a
+6\,GB consumer card as a stand-in. The pipeline produces per-keypoint residual
 standard-deviation ($\sigma$) benchmarks on genuinely held-out clips, evaluated
 against a stock-YOLO baseline that produces zero keypoints.
 
@@ -231,7 +233,7 @@ contracts, summarized in Figure~\ref{fig:pipeline}.
   \phantom{xxxxxxxx}$\rightarrow$ Human review in labeling UI\\
   \phantom{xxxxxxxxxx}$\rightarrow$ YOLO-pose dataset export\\
   \phantom{xxxxxxxxxxxx}$\rightarrow$ Cloud GPU training (RTX 4090, ${\sim}6$ min)\\
-  \phantom{xxxxxxxxxxxxxx}$\rightarrow$ Edge inference + $\sigma$ benchmark (GTX 1660 Ti, 6 GB)
+  \phantom{xxxxxxxxxxxxxx}$\rightarrow$ Edge inference + $\sigma$ benchmark (consumer 6 GB GPU)
   \end{minipage}}
   \caption{The five-stage SamSeesSheep pipeline. Only the trained weights cross
   from cloud to edge; the dataset remains on the training host.}
@@ -302,7 +304,9 @@ training completes in ${\sim}6$ minutes and \texttt{best.pt} is ${\sim}6$\,MB.
 
 \subsection{Edge Inference and Benchmark Protocol}
 \label{sec:bench}
-Inference runs on a local GTX 1660 Ti (6\,GB). The protocol, implemented in
+For these benchmarks, inference runs on a single local consumer GPU (GTX~1660~Ti,
+6\,GB) --- a stand-in for the low-power edge devices that are the intended
+deployment target, which the ${\sim}6$\,MB model is sized for. The protocol, implemented in
 \texttt{sheep-yolo/scripts/bench\_held\_out.py}, evaluates keypoint stability on
 a genuinely held-out clip:
 \begin{enumerate}
