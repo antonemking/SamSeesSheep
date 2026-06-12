@@ -950,9 +950,11 @@ handling chutes, where sustained ear-position patterns become the unit of
 measurement.
 
 \section*{Data and Code Availability}
-The code, benchmark scripts, machine-readable benchmark artifacts, paper source,
-and documentation are available under the MIT License at
-\url{https://github.com/antonemking/SamSeesSheep}. Reproducibility is layered, so
+The author's pipeline code, benchmark scripts, machine-readable benchmark
+artifacts, paper source, and documentation are available under the MIT License at
+\url{https://github.com/antonemking/SamSeesSheep}; the trained YOLO-pose weights
+carry a separate license inherited from Ultralytics (see Companion artifacts
+below). Reproducibility is layered, so
 each headline number can be re-derived at the level a reader is equipped for.
 
 \paragraph{In the repository (clone and verify).} Every $\sigma$, detection rate,
@@ -968,7 +970,9 @@ per-version weights (\texttt{sheep-pose-v0.\{2--7\}-yolo26n}) are gitignored for
 size and published on the Hugging Face Hub at
 \url{https://huggingface.co/antking1/sheep-pose-yolo26n}, with a
 model card and a persistent DOI (\href{https://doi.org/10.57967/hf/9129}{10.57967/hf/9129})
-pinned to a fixed revision. The per-frame model-prediction caches
+pinned to a fixed revision. Because they are trained with Ultralytics YOLO
+(AGPL-3.0), the weights are released under AGPL-3.0 rather than MIT; only the
+author's own repository code is MIT-licensed. The per-frame model-prediction caches
 (\texttt{sheep-yolo/artifacts/\_cache/*.pkl}, ${\sim}3$\,MB total) ship as an asset
 on the \texttt{paper-artifacts-v0.7} GitHub release
 (\url{https://github.com/antonemking/SamSeesSheep/releases/tag/paper-artifacts-v0.7}).

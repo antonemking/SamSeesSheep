@@ -146,4 +146,4 @@ best.pt → sheep-yolo/weights/ → inference + σ benchmark on 6 GB local GPU
 
 ---
 
-MIT License — Animal welfare research belongs in the commons.
+MIT License (pipeline code) — animal welfare research belongs in the commons. The trained YOLO-pose weights are AGPL-3.0, inherited from [Ultralytics YOLO](https://github.com/ultralytics/ultralytics).

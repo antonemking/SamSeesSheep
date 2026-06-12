@@ -366,7 +366,7 @@ I am being explicit about the boundary: this is a measurement instrument, not a 
 
 Future work includes: (a) additional held-out clips spanning varied weather conditions, sheep count extremes, and different camera positions — the two clips reported here (IMG\_3651 and Test\_Clip\_Morning) provide a start but 3--5 clips would be more defensible; (b) cross-flock generalization testing on wool breeds and different geographies; (c) validation against documented stress events with the kill criterion described in Section~6.4; (d) inter-annotator agreement measurement; and (e) continuous monitoring deployment at water troughs or handling chutes, where sustained ear-position patterns, rather than single-frame snapshots, become the unit of measurement.
 
-The code, dataset exports, trained weights, benchmark scripts, and full documentation are available under the MIT License at \texttt{https://github.com/antonemking/SamSeesSheep}.
+The code, dataset exports, benchmark scripts, and full documentation are available under the MIT License at \texttt{https://github.com/antonemking/SamSeesSheep}; the trained YOLO-pose weights are released under AGPL-3.0, inherited from Ultralytics YOLO.
 
 ---
 
