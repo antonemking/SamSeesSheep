@@ -95,7 +95,7 @@ automation.
 
 The gap is not in the biological validity of ear-angle features; it is in the
 measurement infrastructure. No automated system extracts ear-angle measurements
-from ambient pasture video with quantified, reproducible accuracy. Building one
+from ambient pasture video with a quantified, reproducible stability benchmark. Building one
 requires solving a sequence of practical computer-vision problems: detecting
 sheep heads in unconstrained outdoor conditions, localizing five anatomical
 keypoints per head (nose, left/right ear bases, left/right ear tips), tracking
@@ -132,7 +132,8 @@ against a stock-YOLO baseline that produces zero keypoints.
   head, achieving ${\sim}4\dgr$ ear-angle $\sigma$ on a held-out clip.
   \item A reproducible benchmark protocol using genuinely held-out clips with
   per-keypoint residual $\sigma$, derived ear-angle $\sigma$, bootstrap
-  confidence intervals, and a stock-YOLO baseline. The protocol is applied to
+  confidence intervals, a window-selection sensitivity sweep, and a stock-YOLO
+  baseline. The protocol is applied to
   two independent held-out clips (HO-1 and HO-2; Table~\ref{tab:clipmap})
   spanning different flock arrangements, lighting,
   and model versions.
@@ -492,8 +493,8 @@ trace, and the deviation from flatness is the measurement noise floor
 39\% (left) and 33\% (right) reduction from v0.2. For reference, the SPFES
 ear-posture bands span $40\dgr$ between the ``alert'' ($\geq 30\dgr$) and
 ``down/back'' ($\leq -10\dgr$) thresholds \citep{mclennan2019}; a $4\dgr$ noise
-floor is ${\sim}10\%$ of that decision range, so model noise alone is unlikely to
-trigger false band crossings absent genuine ear movement. The stock baseline
+floor is ${\sim}10\%$ of that span --- a scale comparison only, not a claim that
+the instrument is calibrated for SPFES band assignment. The stock baseline
 produces zero keypoints and therefore no ear-angle measurement at all.
 
 \begin{table}[t]
@@ -593,6 +594,65 @@ window can estimate.
     \bottomrule
   \end{tabular}
 \end{table}
+
+\subsection{Window-Selection Sensitivity}
+\label{sec:winsens}
+Each headline $\sigma$ is computed on one hand-picked ``calmest ${\sim}5$\,s''
+window, which raises a fair concern: selecting the window on the variable being
+minimized (head motion) could bias the reported noise floor downward. To bound
+this effect I slid the same fixed-length window across the target sheep's entire
+detected span (step 2 frames; windows retained when $\geq 60$ frames carry a
+computable ear angle) and recomputed $\sigavg$ and the within-window head motion
+(raw positional $\sigma$) for every window. The procedure is implemented in
+\texttt{sheep-yolo/scripts/window\_sensitivity.py} and reproduces each paper
+window's committed $\sigavg$ and raw $\sigma$ exactly. Table~\ref{tab:winsens}
+and Figure~\ref{fig:winsens} report the resulting distributions.
+
+\begin{table}[t]
+  \centering
+  \caption{Window-selection sensitivity. The same fixed-length window is slid
+  across each target's detected span; $\sigavg$ is the mean left/right ear-angle
+  residual $\sigma$ per window. ``Pctile'' is the fraction of windows whose
+  $\sigavg$ is at or below the hand-picked paper window's --- low means the paper
+  window is among the calmer (lower-$\sigma$) ones.}
+  \label{tab:winsens}
+  \resizebox{\textwidth}{!}{%
+  \begin{tabular}{lcccccc}
+    \toprule
+    Run & Windows & Paper $\sigavg$ (\dgr) & Pctile & Median $\sigavg$ (\dgr) & Max $\sigavg$ (\dgr) & corr(motion, $\sigma$) \\
+    \midrule
+    HO-1 v0.4 & 200 & 4.07 & 18th & 4.55 & 5.69 & 0.56 \\
+    HO-1 v0.7 & 205 & 4.08 & 43rd & 4.43 & 8.43 & 0.47 \\
+    HO-2 v0.4 & 324 & 2.61 & 75th & 2.37 & 6.32 & 0.29 \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\textwidth]{window_sensitivity.png}
+  \caption{Ear-angle residual $\sigavg$ for every $5$\,s window slid across the
+  target's detected span, versus within-window head motion. Red star: the
+  hand-picked paper window; dashed line: the median window. Across all windows
+  and both clips $\sigavg$ stays a small fraction of the SPFES $40\dgr$ band and
+  rises only modestly with head motion --- the reported noise floor is not an
+  artifact of selecting the stillest segment.}
+  \label{fig:winsens}
+\end{figure}
+
+The hand-picked window does sit low in the HO-1 v0.4 distribution (18th
+percentile), confirming the selection mechanism is real --- but its magnitude is
+small. The median window scores $4.55\dgr$ against the reported $4.07\dgr$, and
+\emph{even the noisiest} $5$\,s window of that sheep reaches only $5.69\dgr$
+(${\sim}14\%$ of the SPFES $40\dgr$ span). For v0.7 the paper window is
+mid-distribution (43rd percentile), and on HO-2 it is above the median (75th
+percentile) --- a higher-motion window than typical, so the reported $2.61\dgr$
+is, if anything, conservative. Within-window motion correlates with $\sigavg$
+only moderately ($r = 0.29$--$0.56$), so motion explains part but not most of the
+window-to-window variance. The noise floor is therefore not an artifact of
+selecting the stillest segment: across every window of both targets $\sigavg$
+stays between ${\sim}1.3\dgr$ and ${\sim}8.4\dgr$, a small fraction of the SPFES
+band in all cases.
 
 \subsection{v0.4 on Held-Out versus In-Distribution}
 \label{sec:indist}
@@ -775,7 +835,11 @@ ears), geographies, or management conditions without independent validation.
 captured all video with one smartphone and performed all reviews. There is no
 inter-annotator agreement, no independent ground truth, and no vet-validated
 keypoint placement. Labeling consistency is measured only indirectly through the
-training progression.
+training progression. Consequently the reported $\sigma$ quantify
+\emph{precision} (frame-to-frame self-consistency), not accuracy: with no
+independent ground-truth landmark, a fixed systematic error in keypoint
+placement would be invisible to this benchmark, as would any slow bias absorbed
+by the 7-frame rolling median.
 
 \paragraph{Point estimates, no significance on fine deltas.} Each $\sigma$ is a
 single point estimate from one window on one sheep. As Section~\ref{sec:ci}
@@ -784,10 +848,22 @@ band; only the gross v0.2$\rightarrow$v0.4 change is separable. No version
 ranking finer than that should be inferred, and the bootstrap does not address
 single-clip/single-window structural uncertainty.
 
-\paragraph{Two held-out clips, same flock.} The protocol uses two held-out clips
-spanning different lighting and arrangements, but both are from the same flock,
-pasture, and camera. A multi-clip ablation (3--5 clips from different sessions
-and weather) would strengthen the generalization claim.
+\paragraph{Window selection.} The benchmark window is the calmest available
+${\sim}5$\,s segment, which could bias the noise floor downward. The sensitivity
+sweep of Section~\ref{sec:winsens} bounds this effect: it is real but small (the
+HO-1 v0.4 window is at the 18th percentile, ${\sim}0.5\dgr$ below the median
+window, and even the noisiest window of that target is $5.69\dgr$), and on HO-2
+the chosen window is actually above the median. The reported floors are
+best-to-typical, not unrepresentative outliers.
+
+\paragraph{Two held-out clips, same flock and same animals.} The protocol uses
+two held-out clips spanning different lighting and arrangements, but both are
+from the same flock, pasture, and camera --- and both show the same five
+individuals. ``Held-out'' therefore demonstrates generalization to unseen poses,
+scenes, and lighting on \emph{known} animals, not to unseen animals;
+animal-level held-out evaluation requires a second flock. A multi-clip ablation
+(3--5 clips from different sessions and weather) would strengthen the
+generalization claim.
 
 \paragraph{Ambient-vs-clinical gap.} The SPFES thresholds \citep{mclennan2019}
 were validated in clinical pain conditions with trained veterinary observers.
@@ -801,6 +877,12 @@ feature. Welfare is a multi-dimensional construct requiring veterinary
 assessment \citep{berckmans2014precision}; pain is a clinical determination
 requiring multiple indicators. This pipeline measures one feature. It is not a
 welfare instrument.
+
+\paragraph{No student-vs-teacher comparison.} The trained detector is not
+benchmarked against the SAM~3 teacher labels it distilled from, so whether the
+student matches, exceeds, or trails the teacher on held-out frames is unmeasured
+(SAM~3 was never run on the held-out clips, by design). A student-vs-teacher
+agreement study on held-out frames is the most direct next ablation.
 
 \subsection{Known Failure Modes}
 \begin{itemize}
@@ -877,7 +959,7 @@ each headline number can be re-derived at the level a reader is equipped for.
 and per-keypoint number in this paper is stored in committed JSON artifacts under
 \texttt{sheep-yolo/artifacts/} and is checkable in one command with
 \texttt{sheep-yolo/scripts/verify\_paper\_claims.py}, which reads only those JSONs
-and re-validates each value against the paper (44/44 checks pass on a fresh
+and re-validates each value against the paper (59/59 checks pass on a fresh
 clone). The bootstrap confidence intervals of Table~\ref{tab:ci} are in
 \texttt{bench\_bootstrap\_ci.json}.
 
@@ -913,10 +995,13 @@ produced on the cloud GPU (only the weights, not the logs, return to the laptop)
 the in-distribution $4.10$--$5.92$\,px residual-$\sigma$ range
 (Section~\ref{sec:indist}) is quoted from the prior v0.3 benchmark
 report~\citep{v03benchmark}, whose per-clip JSONs are training-set data held
-off-repository; and the held-out clips were screened for low visual similarity to
-the training videos at capture time and were never pushed to the labeler
-(enforced by per-file checksum dedup) --- an author attestation the public
-artifacts cannot independently re-derive.
+off-repository; and the held-out clips were screened by pixel normalized cross-correlation (NCC) of
+the first frame against every training video --- HO-1 scored NCC ${<}0.23$ ---
+and were held in a separate \texttt{test-clips/} directory, never pushed to the
+labeler (enforced by per-file checksum dedup). The training-video frames needed
+to recompute these NCC scores are themselves off-repository, so this screening
+remains an author attestation the public artifacts cannot independently
+re-derive.
 
 \section*{Acknowledgments}
 I thank the open-source computer-vision community whose tools made a

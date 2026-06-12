@@ -88,7 +88,7 @@ non-veterinarian operator. **No** cross-breed, cross-flock, or cross-geography
 generalization is claimed. Known failure modes: dark fleece / low contrast,
 heavy motion blur, profile views with ear occlusion, crowded frames, wool-covered
 ears. See the repository for the full benchmark protocol and the
-`verify_paper_claims.py` harness (44/44 checks).
+`verify_paper_claims.py` harness (59/59 checks).
 
 ## Links
 

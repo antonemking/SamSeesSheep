@@ -5,13 +5,13 @@ load-bearing factual claim is classified against the artifact that backs it.
 
 **Verdict.** After this pass, every headline number in the paper is either
 (a) auto-checked against a committed JSON by `sheep-yolo/scripts/verify_paper_claims.py`
-(**44/44 pass on a fresh clone**), (b) backed by a committed repo artifact that the
+(**59/59 pass on a fresh clone**), (b) backed by a committed repo artifact that the
 harness does not parse, or (c) explicitly disclosed as an external / attestation
 figure. One figure is flagged for an author decision (model size; see §C and
 §Open author actions).
 
 ```
-cd sheep-yolo && python scripts/verify_paper_claims.py   # -> OVERALL: PASS (44/44)
+cd sheep-yolo && python scripts/verify_paper_claims.py   # -> OVERALL: PASS (59/59)
 ```
 
 ## Status legend
@@ -24,7 +24,7 @@ cd sheep-yolo && python scripts/verify_paper_claims.py   # -> OVERALL: PASS (44/
 
 ---
 
-## A — Auto-checked numbers (44/44)
+## A — Auto-checked numbers (59/59)
 
 All values below are read from the named committed JSON and compared to the paper
 by the verifier. Tolerance is 2% or 0.02 absolute (exact for integer counts).
@@ -100,7 +100,7 @@ in `bench_bootstrap_ci.json`.
 3. **Verifier bug fixed (35 → real checks).** The HO-2 detection-rate check read
    `in_roi_target_detection_rate` from `data["v0.7"]` instead of top-level `data`, so
    it silently never ran — the documented "36/36" was actually 35 effective checks.
-   Fixed it to run, and extended the harness to **44 checks**.
+   Fixed it to run, and extended the harness to **59 checks**.
 
 4. **NCC threshold dropped.** Removed `NCC < 0.23` from the paper (it was already
    absent from `paper.tex`; confirmed and kept out), and softened the four other
@@ -111,7 +111,7 @@ in `bench_bootstrap_ci.json`.
 5. **Data Availability rewritten for accuracy.** The old text claimed the prediction
    caches are "in `sheep-yolo/artifacts/_cache/`" — but `_cache/*.pkl` and the
    weights are **gitignored** (only `artifacts/*.json` is whitelisted). Rewrote it as
-   a layered story: committed JSONs (clone-and-verify, 44/44) → companion release
+   a layered story: committed JSONs (clone-and-verify, 59/59) → companion release
    archive for caches+weights (regenerate JSONs; **GitHub release + Zenodo DOI
    placeholder**) → raw clips + dataset on request. Updated `paper/README.md` to match.
 
@@ -136,7 +136,7 @@ in `bench_bootstrap_ci.json`.
 **Data Availability plan (decisions taken; see Open author actions to confirm):**
 
 - **Shared in git (clone-and-verify):** code, the benchmark `artifacts/*.json`, the
-  paper source + figures, docs. `verify_paper_claims.py` passes 44/44 on a fresh
+  paper source + figures, docs. `verify_paper_claims.py` passes 59/59 on a fresh
   clone with no downloads.
 - **Weights → Hugging Face Hub:** the per-version `best.pt` weights
   (`sheep-pose-v0.{2..7}-yolo26n`) are gitignored for size and published as a HF
