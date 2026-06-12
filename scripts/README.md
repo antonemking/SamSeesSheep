@@ -76,7 +76,7 @@ export YOLOE_MODEL=weights/sheep-pose-v0.X.pt
 # run σ-on-motionless-sheep benchmark, post results to docs/v0.X-benchmark.md
 ```
 
-Only the ~10 MB weights file crosses the network. The hundreds of MB of
+Only the ~6 MB weights file crosses the network. The hundreds of MB of
 labeled frames stay on the pod.
 
 ## Configuration

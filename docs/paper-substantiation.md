@@ -70,7 +70,7 @@ in `bench_bootstrap_ci.json`.
 | **NCC < 0.23 vs every training video** | **Dropped — unverifiable.** No code computes NCC and no matrix was ever saved; the held-out clips' raw frames and the training-video frames are both off-repo (test-clips/ holds only a README; data/ is gitignored), so NCC cannot be computed from this repo. Removed from the paper entirely; softened in README, ARCHITECTURE.md and `bench_held_out.py` to the substantiated screening (never pushed to the labeler + visually distinct). See §Resolutions. |
 | **"Never pushed to the labeler"** | **Author attestation.** Enforced by per-file sha256 + per-pod dedup in `.pushed_clips.tsv`, but that file is gitignored, so a reader cannot independently re-derive it. Framed as an attestation in Data Availability. |
 | Clip-similarity screening "at capture time" | **Author attestation.** Disclosed in Data Availability. |
-| **Model size "~10 MB"** (abstract, §1, §3.5, contribution 2, Fig. 1, conclusion) | **Flagged for author.** The on-disk `best.pt` is **6.04 MB** (6,037,991 bytes), consistent across v0.2–v0.7. "~10 MB" matches the FP32 parameter footprint (2.5 M × 4 B), not the deliverable file. Left unchanged to preserve repo-wide consistency (README/VALIDATION/CHANGELOG all say ~10 MB) and because the FP32 framing may be deliberate. **Recommend** stating "~6 MB on disk" (line 298 explicitly says "`best.pt` is ~10 MB", which the artifact contradicts). Data Availability deliberately cites no weight size to avoid an internal contradiction. |
+| **Model size** (abstract, §1, §3.5, contribution 2, Fig. 1, conclusion) | **Resolved → ~6 MB.** The on-disk `best.pt` is **6.04 MB** (6,037,991 bytes), consistent across v0.2–v0.7 and equal to the released HF weights. The earlier "~10 MB" was the FP32 parameter footprint (2.5 M × 4 B), not the deliverable file. Switched repo-wide (paper, README, ARCHITECTURE, VALIDATION, sheep-yolo/README, scripts/README) to "~6 MB" — now verifiable against the published artifact. |
 | Hero video "2036×640 px, 7.5 s" (Fig. 1) | From the archived `.mp4`; verifiable once the archive is published. |
 | Clip provenance: 5 Katahdin ewes, Middletown DE, iPhone 1080p/30fps, April–May 2026; HO-2 "61 MB / 986 frames / ~30 fps" | Dataset attestation; standard for a dataset paper. Not machine-checkable. |
 | "~6 min" training time, "2.5 M parameters" | External/architecture spec (RunPod; YOLO26n-pose). |
@@ -169,10 +169,8 @@ in `bench_bootstrap_ci.json`.
 2. **Confirm clip-sharing policy.** Default is caches-only (clips on request). If the
    footage is privacy-clear and size is acceptable, the held-out clips can also go in
    the release; update Data Availability's "on request" paragraph accordingly.
-3. **Decide the model-size figure.** `best.pt` is 6.04 MB on disk; the paper says
-   "~10 MB" in 6 places (and README/VALIDATION/CHANGELOG). Recommend changing to
-   "~6 MB on disk" (optionally noting the ~10 MB FP32 footprint) repo-wide, or
-   confirm the FP32 framing is intended.
+3. **Model size — resolved.** Switched repo-wide from "~10 MB" (FP32 footprint) to
+   "~6 MB" (on-disk `best.pt`, 6,037,991 B), matching the released HF weights.
 4. **val mAP stays external — logs unrecoverable.** The RunPod instance is
    terminated, so the pose-run `results.csv` cannot be recovered; the
    0.479/0.643/0.732 values in Table 1 remain a permanent disclosure (the weights

@@ -10,7 +10,7 @@ This document will be updated as evidence accumulates. It will not be updated to
 
 The project went through two scope shifts since day 0. This section supersedes anything below it.
 
-**What this repo now is:** a labeling + training + inference pipeline for sheep head keypoints. SAM 3 Video auto-places candidate keypoints (nose, left/right ear bases, left/right ear tips) across every frame of a short clip. A human reviewer confirms or corrects them. Reviewed frames export to a YOLO-pose dataset. A small YOLO-pose model (YOLO26n-pose, 2.5 M params, ~10 MB) is trained against that dataset on a cloud GPU. The trained weights run inference and σ-on-motionless-sheep benchmarks from `sheep-yolo/` within this repo on a 6 GB local GPU.
+**What this repo now is:** a labeling + training + inference pipeline for sheep head keypoints. SAM 3 Video auto-places candidate keypoints (nose, left/right ear bases, left/right ear tips) across every frame of a short clip. A human reviewer confirms or corrects them. Reviewed frames export to a YOLO-pose dataset. A small YOLO-pose model (YOLO26n-pose, 2.5 M params, ~6 MB) is trained against that dataset on a cloud GPU. The trained weights run inference and σ-on-motionless-sheep benchmarks from `sheep-yolo/` within this repo on a 6 GB local GPU.
 
 **What this repo explicitly is not:**
 

@@ -38,7 +38,7 @@ automated system currently exists to extract the relevant ear-angle
 measurements from ambient pasture video. I present SamSeesSheep, a measurement
 pipeline that uses a foundation video segmentation model (SAM~3 Video) as an
 annotation tool, a human-in-the-loop review interface, and a lightweight
-edge-runnable keypoint detector (YOLO-pose, 2.5\,M parameters, ${\sim}10$\,MB)
+edge-runnable keypoint detector (YOLO-pose, 2.5\,M parameters, ${\sim}6$\,MB)
 trained on the reviewed output. The pipeline produces per-keypoint residual
 standard-deviation benchmarks on genuinely held-out clips. On a clip never seen
 by the labeler or trainer, v0.4 achieves $\sigma = 4.06\dgr$ (left ear) and
@@ -72,7 +72,7 @@ researchers who need reproducible ear-angle features from ambient footage.
   7.5\,s; see Data Availability). The figure demonstrates the pipeline's
   end-to-end path: ambient pasture video $\rightarrow$ foundation-model
   annotation $\rightarrow$ human review $\rightarrow$ multi-animal time-series
-  ear-angle extraction, running on an edge GPU with a ${\sim}10$\,MB model.}
+  ear-angle extraction, running on an edge GPU with a ${\sim}6$\,MB model.}
   \label{fig:hero}
 \end{figure}
 
@@ -115,7 +115,7 @@ I exploit this transformation to build a measurement pipeline: SAM~3 Video
 auto-segments sheep in short phone-captured clips; a labeling UI presents
 machine-generated keypoint candidates for human review; reviewed frames export
 to a YOLO-pose dataset; a small model (YOLO26n-pose, 2.5\,M parameters) trains
-on a cloud GPU; and the resulting weights (${\sim}10$\,MB) run inference on a
+on a cloud GPU; and the resulting weights (${\sim}6$\,MB) run inference on a
 consumer-grade edge GPU (6\,GB). The pipeline produces per-keypoint residual
 standard-deviation ($\sigma$) benchmarks on genuinely held-out clips, evaluated
 against a stock-YOLO baseline that produces zero keypoints.
@@ -126,7 +126,7 @@ against a stock-YOLO baseline that produces zero keypoints.
   into a reviewed sheep-head keypoint dataset using a foundation model as the
   annotation engine and a human as the reviewer.
   \item A trained edge-runnable keypoint detector (YOLO26n-pose, 2.5\,M
-  parameters, ${\sim}10$\,MB) that places five keypoints on every detected sheep
+  parameters, ${\sim}6$\,MB) that places five keypoints on every detected sheep
   head, achieving ${\sim}4\dgr$ ear-angle $\sigma$ on a held-out clip.
   \item A reproducible benchmark protocol using genuinely held-out clips with
   per-keypoint residual $\sigma$, derived ear-angle $\sigma$, bootstrap
@@ -295,7 +295,7 @@ $\text{bucket} < 0.2$ go to validation. The split is per-frame (not per-video),
 appropriate for a single-flock, single-camera scope where generalization to
 unseen poses from known scenes is the target. Training uses YOLO26n-pose (2.5\,M
 parameters), 100 epochs, batch 8, image size 640, on an RTX 4090 via RunPod;
-training completes in ${\sim}6$ minutes and \texttt{best.pt} is ${\sim}10$\,MB.
+training completes in ${\sim}6$ minutes and \texttt{best.pt} is ${\sim}6$\,MB.
 
 \subsection{Edge Inference and Benchmark Protocol}
 \label{sec:bench}
@@ -832,7 +832,7 @@ working as designed.
 I have presented SamSeesSheep, a measurement pipeline that converts ambient
 pasture video into quantified ear-angle features using a foundation-model
 annotation flywheel. The pipeline produces a small edge-runnable model (2.5\,M
-parameters, ${\sim}10$\,MB) that places five keypoints on every detected sheep
+parameters, ${\sim}6$\,MB) that places five keypoints on every detected sheep
 head and achieves ear-angle residual $\sigavg$ of $4.08\dgr$ (v0.4 on HO-1)
 and $2.84\dgr$ (v0.7 on HO-2) --- a metric literally unmeasurable
 with off-the-shelf object detectors. The training progression shows monotonic

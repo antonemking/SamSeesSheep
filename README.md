@@ -1,6 +1,6 @@
 # SamSeesSheep
 
-**SAM 3 Video finds every sheep in a clip via text prompts. A human reviews keypoints. A small YOLO-pose model (~10 MB) trains on those annotations and runs inference on a 6 GB GPU at the barn.**
+**SAM 3 Video finds every sheep in a clip via text prompts. A human reviews keypoints. A small YOLO-pose model (~6 MB) trains on those annotations and runs inference on a 6 GB GPU at the barn.**
 
 Built and validated against a single Katahdin flock in Middletown, DE. Generalization to other breeds and conditions is future work.
 
@@ -94,7 +94,7 @@ Export — data/labels/exports/sheep-pose-v0.N/ (YOLO-pose format,
          hash-based train/val split, one .txt label line per instance)
    │
    ▼
-yolo train (on cloud GPU; only best.pt ~10 MB crosses the network)
+yolo train (on cloud GPU; only best.pt ~6 MB crosses the network)
    │
    ▼
 best.pt → sheep-yolo/weights/ → inference + σ benchmark on 6 GB local GPU

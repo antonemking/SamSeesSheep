@@ -51,10 +51,10 @@ PHONE CAPTURE (1080p, 15–30 s, .MOV)
 │  YOLO-POSE TRAINING (on pod GPU)                            │
 │    yolo train model=yolo26n-pose.pt epochs=100 batch=8      │
 │    imgsz=640, single class 'sheep_head', kpt_shape [5,3]    │
-│    ~2.5 M params, ~6 min on RTX 4090, ~10 MB best.pt        │
+│    ~2.5 M params, ~6 min on RTX 4090, ~6 MB best.pt         │
 └─────────────────────────────────────────────────────────────┘
          │
-         ▼ (rsync/sftp best.pt ~10 MB)
+         ▼ (rsync/sftp best.pt ~6 MB)
 ┌─────────────────────────────────────────────────────────────┐
 │ LOCAL EDGE (GTX 1660 Ti, 6 GB)                              │
 │                                                             │
@@ -220,7 +220,7 @@ The repository combines labeling + training (root) with inference + benchmarking
 | **Benchmark proximity** | `bench_held_out.py` compares multiple model versions trained against data produced by the labeling pipeline. Colocation makes version-linking explicit. |
 | **Single research artifact** | The repo is archived with a research paper. Two repos would require two archives; one repo tells the whole story. |
 
-The boundary is clean: root owns labeling and training. `sheep-yolo/` owns inference and benchmarks. Only `best.pt` (~10 MB) crosses the boundary.
+The boundary is clean: root owns labeling and training. `sheep-yolo/` owns inference and benchmarks. Only `best.pt` (~6 MB) crosses the boundary.
 
 ## Compute topology
 
@@ -262,7 +262,7 @@ On the pod, `.env.pod` sets `LABELS_VOLUME` (mount path) and `HF_HOME` (Hugging 
 
 ## Key design decisions and trade-offs
 
-- **SAM 3 as annotator, not inference engine**: SAM 3 Video's frame-to-frame tracking, occlusion handling, and zero-shot instance discovery make it the right tool for the labeling pipeline, where a human reviews every frame. It's too heavy for edge inference (~3 GB model, seconds per frame). The trained YOLO-pose model (~10 MB, <100 ms per frame) is the inference engine. The annotation cost is paid once per dataset version; inference is free forever.
+- **SAM 3 as annotator, not inference engine**: SAM 3 Video's frame-to-frame tracking, occlusion handling, and zero-shot instance discovery make it the right tool for the labeling pipeline, where a human reviews every frame. It's too heavy for edge inference (~3 GB model, seconds per frame). The trained YOLO-pose model (~6 MB, <100 ms per frame) is the inference engine. The annotation cost is paid once per dataset version; inference is free forever.
 - **2 fps sampling, 512 px max dimension**: Keeps SAM 3 within memory budget and per-clip processing time under 3 minutes. Faster than video rate is unnecessary for the labeling use case (sheep head pose changes slowly).
 - **Hash-based split, not random**: Determinism matters for reproducible benchmarks. The `md5` of `(video_id, frame_idx)` is stable across re-exports. A new export run produces the same train/val assignment.
 - **Single-class YOLO-pose**: The model detects one class (`sheep_head`) with 5 keypoints. Multi-class (e.g., separate head/ear/nose) would fragment an already-small dataset.

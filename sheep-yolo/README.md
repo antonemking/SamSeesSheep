@@ -2,7 +2,7 @@
 
 **Inference engine and sigma benchmark for trained sheep-head keypoint models from [SamSeesSheep](../).**
 
-Runs YOLO-pose models (YOLO26n-pose, 2.5 M params, ~10 MB) on a 6 GB local GPU. Produces per-keypoint residual σ benchmarks on genuinely held-out clips and multi-sheep flock ear-angle charts. The models are trained in the parent repo via the SAM 3 → labeling → export → cloud-GPU pipeline; this directory is where they land and get measured.
+Runs YOLO-pose models (YOLO26n-pose, 2.5 M params, ~6 MB) on a 6 GB local GPU. Produces per-keypoint residual σ benchmarks on genuinely held-out clips and multi-sheep flock ear-angle charts. The models are trained in the parent repo via the SAM 3 → labeling → export → cloud-GPU pipeline; this directory is where they land and get measured.
 
 ## What's here
 
