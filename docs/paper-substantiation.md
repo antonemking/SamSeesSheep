@@ -143,7 +143,8 @@ in `bench_bootstrap_ci.json`.
   model repo with a model card and a **HF-minted DOI** (DataCite, pinned to a fixed
   revision — so it doubles as the citable archive; no separate Zenodo deposit
   needed). Idiomatic home for the weights and discoverable to the ML/ag-tech
-  audience. Paper placeholders: `<HF model repo URL>`, `<HF DOI placeholder>`.
+  audience. HF repo: `antking1/sheep-pose-yolo26n` (URL now filled in the paper);
+  weights upload + DOI generation still pending (`<HF DOI placeholder>`).
 - **Caches → GitHub release:** `_cache/*.pkl` (~3 MB total) ship as an asset on a
   tagged GitHub release (e.g. `paper-v0.7`) of the code repo. With the caches a
   reader regenerates every committed JSON from scratch. *(Pickles in a public repo
@@ -158,11 +159,12 @@ in `bench_bootstrap_ci.json`.
 
 ## Open author actions
 
-1. **Publish weights + mint DOI on Hugging Face.** Create the HF model repo, upload
-   `sheep-pose-v0.{2..7}-yolo26n.pt` + a model card, generate the HF DOI (repo
-   Settings → "Generate DOI", pinned to a revision), and tag a GitHub release
-   carrying `_cache/*.pkl`. Then replace `<HF model repo URL>` and
-   `<HF DOI placeholder>` in `paper.tex` Data Availability.
+1. **Finish the HF upload + mint DOI.** Repo `antking1/sheep-pose-yolo26n` exists
+   with the model card, but the six `sheep-pose-v0.{2..7}-yolo26n.pt` weights are
+   not yet uploaded — upload them, then generate the HF DOI (repo Settings →
+   "Generate DOI", pinned to a revision) and tag a GitHub release carrying
+   `_cache/*.pkl`. The repo URL is already filled in `paper.tex`; replace only
+   `<HF DOI placeholder>`.
 2. **Confirm clip-sharing policy.** Default is caches-only (clips on request). If the
    footage is privacy-clear and size is acceptable, the held-out clips can also go in
    the release; update Data Availability's "on request" paragraph accordingly.

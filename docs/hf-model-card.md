@@ -72,7 +72,7 @@ the keypoint head must be trained against the target animals.
 from huggingface_hub import hf_hub_download
 from ultralytics import YOLO
 
-path = hf_hub_download("<your-hf-username>/sheep-pose-yolo26n",
+path = hf_hub_download("antking1/sheep-pose-yolo26n",
                        "sheep-pose-v0.7-yolo26n.pt")
 model = YOLO(path)
 
