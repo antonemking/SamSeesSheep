@@ -609,7 +609,12 @@ The second clip provides a cross-clip validation point, testing whether the
 training-scale monotonicity observed on HO-1 (v0.2$\rightarrow$v0.4)
 reproduces on an independently selected clip with different flock arrangement,
 lighting, and target. Figure~\ref{fig:hero} shows the pipeline's multi-animal
-output on this clip.
+output on this clip. By design, HO-2 carries the v0.2--v0.4 trend-reproduction
+set plus v0.7 as the then-current model; v0.5 and v0.6 were benchmarked only on
+HO-1 (the full ladder lives in Table~\ref{tab:progression}). The v0.7 run on HO-2
+recorded the aggregate ear-angle $\sigma$ (Table~\ref{tab:morningearangle}) rather
+than a per-keypoint breakdown, so the per-keypoint Table~\ref{tab:morningperkpt}
+lists v0.2--v0.4.
 
 \subsubsection{Detection and Keypoint Stability}
 Table~\ref{tab:morningheadline} reports results for v0.2--v0.4 plus the stock
@@ -653,7 +658,8 @@ fully explains the lower pixel $\sigma$.
 
 \begin{table}[t]
   \centering
-  \caption{Per-keypoint residual $\sigma$ (px) on HO-2.}
+  \caption{Per-keypoint residual $\sigma$ (px) on HO-2. Per-keypoint data exist
+  for v0.2--v0.4 on HO-2; see Section~\ref{sec:morning} for the version coverage.}
   \label{tab:morningperkpt}
   \begin{tabular}{lcccc}
     \toprule
