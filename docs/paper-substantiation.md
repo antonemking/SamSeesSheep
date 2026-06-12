@@ -143,8 +143,9 @@ in `bench_bootstrap_ci.json`.
   model repo with a model card and a **HF-minted DOI** (DataCite, pinned to a fixed
   revision — so it doubles as the citable archive; no separate Zenodo deposit
   needed). Idiomatic home for the weights and discoverable to the ML/ag-tech
-  audience. HF repo: `antking1/sheep-pose-yolo26n` (URL now filled in the paper);
-  weights upload + DOI generation still pending (`<HF DOI placeholder>`).
+  audience. **Done:** HF repo `antking1/sheep-pose-yolo26n` holds the 6 weights
+  (byte-verified) + model card, with DOI **10.57967/hf/9129** (rev 0f4d403),
+  filled into the paper.
 - **Caches → GitHub release:** `_cache/*.pkl` (~3 MB total) ship as an asset on a
   tagged GitHub release (e.g. `paper-v0.7`) of the code repo. With the caches a
   reader regenerates every committed JSON from scratch. *(Pickles in a public repo
