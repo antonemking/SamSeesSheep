@@ -7,16 +7,18 @@ antone@lorewood.dev
 
 ---
 
-> **Note (2026-06-11):** This Markdown file is the working draft. The
-> **canonical, arXiv-ready** version is the LaTeX project in `../paper/`
-> (`paper/paper.tex` + `paper/paper.bib`). The peer review that drove the
-> final revisions is in `fable5-peer-review.md`. The load-bearing factual
-> corrections (monotonicity bounded to v0.2→v0.4 with an explicit post-v0.4
-> plateau; the cross-clip 2.84° framed as a noise floor rather than a
-> v0.4→v0.7 improvement; the stock baseline reported as sheep-class detection
-> on both clips) have been applied below so this draft is not misleading, but
-> the LaTeX version is authoritative and adds bootstrap CIs, a data-availability
-> statement, and resolved figure/table cross-references.
+> ## ⚠️ Superseded draft — do not cite
+>
+> **The canonical, arXiv-ready paper is the LaTeX project in [`../paper/`](../paper/)
+> (`paper/paper.tex`). Read and cite that instead.** This Markdown file is the
+> original working draft, kept only for history. It still contains pre-revision
+> claims that were corrected in the final version — notably an unsubstantiated
+> `NCC < 0.23` clip-screening threshold (dropped), a `~10 MB` model size (the
+> released `best.pt` is ~6 MB), the `IMG_3651` / `Test_Clip_Morning` clip names
+> (now HO-1 / HO-2), and "monotonically improving" phrasing that the final version
+> bounds to v0.2→v0.4. The peer review that drove the revisions is in
+> `fable5-peer-review.md`; the full substantiation audit is in
+> `paper-substantiation.md`.
 
 ## Abstract
 
