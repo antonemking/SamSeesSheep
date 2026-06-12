@@ -1,6 +1,6 @@
 # SamSeesSheep
 
-**SAM 3 Video finds every sheep in a clip via text prompts. A human reviews keypoints. A small YOLO-pose model (~6 MB) trains on those annotations and runs inference on a 6 GB GPU at the barn.**
+**SAM 3 Video finds every sheep in a clip via text prompts. A human reviews keypoints. A small YOLO-pose model (~6 MB) trains on those annotations and runs inference locally on a desktop GPU.**
 
 Built and validated against a single Katahdin flock in Middletown, DE. Generalization to other breeds and conditions is future work.
 
