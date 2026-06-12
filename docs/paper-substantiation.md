@@ -146,8 +146,8 @@ in `bench_bootstrap_ci.json`.
   audience. **Done:** HF repo `antking1/sheep-pose-yolo26n` holds the 6 weights
   (byte-verified) + model card, with DOI **10.57967/hf/9129** (rev 0f4d403),
   filled into the paper.
-- **Caches → GitHub release:** `_cache/*.pkl` (~3 MB total) ship as an asset on a
-  tagged GitHub release (e.g. `paper-v0.7`) of the code repo. With the caches a
+- **Caches → GitHub release:** `_cache/*.pkl` (~3 MB total) ship as an asset on the
+  `paper-artifacts-v0.7` GitHub release of the code repo. With the caches a
   reader regenerates every committed JSON from scratch. *(Pickles in a public repo
   are a mild deserialization smell; a release asset keeps them out of the tree —
   converting them to `.npz` later would remove the smell entirely.)*
