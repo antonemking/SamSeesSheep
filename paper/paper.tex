@@ -13,6 +13,8 @@
 \usepackage{caption}
 \usepackage[numbers,sort&compress]{natbib}
 \usepackage[hidelinks]{hyperref}
+\usepackage{xurl}                 % break long URLs at any character
+\setlength{\emergencystretch}{2em}
 
 \graphicspath{{figures/}}
 
@@ -24,7 +26,7 @@
 Extraction from Ambient Pasture Video Using Foundation-Model Annotation}
 
 \author[1]{Antone King}
-\affil[1]{Lorewood Labs, Middletown, Delaware, USA \\ \texttt{antone@lorewood.dev}}
+\affil[1]{Independent Researcher, Middletown, Delaware, USA \\ \texttt{toneking972@gmail.com}}
 \date{}
 
 \begin{document}
@@ -260,7 +262,7 @@ unreviewed), $v{=}2$ (human-reviewed).
   \centering
   \caption{Keypoint slots and their derivation from SAM~3 masks.}
   \label{tab:kpts}
-  \begin{tabular}{cll}
+  \begin{tabular}{c l p{0.6\textwidth}}
     \toprule
     Slot & Name & Derivation \\
     \midrule
@@ -348,6 +350,7 @@ labeled-data scale and scene diversity.
   Ultralytics training logs (see Data Availability); pixel residual $\sigma$ is
   on the HO-1 held-out clip.}
   \label{tab:dataset}
+  \resizebox{\textwidth}{!}{%
   \begin{tabular}{lcccc}
     \toprule
     Version & Reviewed instances & Training videos & val mAP50-95 (pose) & Residual $\sigma$ (mean, 5 kpts, px) \\
@@ -359,7 +362,7 @@ labeled-data scale and scene diversity.
     v0.6 & 471 & 10 & ---   & 8.09 \\
     v0.7 & 523 & 11 & ---   & 7.90 \\
     \bottomrule
-  \end{tabular}
+  \end{tabular}}
 \end{table}
 
 \subsection{Held-Out Clips}
@@ -376,6 +379,7 @@ released benchmark artifacts and scripts retain those capture IDs.
   original capture filenames used throughout the released benchmark artifacts and
   scripts (e.g.\ \texttt{bench\_report-IMG\_3651-3way.json}).}
   \label{tab:clipmap}
+  \resizebox{\textwidth}{!}{%
   \begin{tabular}{llll}
     \toprule
     Paper ID & Capture file & Lighting / time & Target sheep \\
@@ -383,7 +387,7 @@ released benchmark artifacts and scripts retain those capture IDs.
     HO-1 & \texttt{IMG\_3651.MOV}           & Afternoon & Foreground-dominant ewe (track 34) \\
     HO-2 & \texttt{Test\_Clip\_Morning.mov} & Morning   & Background ewe near fence (track 215) \\
     \bottomrule
-  \end{tabular}
+  \end{tabular}}
 \end{table}
 
 \paragraph{HO-1 (\texttt{IMG\_3651}).}
@@ -429,6 +433,7 @@ plus the stock baseline.
   rate (Section~\ref{sec:stock}); the trained models have a single
   \texttt{sheep\_head} class. Stock produces no keypoints.}
   \label{tab:headline}
+  \resizebox{\textwidth}{!}{%
   \begin{tabular}{lcccc}
     \toprule
     Metric & Stock YOLO & v0.2 & v0.3 & v0.4 \\
@@ -438,7 +443,7 @@ plus the stock baseline.
     Residual $\sigma$ (mean, 5 kpts, px)     & ---        & 10.89      & 8.90         & 7.70 \\
     Raw $\sigma$ (mean, 5 kpts, px)          & ---        & 49.44      & 46.90        & 46.60 \\
     \bottomrule
-  \end{tabular}
+  \end{tabular}}
 \end{table}
 
 All three trained models detect the target on 94--97\% of window frames. The
@@ -539,6 +544,7 @@ within ${\sim}0.1\dgr$ of $4.0\dgr$ --- a plateau, not continued improvement.
   \caption{Full progression on HO-1. Improvement is monotonic only through
   v0.4; v0.5--v0.7 plateau, with v0.6 a per-keypoint regression.}
   \label{tab:progression}
+  \resizebox{\textwidth}{!}{%
   \begin{tabular}{lcccc}
     \toprule
     Version & Left ear $\sigma$ (\dgr) & Right ear $\sigma$ (\dgr) & $\sigavg$ (\dgr) & Residual $\sigma$ mean (px) \\
@@ -550,7 +556,7 @@ within ${\sim}0.1\dgr$ of $4.0\dgr$ --- a plateau, not continued improvement.
     v0.6 & 4.65 & 3.55 & 4.10 & 8.09 \\
     v0.7 & 3.70 & 4.46 & 4.08 & 7.90 \\
     \bottomrule
-  \end{tabular}
+  \end{tabular}}
 \end{table}
 
 \subsection{Statistical Robustness}
@@ -619,6 +625,7 @@ drift rather than model noise.
   rate (Section~\ref{sec:stock}); the any-class rate (100\%) is not reported as a
   detection figure because it does not reflect sheep localization.}
   \label{tab:morningheadline}
+  \resizebox{\textwidth}{!}{%
   \begin{tabular}{lcccc}
     \toprule
     Metric & Stock YOLO & v0.2 & v0.3 & v0.4 \\
@@ -628,7 +635,7 @@ drift rather than model noise.
     Residual $\sigma$ (mean, 5 kpts, px)          & ---        & 6.73       & 4.22       & 3.85 \\
     Raw $\sigma$ (mean, 5 kpts, px)               & ---        & 41.53      & 56.09      & 58.35 \\
     \bottomrule
-  \end{tabular}
+  \end{tabular}}
 \end{table}
 
 \subsubsection{Per-Keypoint Residual $\sigma$}
@@ -711,6 +718,7 @@ performance; the two-clip comparison makes this explicit.
   \caption{Cross-clip comparison of ear-angle $\sigavg$. The HO-1 vs.\
   HO-2 gap is a clip-difficulty effect, not a model improvement.}
   \label{tab:crossclip}
+  \resizebox{\textwidth}{!}{%
   \begin{tabular}{lccc}
     \toprule
     Metric & v0.4 on HO-1 & v0.4 on HO-2 & v0.7 on HO-2 \\
@@ -728,7 +736,7 @@ performance; the two-clip comparison makes this explicit.
     Reviewed instances                 & 405                   & 405                   & 523 \\
     Training videos                    & 8                     & 8                     & 11 \\
     \bottomrule
-  \end{tabular}
+  \end{tabular}}
 \end{table}
 
 \section{Discussion}
