@@ -138,22 +138,31 @@ in `bench_bootstrap_ci.json`.
 - **Shared in git (clone-and-verify):** code, the benchmark `artifacts/*.json`, the
   paper source + figures, docs. `verify_paper_claims.py` passes 44/44 on a fresh
   clone with no downloads.
-- **Companion archive (caches + weights):** `_cache/*.pkl` (~3 MB total) and the
-  per-version `best.pt` weights are gitignored for size; publish them as a **tagged
-  GitHub release** asset (e.g. `paper-v0.7`) and mint a **Zenodo DOI** from that
-  release. With the caches a reader regenerates every committed JSON from scratch.
-  *Default chosen: caches-only public + GitHub release; DOI left as `<DOI placeholder>`.*
+- **Weights → Hugging Face Hub:** the per-version `best.pt` weights
+  (`sheep-pose-v0.{2..7}-yolo26n`) are gitignored for size and published as a HF
+  model repo with a model card and a **HF-minted DOI** (DataCite, pinned to a fixed
+  revision — so it doubles as the citable archive; no separate Zenodo deposit
+  needed). Idiomatic home for the weights and discoverable to the ML/ag-tech
+  audience. Paper placeholders: `<HF model repo URL>`, `<HF DOI placeholder>`.
+- **Caches → GitHub release:** `_cache/*.pkl` (~3 MB total) ship as an asset on a
+  tagged GitHub release (e.g. `paper-v0.7`) of the code repo. With the caches a
+  reader regenerates every committed JSON from scratch. *(Pickles in a public repo
+  are a mild deserialization smell; a release asset keeps them out of the tree —
+  converting them to `.npz` later would remove the smell entirely.)*
 - **On request:** the raw held-out clips (HO-1, HO-2) and the full reviewed-keypoint
   dataset — withheld for size and to limit redistribution of identifiable homestead
-  footage. A reader with the clips + released weights can regenerate the caches
-  themselves; without them, every published number is still reproducible from the
-  caches onward.
+  footage (a *gated/private* HF dataset is the right mechanism if controlled sharing
+  is wanted later; not a public one). A reader with the clips + released weights can
+  regenerate the caches themselves; without them, every published number is still
+  reproducible from the caches onward.
 
 ## Open author actions
 
-1. **Mint the archive DOI.** Tag a GitHub release with `_cache/*.pkl` + the
-   `sheep-pose-v0.{2..7}-yolo26n.pt` weights, then mint a Zenodo DOI and replace
-   `<DOI placeholder>` in `paper.tex` Data Availability.
+1. **Publish weights + mint DOI on Hugging Face.** Create the HF model repo, upload
+   `sheep-pose-v0.{2..7}-yolo26n.pt` + a model card, generate the HF DOI (repo
+   Settings → "Generate DOI", pinned to a revision), and tag a GitHub release
+   carrying `_cache/*.pkl`. Then replace `<HF model repo URL>` and
+   `<HF DOI placeholder>` in `paper.tex` Data Availability.
 2. **Confirm clip-sharing policy.** Default is caches-only (clips on request). If the
    footage is privacy-clear and size is acceptable, the held-out clips can also go in
    the release; update Data Availability's "on request" paragraph accordingly.

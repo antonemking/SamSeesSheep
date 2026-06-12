@@ -867,19 +867,20 @@ and re-validates each value against the paper (44/44 checks pass on a fresh
 clone). The bootstrap confidence intervals of Table~\ref{tab:ci} are in
 \texttt{bench\_bootstrap\_ci.json}.
 
-\paragraph{Companion archive (regenerate from cached predictions).} To keep the
-git tree small, the per-frame model-prediction caches
-(\texttt{sheep-yolo/artifacts/\_cache/*.pkl}, ${\sim}3$\,MB total) and the trained
-per-version weights are \emph{not} tracked in git; they are published as an asset
-on a tagged GitHub release of the same repository [persistent archive DOI to be
-minted on Zenodo: \texttt{<DOI placeholder>}]. With the caches, every committed
-benchmark JSON can be regenerated from scratch
-(\texttt{gen\_bench\_Test\_Clip\_Morning.py} for HO-2; the archived
-\texttt{bench\_v02\_v03.py} / \texttt{bench\_v04\_v05\_v0\{6,7\}.py} for HO-1), and
-the ear-angle chart of Figure~\ref{fig:earangle} can be regenerated with
-\texttt{gen\_ear\_angle\_chart.py}. The hero still of Figure~\ref{fig:hero} is a
-frame from \texttt{synced-lanes-6ewes-pro-Test\_Clip\_Morning.mp4}, also in the
-archive.
+\paragraph{Companion artifacts (weights and cached predictions).} The trained
+per-version weights (\texttt{sheep-pose-v0.\{2--7\}-yolo26n}) are gitignored for
+size and published on the Hugging Face Hub at \url{<HF-model-repo-URL>}, with a
+model card and a persistent DOI (\texttt{<HF DOI placeholder>}) pinned to a fixed
+revision. The per-frame model-prediction caches
+(\texttt{sheep-yolo/artifacts/\_cache/*.pkl}, ${\sim}3$\,MB total) ship as an asset
+on a tagged GitHub release of the code repository. With the caches, every
+committed benchmark JSON can be regenerated from scratch
+(\texttt{gen\_bench\_Test\_Clip\_Morning.py} for HO-2; \texttt{gen\_residual\_px.py}
+and the archived \texttt{bench\_v02\_v03.py} /
+\texttt{bench\_v04\_v05\_v0\{6,7\}.py} for HO-1), and the ear-angle chart of
+Figure~\ref{fig:earangle} with \texttt{gen\_ear\_angle\_chart.py}. The hero still
+of Figure~\ref{fig:hero} is a frame from
+\texttt{synced-lanes-6ewes-pro-Test\_Clip\_Morning.mp4}, also in the release.
 
 \paragraph{Available on request (raw video and dataset).} The held-out clips
 (HO-1, HO-2) and the full reviewed-keypoint training dataset are retained

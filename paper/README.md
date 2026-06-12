@@ -37,10 +37,11 @@ python scripts/gen_bench_Test_Clip_Morning.py  # regenerates the HO-2 JSON — n
 ```
 
 The benchmark JSONs are committed, so `verify_paper_claims.py` runs on a fresh
-clone. The per-frame prediction caches (`sheep-yolo/artifacts/_cache/*.pkl`) and
-the trained weights are **gitignored for size** and ship as a tagged GitHub
-release asset (Zenodo DOI to be minted); the `gen_*`/`bench_*` regeneration
-scripts need that archive. Three figures are reported from outside the repo and
+clone. The trained weights are **gitignored for size** and published on the
+Hugging Face Hub (with a model card and a minted DOI); the per-frame prediction
+caches (`sheep-yolo/artifacts/_cache/*.pkl`) ship as a tagged GitHub release
+asset. The `gen_*`/`bench_*` regeneration scripts need those caches. Three
+figures are reported from outside the repo and
 are **not** checkable by the verification script (disclosed in the paper's Data
 and Code Availability section): the validation mAP values (RunPod Ultralytics
 training logs), the in-distribution σ range (prior v0.3 benchmark report), and
