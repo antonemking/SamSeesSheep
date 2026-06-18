@@ -124,6 +124,7 @@ best.pt → sheep-yolo/weights/ → inference + σ benchmark on 6 GB local GPU
 
 ## Quick links
 
+- **[Paper](./paper/paper.pdf)** — full methodology, arXiv-ready (or read it at [lorewood.dev/papers/samseessheep.pdf](https://lorewood.dev/papers/samseessheep.pdf))
 - **[SETUP.md](./SETUP.md)** — complete reproducibility guide (prerequisites, local labeling, cloud GPU training, inference)
 - **[ARCHITECTURE.md](./ARCHITECTURE.md)** — detailed technical architecture for researchers and engineers
 - **[DATA_FORMAT.md](./DATA_FORMAT.md)** — review.json schema, YOLO-pose export format, keypoint v-flag semantics
@@ -142,7 +143,7 @@ best.pt → sheep-yolo/weights/ → inference + σ benchmark on 6 GB local GPU
 
 ## Built by
 
-[Antone King](https://github.com/antonemking) — applying AI to agriculture and movement science. Part of [Lorewood Labs](https://lorewood.dev).
+[Antone King](https://github.com/antonemking) — applying AI to agriculture and movement science from Middletown, DE.
 
 ---
 
