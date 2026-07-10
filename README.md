@@ -126,7 +126,8 @@ best.pt → sheep-yolo/weights/ → inference + σ benchmark on 6 GB local GPU
 
 ## Quick links
 
-- **[Paper](./paper/paper.pdf)** — full methodology, arXiv-ready (or read it at [lorewood.dev/papers/samseessheep.pdf](https://lorewood.dev/papers/samseessheep.pdf))
+- **[Paper](./paper/paper.pdf)** — full methodology, arXiv-ready
+- **[Trained weights](https://huggingface.co/antking1/sheep-pose-yolo26n)** — all v0.2-v0.7 on Hugging Face (DOI: [10.57967/hf/9129](https://doi.org/10.57967/hf/9129), AGPL-3.0)
 - **[SETUP.md](./SETUP.md)** — complete reproducibility guide (prerequisites, local labeling, cloud GPU training, inference)
 - **[ARCHITECTURE.md](./ARCHITECTURE.md)** — detailed technical architecture for researchers and engineers
 - **[DATA_FORMAT.md](./DATA_FORMAT.md)** — review.json schema, YOLO-pose export format, keypoint v-flag semantics
