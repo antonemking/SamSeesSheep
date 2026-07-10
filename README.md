@@ -2,7 +2,9 @@
 
 **SAM 3 Video finds every sheep in a clip via text prompts. A human reviews keypoints. A small YOLO-pose model (~6 MB) trains on those annotations and runs inference locally on a desktop GPU.**
 
-Built and validated against a single Katahdin flock in Middletown, DE. Generalization to other breeds and conditions is future work.
+**Read the paper:** [`paper/paper.pdf`](./paper/paper.pdf) · arXiv-ready preprint
+
+*Built and validated against a single Katahdin flock in Middletown, DE. Generalization to other breeds and conditions is future work.*
 
 *v0.7 · 523 reviewed instances · σ_avg 2.84° ear-angle on a held-out clip · stock YOLO produces zero keypoints*
 
