@@ -1,10 +1,14 @@
-"""Stdlib tests for pose summaries and the Jev look/dont mapping.
+"""Stdlib tests for pose summaries, the Jev look/dont mapping, and the farmer demo.
 
     python experiments/sheep-triage-jev/test_triage.py
+
+Overlay-video tests need OpenCV and are skipped without it. None of these
+tests call the API.
 """
 
 from __future__ import annotations
 
+import importlib.util
 import io
 import json
 import os
@@ -14,12 +18,24 @@ import urllib.error
 from pathlib import Path
 from unittest import mock
 
+from glance_list import (
+    LOOK,
+    SKIP,
+    UNCHECKED,
+    badge_for,
+    build_cards,
+    reason_for,
+    render_html,
+    write_glance_list,
+)
 from jev_client import JevError, decision_from_noul, request_body, triage_track
 from pose_features import ear_angles, summarize_frames, synthetic_frames
 from pose_runner import frame_from_result
+from render_overlay import badges_from_triage, header_parts, load_frames, save_frames
 from run_pipeline import run
 
 HERE = Path(__file__).resolve().parent
+HAS_CV2 = all(importlib.util.find_spec(m) is not None for m in ("cv2", "numpy"))
 
 
 def _pt(x, y, conf=1.0):
@@ -306,6 +322,224 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(by_id[7], "look")
             blob = "\n".join(p.read_text() for p in out.iterdir())
             self.assertNotIn(key, blob)
+
+
+def _track(tid, first, last, *, left_std=2.0, right_std=2.0, n_right=None, path=0.0, width=200.0):
+    n = last - first + 1
+    return {
+        "track_id": tid,
+        "n_frames": n,
+        "frame_first": first,
+        "frame_last": last,
+        "duration_s": n / 30.0,
+        "facing_fraction": 1.0,
+        "ear_angle_deg": {
+            "left_median": 90.0,
+            "left_std": left_std,
+            "right_median": 90.0,
+            "right_std": right_std if n_right != 0 else None,
+            "n_left": n,
+            "n_right": n if n_right is None else n_right,
+        },
+        "motion": {"centroid_path_px": path, "bbox_median_w_px": width},
+    }
+
+
+def _docs(decisions, *, mode="jev", errors=()):
+    tracks = [
+        _track(1, 0, 299),
+        _track(4, 60, 239, left_std=28.0),
+        _track(9, 150, 449, path=1500.0),
+        _track(12, 30, 329, n_right=0),
+    ]
+    tracks_doc = {
+        "clip": "/Users/someone/sheep-triage-jev/IMG_3877.MOV",
+        "fps": 30.0,
+        "n_frames": 450,
+        "dropped_track_ids": [77],
+        "tracks": tracks,
+    }
+    rows = []
+    for track in tracks:
+        tid = track["track_id"]
+        row = {"track_id": tid, "decision": decisions.get(tid), "noul": 0.123456}
+        if tid in errors:
+            row["error"] = "Jev HTTP 500"
+        rows.append(row)
+    return tracks_doc, {"mode": mode, "model": "jev-latest", "tracks": rows}
+
+
+class FarmerBadgeTests(unittest.TestCase):
+    def test_look_and_dont_become_look_and_skip(self):
+        self.assertEqual(badge_for("look"), "Look")
+        self.assertEqual(badge_for("dont"), "Skip")
+
+    def test_anything_else_is_not_checked(self):
+        for value in (None, "", "maybe", "LOOK"):
+            self.assertEqual(badge_for(value), UNCHECKED)
+
+    def test_overlay_reads_badges_from_triage(self):
+        triage = {
+            "tracks": [
+                {"track_id": 1, "decision": "look"},
+                {"track_id": 2, "decision": "dont"},
+                {"track_id": 3},
+            ]
+        }
+        self.assertEqual(badges_from_triage(triage), {1: LOOK, 2: SKIP, 3: UNCHECKED})
+
+    def test_overlay_header_never_fakes_a_skip(self):
+        self.assertEqual(header_parts({1: LOOK, 2: LOOK}), [("LOOK 2", LOOK), ("SKIP 0", SKIP)])
+        self.assertEqual(header_parts({1: UNCHECKED}), [("NOT SORTED YET", UNCHECKED)])
+
+    def test_frames_round_trip(self):
+        frames, _ = synthetic_frames()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "frames.json"
+            save_frames(path, frames)
+            loaded = load_frames(path)
+        self.assertEqual(len(loaded), len(frames))
+        self.assertEqual(sorted(loaded[0]), [1, 7, 99])
+        self.assertEqual(loaded[3][7]["kpts"][0], frames[3][7]["kpts"][0])
+
+
+class GlanceListTests(unittest.TestCase):
+    def test_look_cards_come_first_with_time_reason_and_jump(self):
+        tracks_doc, triage = _docs({1: "dont", 4: "look", 9: "look", 12: "dont"})
+        cards = build_cards(tracks_doc, triage)
+        self.assertEqual([c["badge"] for c in cards], [LOOK, LOOK, SKIP, SKIP])
+        self.assertEqual([c["track_id"] for c in cards], [4, 9, 1, 12])
+        page = render_html(tracks_doc, triage, video="annotated.mp4")
+        self.assertIn("2 of 4 need a look, 2 can be skipped.", page)
+        self.assertIn('<video id="replay" src="annotated.mp4"', page)
+        self.assertIn('href="annotated.mp4#t=2.00" data-t="2.00">Jump to 0:02</a>', page)
+        self.assertIn("In view 0:02 – 0:08", page)
+        self.assertIn("Left ear kept moving — its angle varied by about 28°.", page)
+        self.assertLess(page.index("Sheep #9"), page.index("Sheep #1<"))
+
+    def test_all_look_says_everyone_needs_a_look(self):
+        tracks_doc, triage = _docs({1: "look", 4: "look", 9: "look", 12: "look"})
+        page = render_html(tracks_doc, triage, video="annotated.mp4")
+        self.assertIn("Every sheep in this clip needs a look (4 of 4).", page)
+        self.assertIn("Skip 0", page)
+        self.assertNotIn('class="card skip"', page)
+        self.assertEqual(page.count('class="card look"'), 4)
+        self.assertIn("still flagged for a glance", page)
+
+    def test_pose_only_run_is_not_sorted(self):
+        tracks_doc, triage = _docs({}, mode="pose-only")
+        page = render_html(tracks_doc, triage, video=None)
+        self.assertIn("Not sorted yet", page)
+        self.assertNotIn('class="card look"', page)
+        self.assertNotIn('class="card skip"', page)
+
+    def test_failed_checks_are_not_dressed_up(self):
+        tracks_doc, triage = _docs({1: "dont", 4: "look"}, errors=(9, 12))
+        page = render_html(tracks_doc, triage, video=None)
+        self.assertIn("1 of 4 need a look, 1 can be skipped, 2 could not be checked.", page)
+        self.assertEqual(page.count("The look/skip check failed for this one."), 2)
+
+    def test_without_video_names_the_timestamp(self):
+        tracks_doc, triage = _docs({4: "look"})
+        page = render_html(tracks_doc, triage, video=None)
+        self.assertNotIn("<video", page)
+        self.assertNotIn("a class=\"jump\"", page)
+        self.assertIn("At 0:02 in the clip.", page)
+
+    def test_farmer_words_only(self):
+        tracks_doc, triage = _docs({1: "dont", 4: "look"})
+        page = render_html(tracks_doc, triage, video="annotated.mp4").lower()
+        for word in ("noul", "jev", "0.123", "decision", "track_id", "/users/someone"):
+            self.assertNotIn(word, page)
+        self.assertIn("img_3877.mov", page)
+        self.assertIn("1 very brief detection was ignored", page)
+
+    def test_reasons_are_plain_english(self):
+        self.assertEqual(
+            reason_for(_track(4, 0, 99, right_std=30.0)),
+            "Right ear kept moving — its angle varied by about 30°.",
+        )
+        self.assertEqual(reason_for(_track(12, 0, 99, n_right=0)), "Right ear hard to see on most frames.")
+        self.assertEqual(reason_for(_track(9, 0, 299, path=1500.0)), "Walked around a lot while in view.")
+        self.assertEqual(reason_for(_track(3, 0, 9)), "Only in view for a moment (0.3 s).")
+        self.assertIn("steady", reason_for(_track(1, 0, 299), SKIP))
+
+    def test_page_from_a_mocked_jev_run(self):
+        key = "sk-live-glance-list"
+
+        def opener(req, timeout=0):
+            class Resp:
+                def read(self_inner):
+                    track = json.loads(req.data.decode())["state"]["track"]
+                    noul = 0.2 if track["track_id"] == 1 else 0.8
+                    return json.dumps({"answers": {"look": {"type": "noul", "noul": noul}}}).encode()
+
+                def __enter__(self_inner):
+                    return self_inner
+
+                def __exit__(self_inner, *args):
+                    return False
+
+            return Resp()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "run"
+            with mock.patch.dict(os.environ, {"TYPESAFE_API_KEY": key}, clear=True):
+                with mock.patch("run_pipeline.triage_track", wraps=_wrap(opener)):
+                    self.assertEqual(run(["--synthetic", "--out", str(out)]), 0)
+            page = write_glance_list(out).read_text()
+        self.assertIn("1 of 2 need a look, 1 can be skipped.", page)
+        self.assertLess(page.index("Sheep #7"), page.index("Sheep #1<"))
+        self.assertNotIn(key, page)
+        self.assertNotIn("<video", page)
+
+
+@unittest.skipUnless(HAS_CV2, "OpenCV not installed; run in the sheep-yolo env")
+class OverlayTests(unittest.TestCase):
+    def test_demo_run_writes_video_and_page(self):
+        import cv2
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "run"
+            with mock.patch.dict(os.environ, {}, clear=True):
+                self.assertEqual(run(["--synthetic", "--pose-only", "--demo", "--out", str(out)]), 0)
+            cap = cv2.VideoCapture(str(out / "annotated.mp4"))
+            n = 0
+            while cap.read()[0]:
+                n += 1
+            cap.release()
+            page = (out / "glance-list.html").read_text()
+            self.assertEqual(n, 8)
+            self.assertEqual(len(load_frames(out / "frames.json")), 8)
+            self.assertIn('<video id="replay" src="annotated.mp4"', page)
+            self.assertIn("Not sorted yet", page)
+
+    def test_badges_are_burned_from_the_decision(self):
+        import cv2
+        import numpy as np
+        from render_overlay import BADGE_BG, draw_track
+
+        frames, _ = synthetic_frames()
+
+        def colored(img, badge):
+            return int(np.all(img == np.array(BADGE_BG[badge], np.uint8), axis=-1).sum())
+
+        look = np.zeros((600, 640, 3), np.uint8)
+        draw_track(cv2, look, frames[0][7], 7, LOOK, scale=1.0, kpt_conf=0.4, top=0)
+        skip = np.zeros((600, 640, 3), np.uint8)
+        draw_track(cv2, skip, frames[0][1], 1, SKIP, scale=1.0, kpt_conf=0.4, top=0)
+        self.assertGreater(colored(look, LOOK), 1000)
+        self.assertEqual(colored(look, SKIP), 0)
+        self.assertGreater(colored(skip, SKIP), 1000)
+        self.assertEqual(colored(skip, LOOK), 0)
+
+
+@unittest.skipIf(HAS_CV2, "OpenCV is installed")
+class DemoWithoutOpenCVTests(unittest.TestCase):
+    def test_demo_explains_the_env(self):
+        with self.assertRaises(SystemExit) as caught:
+            run(["--synthetic", "--pose-only", "--demo", "--out", "/tmp/samseessheep-no-demo"])
+        self.assertIn("uv run --project sheep-yolo", str(caught.exception))
 
 
 def _wrap(opener):
