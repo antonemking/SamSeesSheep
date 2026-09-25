@@ -114,6 +114,7 @@ best.pt → sheep-yolo/weights/ → inference + σ benchmark on 6 GB local GPU
 | `data/labels/` | Reviewed annotations (symlink to durable network volume on pod) |
 | `docs/` | Benchmarks, cloud ops guide, architecture notes |
 | `sheep-yolo/` | Inference pipeline, σ-on-motionless-sheep benchmark, demo UI |
+| `experiments/sheep-triage-jev/` | Pose-track summaries → TypeSafe Jev look/dont triage |
 | `assets/` | Hero images, showcase media |
 
 ## Scope — what this is / what this is not
