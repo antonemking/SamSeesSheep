@@ -101,6 +101,9 @@ reports/runs/
 # Internal working notes (not published)
 _notes/
 
+# TypeSafe Jev triage runs (pose summaries; never commit an API key)
+experiments/sheep-triage-jev/runs/
+
 # sheep-yolo subdir — inference artifacts, weights, raw clips.
 # Ignore the heavy outputs (videos, PNG grids, pickle caches) but TRACK the
 # small machine-readable benchmark JSONs so verify_paper_claims.py runs on a
