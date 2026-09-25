@@ -13,6 +13,9 @@ Full triage (TYPESAFE_API_KEY must be set in the environment, never committed):
     uv run --project sheep-yolo python experiments/sheep-triage-jev/run_pipeline.py \\
         --clip test-clips/Test_Clip_Morning.mov
 
+Add --demo to also write annotated.mp4 (Look / Skip replay) and
+glance-list.html into the same --out folder.
+
 Jev runs on this machine or in the cloud. It does not run on a Pi.
 """
 
@@ -106,6 +109,12 @@ def _parse(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--model", default="jev-latest")
     p.add_argument("--timeout", type=float, default=60.0)
     p.add_argument("--out", type=Path, default=None)
+    p.add_argument(
+        "--demo",
+        action="store_true",
+        help="Also write frames.json, annotated.mp4 (Look / Skip replay) and glance-list.html. Needs OpenCV.",
+    )
+    p.add_argument("--demo-width", type=int, default=1280, help="Max width of annotated.mp4.")
     return p.parse_args(argv)
 
 
@@ -157,6 +166,15 @@ def _load_frames(args: argparse.Namespace) -> tuple[list, float, dict]:
 
 def run(argv: list[str] | None = None) -> int:
     args = _parse(sys.argv[1:] if argv is None else argv)
+    if args.demo:
+        try:
+            import cv2  # noqa: F401
+            import numpy  # noqa: F401
+        except ImportError:
+            raise SystemExit(
+                "--demo needs OpenCV and NumPy. Run it in the sheep-yolo env:\n"
+                "  uv run --project sheep-yolo python experiments/sheep-triage-jev/run_pipeline.py ... --demo"
+            )
     frames, fps, meta = _load_frames(args)
     tracks, dropped = summarize_frames(
         frames,
@@ -257,11 +275,26 @@ def run(argv: list[str] | None = None) -> int:
     text = _summary_text(meta, tracks, triage_rows)
     (out / "summary.txt").write_text(text)
     sys.stdout.write(text)
+    if args.demo:
+        from glance_list import write_glance_list
+        from render_overlay import FRAMES_NAME, render, save_frames
+
+        save_frames(out / FRAMES_NAME, frames)
+        render(
+            out,
+            frames,
+            triage,
+            clip=None if args.synthetic else Path(meta["clip"]),
+            fps=fps,
+            kpt_conf=args.kpt_conf,
+            max_width=args.demo_width,
+        )
+        print(f"wrote {write_glance_list(out)}")
     print(f"wrote {out}")
-    if api_key and api_key in (out / "tracks.json").read_text():
-        raise SystemExit("refusing to leave the API key in run artifacts")
-    if api_key and api_key in (out / "triage.json").read_text():
-        raise SystemExit("refusing to leave the API key in run artifacts")
+    if api_key:
+        for path in out.iterdir():
+            if path.is_file() and path.suffix in {".json", ".txt", ".html"} and api_key in path.read_text():
+                raise SystemExit(f"refusing to leave the API key in run artifacts ({path.name})")
     return 3 if failures else 0
 
 
