@@ -2,8 +2,10 @@
 
 Experiment: can TypeSafe Jev triage tracked sheep from their ear positions?
 
+It runs as an overnight batch. The day's footage of a pen is tracked and ear-checked after dark, and the farmer opens one page, the morning brief, next day: which sheep to check, most clearly flagged first.
+
 ```
-video clip
+the day's footage of one pen
   → YOLO-pose + ByteTrack (sheep-pose v0.7, five keypoints)
   → one ear pack per track (code does the maths)
   → TypeSafe Jev, one call per track, three questions in parallel:
@@ -13,7 +15,8 @@ video clip
   → typed look, noul >= threshold (default 0.5) → look
     typed look, noul <  threshold             → cannot (not sure)
     typed skip → skip, typed cannot → cannot, whatever the noul
-  → one pen call: walk_now | later | fine
+  → one pen call for tomorrow: walk_tomorrow | later | fine
+  → morning-brief.html, read the next morning (with --demo)
 ```
 
 Jev sees text. It does not see frames. This does not run on a Pi, and it does not score pain or welfare. `look` means the ear numbers are worth a human glance, `skip` means both ears looked even and steady, and `cannot` means the face or ears were not seen well enough to judge.
@@ -76,11 +79,11 @@ What Jev sees per track (the `ear_pack` in `tracks.json`, also under `jev_state`
 
 Angles are `null` when an ear was measured on fewer than 3 frames. Speed, centroid path and track coverage stay in `tracks.json` but are not sent to Jev.
 
-The protocol text every question carries (`SPFES_EAR_PROTOCOL` in `jev_client.py`, question set `spfes-ear-v1`):
+The protocol text every question carries (`SPFES_EAR_PROTOCOL` in `jev_client.py`, question set `spfes-ear-v2`; v2 changed only the pen question, for the overnight batch, and the track questions are the same as in v1):
 
 > Ear items of McLennan's SPFES sheep facial scale, read from head-pose numbers. Signs worth a person's look: unusual ear carriage (an ear held far forward, far back toward the neck, or so flat that only one ear can be measured while the face is toward the camera), clear asymmetry between the left and right ears, or frequent ear posture change across frames. Cannot check: the face was mostly not toward the camera, or the ears could not be measured on most facing frames. Walking, speed and a short time in view are not signs.
 
-The questions: `triage` asks "should a person look at this sheep, skip it, or can it not be checked?"; `look` asks "does this sheep show an ear sign worth a person's look?"; `reason` picks one of `flutter`, `asymmetry`, `carriage`, `one_ear_missing`, `steady`, `not_facing`, `ears_unmeasurable`. Code keeps the reason consistent with the decision and words it for the farmer with the track's own numbers. The pen question gets the look/skip/cannot counts and reason counts and picks `walk_now`, `later` or `fine`.
+The questions: `triage` asks "should a person look at this sheep, skip it, or can it not be checked?"; `look` asks "does this sheep show an ear sign worth a person's look?"; `reason` picks one of `flutter`, `asymmetry`, `carriage`, `one_ear_missing`, `steady`, `not_facing`, `ears_unmeasurable`. Code keeps the reason consistent with the decision and words it for the farmer with the track's own numbers. The pen question gets the day's look/skip/cannot counts and reason counts and picks what the farmer should do tomorrow: `walk_tomorrow`, `later` or `fine`. Runs from before v2 answered `walk_now`; the brief reads that as `walk_tomorrow`.
 
 ### The decision
 
@@ -107,50 +110,77 @@ python experiments/sheep-triage-jev/run_pipeline.py \
   --out experiments/sheep-triage-jev/runs/img3877-spfes/
 ```
 
-Add `--demo` (in the sheep-yolo env) to rebuild the replay and glance list for the new answers; the source clip must still be at the path recorded in the old `tracks.json`. Fresh from the clip:
+Add `--demo` (in the sheep-yolo env) to rebuild the replay and the morning brief for the new answers; the source clip must still be at the path recorded in the old `tracks.json`. Fresh from the clip:
 
 ```bash
 uv run --project sheep-yolo python experiments/sheep-triage-jev/run_pipeline.py \
   --clip sheep-yolo/test-clips/IMG_3877.MOV \
   --triage book --demo \
   --out experiments/sheep-triage-jev/runs/img3877-spfes/
-open experiments/sheep-triage-jev/runs/img3877-spfes/glance-list.html
+open experiments/sheep-triage-jev/runs/img3877-spfes/morning-brief.html
 ```
 
-## Farmer demo
+## Morning brief (farmer demo)
 
-`--demo` adds a replay with a Look / Skip / Not checked badge on every sheep and a glance list of which sheep to look at first, in the same `--out` folder. Local Mac smoke, from the repo root, with the v0.7 weights in place (see Weights):
+`--demo` writes the page the farmer opens next morning, `morning-brief.html`, into the same `--out` folder, next to a replay (`annotated.mp4`, a Look / Skip / Not checked badge on every sheep) and one thumbnail per sheep (`thumbs/`, cropped from the footage). The brief, top to bottom:
+
+1. The pen and the day the footage was taken: "North pen · Morning brief", "Thursday 24 September".
+2. One line for tomorrow, "Check these 4 tomorrow.", with the pen call under it: "Walk the pen first thing tomorrow." / "No rush — your next routine walk-through is soon enough." / "The pen looks fine — no special walk needed."
+3. The Look sheep only, most clearly flagged first (Jev's look noul among typed looks; ties go to the sheep seen first). Each card has the sheep number, its thumbnail, when it was seen ("Seen 0:02 – 0:08"), one plain-English ear reason, and a Watch button that opens the replay at that moment.
+4. A collapsed "Not on the list" section with the sheep that were not checked and the ones that looked fine. They never make the headline.
+
+It says so plainly when there is nothing to do: "Nothing needs a check tomorrow." when every sheep looked fine, and "Nothing flagged for tomorrow." when none were flagged but some couldn't be checked. When every sheep comes back Look it says "Check all 6 tomorrow." and "Every sheep seen was flagged (6 of 6)."; it never invents a sheep that looked fine. A Jev `cannot` is Not checked with its reason ("Couldn't see its face well enough — it was mostly turned away."), and a typed look that fails the noul gate is Not checked with "Not sure enough to call — the ear signs were weak or mixed." Without a key, or with `--pose-only`, the brief says "Not sorted yet — the ear check didn't run, so there's no list for tomorrow." The page has no model names, scores, JSON, file paths or diagnosis words, and it loads nothing from the network. It reads on a phone and on a laptop.
+
+`--pen "North pen"` names the pen (default "Your flock"). `--date 2026-09-24` is the day the footage was taken. It defaults to the clip file's date, which is the copy date if the clip was AirDropped or exported later, so pass it when that is wrong. `--from-run` keeps the earlier run's date and pen unless you pass new ones.
+
+### Mac commands
+
+From the repo root, with the v0.7 weights in place (see Weights). Run this after the day's footage is copied over (by hand, or from cron or launchd; nothing here schedules it), then open the brief in the morning:
 
 ```bash
 export TYPESAFE_API_KEY=...   # this shell only; never commit it, never put it on the Pi
 uv run --project sheep-yolo python experiments/sheep-triage-jev/run_pipeline.py \
   --clip sheep-yolo/test-clips/IMG_3877.MOV \
-  --demo \
-  --out experiments/sheep-triage-jev/runs/img3877-demo/
-open experiments/sheep-triage-jev/runs/img3877-demo/glance-list.html
+  --demo --pen "North pen" --date 2026-09-24 \
+  --out experiments/sheep-triage-jev/runs/2026-09-24-north-pen/
+open experiments/sheep-triage-jev/runs/2026-09-24-north-pen/morning-brief.html
 ```
 
 `sheep-yolo/test-clips/` is gitignored, so copy `IMG_3877.MOV` there yourself or point `--clip` at another local source clip you have the rights to show. `--max-frames 900` gives a 30 s cut if you want a quicker first pass.
 
-The page is farmer language only: the pen call on top ("Walk the pen now." / "No rush — look them over on your next walk-through." / "The pen looks fine for now."), then Look / Skip / Not checked, when each sheep is in view, one plain-English reason, and a Jump button that seeks the replay to that moment. Look cards come first. When Jev answers `cannot`, the card reads Not checked with the reason ("Couldn't see its face well enough — it was mostly turned away."); a typed look that fails the noul gate reads Not checked with "Not sure enough to call — the ear signs were weak or mixed." If every sheep comes back Look, the page and the replay both say so; they never invent a Skip. Without a key, or with `--pose-only`, badges read "Not checked" and the page says "Not sorted yet". Run folders from before the SPFES check (`look` / `dont`) still render.
+Already tracked IMG_3877 with `--demo`? Re-ask Jev and get a fresh brief without running YOLO again (the clip must still be at the path in the old `tracks.json`):
 
-Offline smoke with no key, weights, or clip. Every badge reads "Not checked":
+```bash
+export TYPESAFE_API_KEY=...
+uv run --project sheep-yolo python experiments/sheep-triage-jev/run_pipeline.py \
+  --from-run experiments/sheep-triage-jev/runs/img3877-demo/ \
+  --demo --pen "North pen" --date 2026-09-24 \
+  --out experiments/sheep-triage-jev/runs/img3877-brief/
+open experiments/sheep-triage-jev/runs/img3877-brief/morning-brief.html
+```
+
+Offline smoke with no key, weights or clip. Every sheep is Not checked and the brief says "Not sorted yet":
 
 ```bash
 uv run --project sheep-yolo python experiments/sheep-triage-jev/run_pipeline.py \
-  --synthetic --pose-only --demo --out experiments/sheep-triage-jev/runs/synthetic-demo/
-open experiments/sheep-triage-jev/runs/synthetic-demo/glance-list.html
+  --synthetic --pose-only --demo --pen "North pen" \
+  --out experiments/sheep-triage-jev/runs/synthetic-brief/
+open experiments/sheep-triage-jev/runs/synthetic-brief/morning-brief.html
 ```
 
-Rebuild either piece of an existing run folder without re-tracking:
+Rebuild pieces of an existing run folder without re-tracking. `render_overlay.py` rebuilds the replay and the thumbnails; `glance_list.py` rebuilds only the brief (run it after the replay so it picks up the thumbnails) and takes `--pen` and `--date` too:
 
 ```bash
-python experiments/sheep-triage-jev/glance_list.py experiments/sheep-triage-jev/runs/img3877-demo/
 uv run --project sheep-yolo python experiments/sheep-triage-jev/render_overlay.py \
   experiments/sheep-triage-jev/runs/img3877-demo/
+python experiments/sheep-triage-jev/glance_list.py experiments/sheep-triage-jev/runs/img3877-demo/ \
+  --pen "North pen" --date 2026-09-24
+open experiments/sheep-triage-jev/runs/img3877-demo/morning-brief.html
 ```
 
-`annotated.mp4` is H.264 through PyAV (already in the sheep-yolo env), so it plays and seeks in Safari and Chrome. If PyAV cannot encode H.264 the renderer says so and writes mp4v instead; QuickTime plays that, browsers may not. `--demo-width` (default 1280) caps the replay width.
+Older run folders still render: ones from before the SPFES check (`look` / `dont`), ones whose pen call is `walk_now`, and ones with only a `glance-list.html`. Without a recorded date the brief uses the date of the folder's `tracks.json`.
+
+`annotated.mp4` is H.264 through PyAV (already in the sheep-yolo env), so it plays and seeks in Safari and Chrome. If PyAV cannot encode H.264 the renderer says so and writes mp4v instead; QuickTime plays that, browsers may not. `--demo-width` (default 1280) caps the replay width. The thumbnails are frames of real sheep when the clip is real; `runs/` is gitignored, so keep it that way and don't copy a run folder into the repo.
 
 ## Weights
 
@@ -172,16 +202,17 @@ Pass `--weights` to use another file.
 
 | File | Contents |
 |---|---|
-| `tracks.json` | Per-track visibility, ear-angle median/spread, motion, the `ear_pack`, and the exact JSON state Jev sees |
+| `tracks.json` | Per-track visibility, ear-angle median/spread, motion, the `ear_pack`, and the exact JSON state Jev sees. Top level: `footage_date` and `pen_label` for the brief |
 | `triage.json` | Per track, side by side: Jev's `typed_class`, the raw `noul`, `threshold`, the final `decision` (`look` / `skip` / `cannot`), `gated` (the noul gate changed the call) and `reason`; then the `triage` and `reason` choice probabilities, model, token usage, and `book` with `--triage book`. Top level: `pen`, `decision_rule`, `question_set`. Pose-only runs leave `decision` null |
 | `summary.txt` | One line per track (typed class, noul, final call, book call), then typed and final counts with the gate count, book counts and book-vs-final agreement, and the pen call |
 | `annotated.mp4` | `--demo` only. Replay with pose boxes, ear-angle lines (blue left, purple right, degrees at the tip) and a Look / Skip / Not checked badge per track from `triage.json` |
-| `glance-list.html` | `--demo` only. Look cards first, each with a jump into `annotated.mp4` |
+| `thumbs/sheep-<n>.jpg` | `--demo` only. One 320×240 crop per sheep, from a frame with its face toward the camera; drawn heads for `--synthetic` |
+| `morning-brief.html` | `--demo` only. The farmer's page: date, pen, "Check these N tomorrow", ranked Look cards with a Watch button into `annotated.mp4`, the rest collapsed |
 | `frames.json` | `--demo` only. Per-frame boxes and keypoints, so the replay can be re-rendered |
 
 Tracks seen on fewer than `--min-frames` frames (default 2) are dropped and listed as `dropped_track_ids`. Detection confidence defaults to 0.25 and keypoint confidence to 0.4, matching the ear-angle renderer.
 
-Useful knobs: `--max-frames`, `--threshold`, `--model`, `--fps`, `--out`, `--triage book`, `--no-pen`, `--from-run`.
+Useful knobs: `--max-frames`, `--threshold`, `--model`, `--fps`, `--out`, `--triage book`, `--no-pen`, `--from-run`, `--pen`, `--date`.
 
 ## Tests
 
@@ -199,9 +230,10 @@ uv run --project sheep-yolo python experiments/sheep-triage-jev/test_triage.py
 
 ## Still open
 
-- No API key ships with the repo. The SPFES questions (`spfes-ear-v1`) and the pen question have not been sent to the live API yet; the tests use a fake Jev that answers in the documented response shape.
+- No API key ships with the repo. The SPFES questions (`spfes-ear-v2`) and the pen question have not been sent to the live API yet; the tests use a fake Jev that answers in the documented response shape.
 - The 0.5 gate on typed looks is a starting point, not a tuned operating point. Noul probabilities are calibrated by TypeSafe in general; they are not calibrated on this flock.
 - Nothing here measures whether `look` agrees with a person, or with a full SPFES score. That eval is future work.
 - The book thresholds (15° spread, 25° asymmetry, 75°–140° band, half the frames) are guesses from the ear-angle geometry, not from labelled SPFES data. Tune them after a real IMG_3877 run.
-- The farmer demo is checked on synthetic fixtures only. Nobody has watched a real-clip replay yet.
+- The morning brief is checked on synthetic fixtures only. Nobody has seen thumbnails cropped from real footage, or watched a real-clip replay from the brief, yet.
+- The brief's order within the Look list comes from the same uncalibrated noul. It says which Look was flagged more clearly, not which sheep is worse off.
 - Jev-Omni and multimodal Gemma are out of scope. So is Pi / Pico deployment.
