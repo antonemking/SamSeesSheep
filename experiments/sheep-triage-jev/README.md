@@ -180,6 +180,12 @@ open experiments/sheep-triage-jev/runs/img3877-demo/morning-brief.html
 
 Older run folders still render: ones from before the SPFES check (`look` / `dont`), ones whose pen call is `walk_now`, and ones with only a `glance-list.html`. Without a recorded date the brief uses the date of the folder's `tracks.json`.
 
+### Phone clips and rotation
+
+An iPhone stores the picture as the sensor saw it and writes how to turn it for display into the clip (the video track's display matrix): 180° for a clip filmed with the phone upside down, 90° or 270° for portrait. Players apply it. OpenCV may or may not, depending on the machine, which is how the replay and thumbnails came out upside down. Every clip is now read through `clip_frames.py`: PyAV decodes the stored pixels, and the rotation the clip asks for is applied before tracking, the replay and the thumbnails see a frame. So the pose model sees the sheep upright and the crops match what you saw on the phone, whatever OpenCV does. Upright clips are left alone. `tracks.json` records the turn as `frame_rotation`.
+
+Run folders from before this fix were tracked on whatever OpenCV handed over. `--from-run` and `render_overlay.py` check how OpenCV turns that clip on this machine and turn the old boxes and keypoints to match, so the new replay and thumbnails are upright and in the right place. The poses themselves came from the model seeing the clip as stored. For a turned clip such as IMG_3877, re-track it with `--clip` (the first Mac command above) rather than `--from-run`.
+
 `annotated.mp4` is H.264 through PyAV (already in the sheep-yolo env), so it plays and seeks in Safari and Chrome. If PyAV cannot encode H.264 the renderer says so and writes mp4v instead; QuickTime plays that, browsers may not. `--demo-width` (default 1280) caps the replay width. The thumbnails are frames of real sheep when the clip is real; `runs/` is gitignored, so keep it that way and don't copy a run folder into the repo.
 
 ## Weights
@@ -202,7 +208,7 @@ Pass `--weights` to use another file.
 
 | File | Contents |
 |---|---|
-| `tracks.json` | Per-track visibility, ear-angle median/spread, motion, the `ear_pack`, and the exact JSON state Jev sees. Top level: `footage_date` and `pen_label` for the brief |
+| `tracks.json` | Per-track visibility, ear-angle median/spread, motion, the `ear_pack`, and the exact JSON state Jev sees. Top level: `footage_date` and `pen_label` for the brief, and `frame_rotation`, the clockwise turn (0, 90, 180 or 270) applied to the clip's frames before tracking |
 | `triage.json` | Per track, side by side: Jev's `typed_class`, the raw `noul`, `threshold`, the final `decision` (`look` / `skip` / `cannot`), `gated` (the noul gate changed the call) and `reason`; then the `triage` and `reason` choice probabilities, model, token usage, and `book` with `--triage book`. Top level: `pen`, `decision_rule`, `question_set`. Pose-only runs leave `decision` null |
 | `summary.txt` | One line per track (typed class, noul, final call, book call), then typed and final counts with the gate count, book counts and book-vs-final agreement, and the pen call |
 | `annotated.mp4` | `--demo` only. Replay with pose boxes, ear-angle lines (blue left, purple right, degrees at the tip) and a Look / Skip / Not checked badge per track from `triage.json` |
@@ -222,7 +228,7 @@ No API key, no weights, no network (Jev is a local fake and the tests fail if an
 python experiments/sheep-triage-jev/test_triage.py
 ```
 
-The four replay tests need OpenCV and are skipped without it. Run them in the sheep-yolo env:
+The replay tests need OpenCV, and the rotation tests also need PyAV (they build small turned MP4s on the fly, with no real footage). Both are skipped without them. Run them in the sheep-yolo env:
 
 ```bash
 uv run --project sheep-yolo python experiments/sheep-triage-jev/test_triage.py
@@ -235,5 +241,6 @@ uv run --project sheep-yolo python experiments/sheep-triage-jev/test_triage.py
 - Nothing here measures whether `look` agrees with a person, or with a full SPFES score. That eval is future work.
 - The book thresholds (15° spread, 25° asymmetry, 75°–140° band, half the frames) are guesses from the ear-angle geometry, not from labelled SPFES data. Tune them after a real IMG_3877 run.
 - The morning brief is checked on synthetic fixtures only. Nobody has seen thumbnails cropped from real footage, or watched a real-clip replay from the brief, yet.
+- Rotation is tested on synthetic MP4s whose track header says 0, 90, 180 or 270, and on a fake YOLO. It has not been run on an actual iPhone .MOV yet; IMG_3877 is the first one to try.
 - The brief's order within the Look list comes from the same uncalibrated noul. It says which Look was flagged more clearly, not which sheep is worse off.
 - Jev-Omni and multimodal Gemma are out of scope. So is Pi / Pico deployment.
