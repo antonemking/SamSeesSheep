@@ -1,9 +1,11 @@
-"""Stdlib tests for pose summaries, the Jev look/dont mapping, and the farmer demo.
+"""Stdlib tests for pose summaries, the SPFES ear pack, the book rules, the Jev
+look / skip / cannot mapping, the pen call, and the farmer demo.
 
     python experiments/sheep-triage-jev/test_triage.py
 
 Overlay-video tests need OpenCV and are skipped without it. None of these
-tests call the API.
+tests call the API: Jev is a local fake, and urllib's urlopen is patched to
+fail the test if anything reaches for the network.
 """
 
 from __future__ import annotations
@@ -11,11 +13,15 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import math
 import os
+import re
 import tempfile
 import unittest
 import urllib.error
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 from glance_list import (
@@ -24,18 +30,58 @@ from glance_list import (
     UNCHECKED,
     badge_for,
     build_cards,
+    farmer_reason,
+    headline,
+    pen_line,
     reason_for,
     render_html,
     write_glance_list,
 )
-from jev_client import JevError, decision_from_noul, request_body, triage_track
-from pose_features import ear_angles, summarize_frames, synthetic_frames
+from jev_client import (
+    LOOK_ID,
+    PEN_CALLS,
+    PEN_ID,
+    PEN_QUESTIONS,
+    REASON_ID,
+    SPFES_EAR_PROTOCOL,
+    TRACK_QUESTIONS,
+    TRIAGE_ID,
+    ChoiceAnswer,
+    JevError,
+    decide,
+    fitting_reason,
+    pen_request_body,
+    pen_state,
+    request_body,
+    triage_pen,
+    triage_track,
+)
+from pose_features import (
+    MIN_EAR_FRAMES,
+    EarPack,
+    EarStats,
+    ear_angles,
+    state_for_jev,
+    summarize_frames,
+    summarize_track,
+    synthetic_frames,
+)
 from pose_runner import frame_from_result
 from render_overlay import badges_from_triage, header_parts, load_frames, save_frames
 from run_pipeline import run
+from spfes_ear import DECISIONS, REASONS, REASONS_FOR, Verdict, book_triage
 
 HERE = Path(__file__).resolve().parent
 HAS_CV2 = all(importlib.util.find_spec(m) is not None for m in ("cv2", "numpy"))
+
+
+def setUpModule() -> None:
+    guard = mock.patch(
+        "urllib.request.urlopen",
+        side_effect=AssertionError("unit tests must not reach the network"),
+    )
+    guard.start()
+    unittest.addModuleCleanup(guard.stop)
 
 
 def _pt(x, y, conf=1.0):
@@ -173,9 +219,9 @@ class PoseParseTests(unittest.TestCase):
 
 class JevMappingTests(unittest.TestCase):
     def test_threshold(self):
-        self.assertEqual(decision_from_noul(0.5, 0.5), "look")
-        self.assertEqual(decision_from_noul(0.49, 0.5), "dont")
-        self.assertEqual(decision_from_noul(0.0, 0.5), "dont")
+        self.assertEqual(decide("look", 0.5, 0.5), "look")
+        self.assertEqual(decide("look", 0.49, 0.5), "skip")
+        self.assertEqual(decide("skip", 0.0, 0.5), "skip")
 
     def test_request_is_a_noul_and_omits_the_key(self):
         body = request_body({"track_id": 1})
@@ -187,27 +233,17 @@ class JevMappingTests(unittest.TestCase):
     def test_client_maps_response(self):
         seen = {}
 
-        class Resp:
-            def read(self):
-                return json.dumps(
-                    {
-                        "model": "jev-1.13.0",
-                        "answers": {"look": {"type": "noul", "noul": 0.82}},
-                        "usage": {"input_tokens": 10, "output_tokens": 2},
-                    }
-                ).encode()
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *args):
-                return False
-
         def opener(req, timeout=0):
             seen["timeout"] = timeout
             seen["auth"] = req.get_header("Authorization")
             seen["body"] = json.loads(req.data.decode())
-            return Resp()
+            return _Resp(
+                {
+                    "model": "jev-1.13.0",
+                    "answers": _track_answers("look", 0.82, "flutter"),
+                    "usage": {"input_tokens": 10, "output_tokens": 2},
+                }
+            )
 
         out = triage_track(
             {"track_id": 4},
@@ -215,11 +251,13 @@ class JevMappingTests(unittest.TestCase):
             threshold=0.5,
             opener=opener,
         )
-        self.assertEqual(out["decision"], "look")
-        self.assertEqual(out["noul"], 0.82)
+        self.assertEqual(out.decision, "look")
+        self.assertEqual(out.reason, "flutter")
+        self.assertEqual(out.noul, 0.82)
+        self.assertEqual(out.model, "jev-1.13.0")
         self.assertEqual(seen["auth"], "Bearer sk-test-secret")
         self.assertNotIn("sk-test-secret", json.dumps(seen["body"]))
-        self.assertNotIn("sk-test-secret", json.dumps(out))
+        self.assertNotIn("sk-test-secret", json.dumps(out.to_json()))
 
     def test_http_error_scrubs_the_key(self):
         key = "sk-test-do-not-leak"
@@ -292,33 +330,16 @@ class PipelineTests(unittest.TestCase):
 
     def test_key_triggers_jev_and_is_not_stored(self):
         key = "sk-live-should-not-land-on-disk"
-
-        def opener(req, timeout=0):
-            class Resp:
-                def read(self_inner):
-                    track = json.loads(req.data.decode())["state"]["track"]
-                    noul = 0.1 if track["track_id"] == 1 else 0.9
-                    return json.dumps(
-                        {"model": "jev-test", "answers": {"look": {"type": "noul", "noul": noul}}}
-                    ).encode()
-
-                def __enter__(self_inner):
-                    return self_inner
-
-                def __exit__(self_inner, *args):
-                    return False
-
-            return Resp()
+        jev = FakeJev(lambda pack: ("skip", 0.1, "steady") if pack.track_id == 1 else ("look", 0.9, "flutter"))
 
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "run"
             with mock.patch.dict(os.environ, {"TYPESAFE_API_KEY": key}, clear=True):
-                with mock.patch("run_pipeline.triage_track", wraps=_wrap(opener)):
-                    code = run(["--synthetic", "--out", str(out)])
+                code = run(["--synthetic", "--out", str(out)], opener=jev)
             self.assertEqual(code, 0)
             triage = json.loads((out / "triage.json").read_text())
             by_id = {row["track_id"]: row["decision"] for row in triage["tracks"]}
-            self.assertEqual(by_id[1], "dont")
+            self.assertEqual(by_id[1], "skip")
             self.assertEqual(by_id[7], "look")
             blob = "\n".join(p.read_text() for p in out.iterdir())
             self.assertNotIn(key, blob)
@@ -466,27 +487,12 @@ class GlanceListTests(unittest.TestCase):
 
     def test_page_from_a_mocked_jev_run(self):
         key = "sk-live-glance-list"
-
-        def opener(req, timeout=0):
-            class Resp:
-                def read(self_inner):
-                    track = json.loads(req.data.decode())["state"]["track"]
-                    noul = 0.2 if track["track_id"] == 1 else 0.8
-                    return json.dumps({"answers": {"look": {"type": "noul", "noul": noul}}}).encode()
-
-                def __enter__(self_inner):
-                    return self_inner
-
-                def __exit__(self_inner, *args):
-                    return False
-
-            return Resp()
+        jev = FakeJev(lambda pack: ("skip", 0.2, "steady") if pack.track_id == 1 else ("look", 0.8, "flutter"))
 
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "run"
             with mock.patch.dict(os.environ, {"TYPESAFE_API_KEY": key}, clear=True):
-                with mock.patch("run_pipeline.triage_track", wraps=_wrap(opener)):
-                    self.assertEqual(run(["--synthetic", "--out", str(out)]), 0)
+                self.assertEqual(run(["--synthetic", "--out", str(out)], opener=jev), 0)
             page = write_glance_list(out).read_text()
         self.assertIn("1 of 2 need a look, 1 can be skipped.", page)
         self.assertLess(page.index("Sheep #7"), page.index("Sheep #1<"))
@@ -542,18 +548,638 @@ class DemoWithoutOpenCVTests(unittest.TestCase):
         self.assertIn("uv run --project sheep-yolo", str(caught.exception))
 
 
-def _wrap(opener):
-    def _call(state, *, api_key, threshold, model, timeout):
-        return triage_track(
-            state,
-            api_key=api_key,
-            threshold=threshold,
-            model=model,
-            timeout=timeout,
-            opener=opener,
+class _Resp:
+    """The context-managed response object urllib's opener returns."""
+
+    def __init__(self, payload: Any):
+        self._raw = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
+
+    def read(self) -> bytes:
+        return self._raw
+
+    def __enter__(self) -> _Resp:  # noqa: PYI034 - typing.Self needs 3.11; these tests run on older stdlib Pythons
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+
+def _choice_answer(picked: str, options: tuple[str, ...], p: float = 0.9) -> dict[str, Any]:
+    rest = (1.0 - p) / (len(options) - 1)
+    return {
+        "type": "choice",
+        "choice": picked,
+        "confidence": 0.8,
+        "probabilities": {o: (p if o == picked else rest) for o in options},
+    }
+
+
+def _track_answers(triage: str, noul: float, reason: str) -> dict[str, Any]:
+    return {
+        TRIAGE_ID: _choice_answer(triage, DECISIONS),
+        LOOK_ID: {"type": "noul", "noul": noul},
+        REASON_ID: _choice_answer(reason, REASONS),
+    }
+
+
+Rule = Callable[[EarPack], tuple[str, float, str]]
+
+
+def book_rule(pack: EarPack) -> tuple[str, float, str]:
+    verdict = book_triage(pack)
+    return verdict.decision, 0.9 if verdict.decision == "look" else 0.1, verdict.reason
+
+
+class FakeJev:
+    """Offline stand-in for the System One endpoint. Answers each track from ``rule(pack)``."""
+
+    def __init__(
+        self,
+        rule: Rule = book_rule,
+        *,
+        pen: str = "later",
+        fail_track_ids: tuple[int, ...] = (),
+        fail_pen: bool = False,
+    ):
+        self.rule = rule
+        self.pen = pen
+        self.fail_track_ids = set(fail_track_ids)
+        self.fail_pen = fail_pen
+        self.bodies: list[dict[str, Any]] = []
+
+    def _fail(self, req: Any, code: int) -> urllib.error.HTTPError:
+        return urllib.error.HTTPError(req.full_url, code, "fake", hdrs=None, fp=io.BytesIO(b"fake failure"))  # type: ignore[arg-type]
+
+    def __call__(self, req: Any, timeout: float = 0) -> _Resp:
+        body = json.loads(req.data.decode())
+        self.bodies.append(body)
+        if PEN_ID in body["questions"]:
+            if self.fail_pen:
+                raise self._fail(req, 529)
+            answers = {PEN_ID: _choice_answer(self.pen, PEN_CALLS)}
+        else:
+            pack = EarPack.from_json(body["state"]["track"])
+            if pack.track_id in self.fail_track_ids:
+                raise self._fail(req, 500)
+            answers = _track_answers(*self.rule(pack))
+        return _Resp({"model": "jev-test", "answers": answers, "usage": {"input_tokens": 12, "output_tokens": 3}})
+
+    @property
+    def pen_calls(self) -> int:
+        return sum(PEN_ID in body["questions"] for body in self.bodies)
+
+
+def _head_at(
+    cx: float,
+    cy: float,
+    left_deg: float,
+    right_deg: float,
+    *,
+    nose_conf: float = 1.0,
+    right_conf: float = 1.0,
+) -> dict[str, Any]:
+    """Head facing up the image. An ear at 90° sticks straight out, 0° points at the nose, 180° straight back."""
+    lb, rb = [cx - 30.0, cy, 1.0], [cx + 30.0, cy, 1.0]
+
+    def tip(base: list[float], deg: float, sign: int, conf: float) -> list[float]:
+        rad = math.radians(deg)
+        return [base[0] + sign * 50 * math.sin(rad), base[1] - 50 * math.cos(rad), conf]
+
+    return {
+        "box": [cx - 90, cy - 80, cx + 90, cy + 60],
+        "kpts": [[cx, cy - 60, nose_conf], lb, rb, tip(lb, left_deg, -1, 1.0), tip(rb, right_deg, 1, right_conf)],
+    }
+
+
+def spfes_frames() -> list[dict[int, dict[str, Any]]]:
+    """Three seconds, one sheep per SPFES ear case, no video. Each case is named by its book verdict.
+
+    #3 skip/steady (and walks across the frame), #5 look/flutter, #8 look/asymmetry,
+    #12 look/carriage, #15 cannot/not_facing, #21 look/one_ear_missing, #99 a one-frame flicker.
+    """
+    frames: list[dict[int, dict[str, Any]]] = []
+    for i in range(90):
+        jitter = (-2.0, 0.0, 2.0)[i % 3]
+        frame: dict[int, dict[str, Any]] = {}
+        frame[3] = _head_at(120 + 4 * i, 520, 92 + jitter, 88 - jitter)
+        if i < 75:
+            frame[5] = _head_at(180, 220, (55.0, 125.0)[(i // 3) % 2], 95 + jitter)
+        if i >= 15:
+            frame[8] = _head_at(480, 220, 90 + jitter, 128 + jitter)
+        if i >= 30:
+            frame[12] = _head_at(780, 220, 150 + jitter, 150 - jitter)
+        if i < 60:
+            frame[15] = _head_at(820, 520, 90, 90, nose_conf=1.0 if i % 5 == 0 else 0.0)
+        if i >= 45:
+            frame[21] = _head_at(1110, 520, 95 + jitter, 95, right_conf=0.0)
+        if i == 10:
+            frame[99] = _head_at(1110, 220, 90, 90)
+        frames.append(frame)
+    return frames
+
+
+SPFES_EXPECTED = {
+    3: Verdict("skip", "steady"),
+    5: Verdict("look", "flutter"),
+    8: Verdict("look", "asymmetry"),
+    12: Verdict("look", "carriage"),
+    15: Verdict("cannot", "not_facing"),
+    21: Verdict("look", "one_ear_missing"),
+}
+
+
+def spfes_run_dir(root: Path) -> Path:
+    """A --demo-style run folder (frames.json + tracks.json) for --from-run, from the SPFES fixture."""
+    src = root / "spfes-source"
+    src.mkdir()
+    save_frames(src / "frames.json", spfes_frames())
+    (src / "tracks.json").write_text(json.dumps({"clip": "synthetic", "weights": None, "fps": 30.0, "tracks": []}))
+    return src
+
+
+def _pack(
+    *,
+    facing: float = 1.0,
+    left: tuple[float, float | None, float | None] = (1.0, 90.0, 2.0),
+    right: tuple[float, float | None, float | None] = (1.0, 90.0, 2.0),
+    asymmetry: float | None = 3.0,
+    n_frames: int = 90,
+) -> EarPack:
+    return EarPack(
+        track_id=1,
+        n_frames=n_frames,
+        duration_s=round(n_frames / 30.0, 2),
+        facing_fraction=facing,
+        left_ear=EarStats(*left),
+        right_ear=EarStats(*right),
+        asymmetry_deg=asymmetry,
+    )
+
+
+def _obs(frame: int, head: dict[str, Any]) -> dict[str, Any]:
+    return {"frame": frame, **head}
+
+
+class FeaturePackTests(unittest.TestCase):
+    def _pack_of(self, observations: list[dict[str, Any]]) -> EarPack:
+        summary = summarize_track(1, observations, n_source_frames=len(observations), fps=30.0, kpt_conf=0.4)
+        return EarPack.from_json(summary["ear_pack"])
+
+    def test_synthetic_tracks(self):
+        tracks, _ = summarize_frames(synthetic_frames()[0], fps=30.0, kpt_conf=0.4, min_frames=2)
+        steady, jumpy = (EarPack.from_json(t["ear_pack"]) for t in tracks)
+        self.assertEqual(steady.left_ear, EarStats(1.0, 90.0, 0.0))
+        self.assertEqual(steady.right_ear, EarStats(1.0, 90.0, 0.0))
+        self.assertEqual(steady.asymmetry_deg, 0.0)
+        self.assertEqual((steady.n_frames, steady.duration_s, steady.facing_fraction), (8, 0.27, 1.0))
+        self.assertEqual(jumpy.left_ear, EarStats(1.0, 45.0, 45.0))
+        self.assertEqual(jumpy.right_ear, EarStats(0.0, None, None))
+        self.assertIsNone(jumpy.asymmetry_deg)
+
+    def test_asymmetry_is_per_frame_not_a_difference_of_medians(self):
+        pairs = [(80, 100), (90, 90), (100, 140)]
+        pack = self._pack_of([_obs(i, _head_at(300, 300, left, right)) for i, (left, right) in enumerate(pairs)])
+        self.assertEqual(pack.left_ear.median_deg, 90.0)
+        self.assertEqual(pack.right_ear.median_deg, 100.0)
+        self.assertEqual(pack.asymmetry_deg, 20.0)
+
+    def test_measured_fraction_counts_facing_frames_only(self):
+        heads = [_head_at(300, 300, 90, 90, nose_conf=1.0 if i % 2 else 0.0) for i in range(8)]
+        heads[1] = _head_at(300, 300, 90, 90, right_conf=0.0)
+        pack = self._pack_of([_obs(i, h) for i, h in enumerate(heads)])
+        self.assertEqual(pack.facing_fraction, 0.5)
+        self.assertEqual(pack.left_ear.measured_fraction, 1.0)
+        self.assertEqual(pack.right_ear.measured_fraction, 0.75)
+
+    def test_too_few_measured_frames_leave_the_numbers_out(self):
+        heads = [_head_at(300, 300, 90, 120) for _ in range(MIN_EAR_FRAMES - 1)]
+        pack = self._pack_of([_obs(i, h) for i, h in enumerate(heads)])
+        self.assertEqual(pack.left_ear, EarStats(1.0, None, None))
+        self.assertIsNone(pack.asymmetry_deg)
+
+    def test_pack_is_ear_only(self):
+        tracks, _ = summarize_frames(spfes_frames(), fps=30.0, kpt_conf=0.4, min_frames=2)
+        for track in tracks:
+            self.assertEqual(
+                set(track["ear_pack"]),
+                {"track_id", "n_frames", "duration_s", "facing_fraction", "left_ear", "right_ear", "asymmetry_deg"},
+            )
+            self.assertEqual(set(track["ear_pack"]["left_ear"]), {"measured_fraction", "median_deg", "std_deg"})
+
+    def test_json_round_trip(self):
+        pack = _pack(right=(0.2, None, None), asymmetry=None)
+        self.assertEqual(EarPack.from_json(json.loads(json.dumps(pack.to_json()))), pack)
+
+    def test_jev_state_is_the_pack_with_notes_and_no_motion(self):
+        tracks, _ = summarize_frames(spfes_frames(), fps=30.0, kpt_conf=0.4, min_frames=2)
+        state = state_for_jev(tracks[0])
+        self.assertEqual(state["track"], tracks[0]["ear_pack"])
+        blob = json.dumps(state).lower()
+        for word in ("centroid", "motion", "coverage", "keypoint_visibility", "bbox", "speed", "path"):
+            self.assertNotIn(word, blob)
+        for field in ("median_deg", "std_deg", "asymmetry_deg", "facing_fraction", "measured_fraction"):
+            self.assertIn(field, state["field_notes"])
+
+
+class BookRuleTests(unittest.TestCase):
+    def check(self, pack: EarPack, decision: str, reason: str) -> None:
+        self.assertEqual(book_triage(pack), Verdict(decision, reason))  # type: ignore[arg-type]
+
+    def test_steady_even_ears_are_skipped(self):
+        self.check(_pack(), "skip", "steady")
+
+    def test_not_facing_wins_over_every_sign(self):
+        self.check(_pack(facing=0.49, left=(1.0, 160.0, 40.0)), "cannot", "not_facing")
+        self.check(_pack(facing=0.5), "skip", "steady")
+
+    def test_unmeasurable_ears_cannot_be_checked(self):
+        self.check(_pack(left=(0.49, 90.0, 2.0), right=(0.2, 90.0, 2.0)), "cannot", "ears_unmeasurable")
+        self.check(_pack(left=(1.0, None, None), right=(1.0, None, None), asymmetry=None), "cannot", "ears_unmeasurable")
+
+    def test_flutter(self):
+        self.check(_pack(right=(1.0, 90.0, 15.0)), "look", "flutter")
+        self.check(_pack(right=(1.0, 90.0, 14.9)), "skip", "steady")
+
+    def test_asymmetry(self):
+        self.check(_pack(right=(1.0, 115.0, 2.0), asymmetry=25.0), "look", "asymmetry")
+        self.check(_pack(right=(1.0, 115.0, 2.0), asymmetry=24.9), "skip", "steady")
+
+    def test_carriage_band_is_inclusive(self):
+        self.check(_pack(left=(1.0, 74.9, 2.0), right=(1.0, 80.0, 2.0)), "look", "carriage")
+        self.check(_pack(left=(1.0, 140.1, 2.0), right=(1.0, 139.0, 2.0)), "look", "carriage")
+        self.check(_pack(left=(1.0, 75.0, 2.0), right=(1.0, 140.0, 2.0), asymmetry=3.0), "skip", "steady")
+
+    def test_one_ear_missing_while_facing(self):
+        self.check(_pack(right=(0.1, None, None), asymmetry=None), "look", "one_ear_missing")
+
+    def test_asymmetry_needs_both_ears_seen(self):
+        self.check(_pack(right=(0.3, 150.0, 2.0), asymmetry=60.0), "look", "one_ear_missing")
+
+    def test_first_matching_sign_names_the_reason(self):
+        self.check(_pack(left=(1.0, 150.0, 20.0), asymmetry=60.0), "look", "flutter")
+        self.check(_pack(left=(1.0, 150.0, 2.0), asymmetry=60.0), "look", "asymmetry")
+
+    def test_brief_tracks_are_not_a_look(self):
+        self.check(_pack(n_frames=4), "skip", "steady")
+
+    def test_fixture_cases(self):
+        tracks, dropped = summarize_frames(spfes_frames(), fps=30.0, kpt_conf=0.4, min_frames=2)
+        self.assertEqual(dropped, [99])
+        got = {t["track_id"]: book_triage(EarPack.from_json(t["ear_pack"])) for t in tracks}
+        self.assertEqual(got, SPFES_EXPECTED)
+
+    def test_reasons_always_fit_the_decision(self):
+        for facing in (0.2, 1.0):
+            for measured in (0.2, 1.0):
+                for median in (60.0, 100.0, 150.0):
+                    for std in (2.0, 30.0):
+                        verdict = book_triage(_pack(facing=facing, left=(measured, median, std)))
+                        self.assertIn(verdict.reason, REASONS_FOR[verdict.decision])
+
+
+class JevQuestionTests(unittest.TestCase):
+    def test_track_request_asks_three_typed_questions(self):
+        body = request_body({"task": "t", "track": _pack().to_json()})
+        questions = body["questions"]
+        self.assertEqual({q: questions[q]["type"] for q in questions}, {"triage": "choice", "look": "noul", "reason": "choice"})
+        self.assertEqual(tuple(questions[TRIAGE_ID]["criteria"]), DECISIONS)
+        self.assertEqual(tuple(questions[REASON_ID]["criteria"]), REASONS)
+        self.assertEqual(set(questions[LOOK_ID]["criteria"]), {"true", "false"})
+        for question in questions.values():
+            self.assertEqual(question["instructions"]["protocol"], SPFES_EAR_PROTOCOL)
+        self.assertEqual(body["state"]["track"]["left_ear"]["median_deg"], 90.0)
+
+    def test_protocol_names_the_ear_signs_and_what_is_not_a_sign(self):
+        text = SPFES_EAR_PROTOCOL.lower()
+        for phrase in ("spfes", "carriage", "asymmetry", "posture change", "cannot check", "not toward the camera"):
+            self.assertIn(phrase, text)
+        self.assertIn("walking, speed and a short time in view are not signs", text)
+        self.assertNotIn("pain", json.dumps([TRACK_QUESTIONS, PEN_QUESTIONS]).lower())
+
+    def test_pen_request(self):
+        state = pen_state([Verdict("look", "flutter"), Verdict("look", "carriage"), Verdict("cannot", "not_facing")], failed=1)
+        self.assertEqual(state["sheep_tracked"], 4)
+        self.assertEqual(state["counts"], {"look": 2, "skip": 0, "cannot": 1, "check_failed": 1})
+        self.assertEqual(state["look_reasons"], {"flutter": 1, "carriage": 1})
+        self.assertEqual(state["cannot_reasons"], {"not_facing": 1})
+        body = pen_request_body(state)
+        self.assertEqual(tuple(body["questions"][PEN_ID]["criteria"]), PEN_CALLS)
+        self.assertEqual(body["questions"][PEN_ID]["type"], "choice")
+
+
+def _ask(answers: dict[str, Any], *, threshold: float = 0.5) -> Any:
+    return triage_track(
+        {"track": _pack().to_json()},
+        api_key="sk-test",
+        threshold=threshold,
+        opener=lambda req, timeout=0: _Resp({"model": "jev-test", "answers": answers}),
+    )
+
+
+class JevResponseTests(unittest.TestCase):
+    def test_code_owns_the_look_skip_cut_and_jev_owns_cannot(self):
+        cases = [
+            (("look", 0.8), "look"),
+            (("skip", 0.8), "look"),
+            (("look", 0.3), "skip"),
+            (("skip", 0.5), "look"),
+            (("cannot", 0.95), "cannot"),
+        ]
+        for (choice, noul), expected in cases:
+            with self.subTest(choice=choice, noul=noul):
+                reason = REASONS_FOR[expected][0]
+                self.assertEqual(_ask(_track_answers(choice, noul, reason)).decision, expected)
+        self.assertEqual(_ask(_track_answers("look", 0.8, "flutter"), threshold=0.9).decision, "skip")
+
+    def test_reason_is_bent_to_fit_the_decision(self):
+        answer = ChoiceAnswer("steady", 0.4, {"steady": 0.5, "carriage": 0.3, "flutter": 0.1, "not_facing": 0.1})
+        self.assertEqual(fitting_reason("look", answer), "carriage")
+        self.assertEqual(fitting_reason("skip", answer), "steady")
+        self.assertEqual(fitting_reason("cannot", answer), "not_facing")
+        self.assertEqual(fitting_reason("cannot", ChoiceAnswer("steady", 1.0, {"steady": 1.0})), "not_facing")
+
+    def test_record_keeps_both_answers_for_the_ab(self):
+        out = _ask(_track_answers("cannot", 0.7, "not_facing")).to_json()
+        self.assertEqual((out["decision"], out["reason"], out["noul"]), ("cannot", "not_facing", 0.7))
+        self.assertEqual(out["choice"]["choice"], "cannot")
+        self.assertAlmostEqual(sum(out["choice"]["probabilities"].values()), 1.0)
+        self.assertEqual(set(out["reason_choice"]["probabilities"]), set(REASONS))
+
+    def test_malformed_answers_are_errors_not_defaults(self):
+        good = _track_answers("look", 0.8, "flutter")
+        broken = {
+            "no triage": {k: v for k, v in good.items() if k != TRIAGE_ID},
+            "no reason": {k: v for k, v in good.items() if k != REASON_ID},
+            "unknown option": {**good, TRIAGE_ID: {**good[TRIAGE_ID], "choice": "maybe"}},
+            "noul above one": {**good, LOOK_ID: {"type": "noul", "noul": 1.3}},
+            "noul as text": {**good, LOOK_ID: {"type": "noul", "noul": "0.8"}},
+            "noul not finite": {**good, LOOK_ID: {"type": "noul", "noul": float("nan")}},
+            "wrong type": {**good, LOOK_ID: good[TRIAGE_ID]},
+            "no confidence": {**good, REASON_ID: {k: v for k, v in good[REASON_ID].items() if k != "confidence"}},
+            "no probabilities": {**good, REASON_ID: {"type": "choice", "choice": "flutter", "confidence": 1.0}},
+        }
+        for name, answers in broken.items():
+            with self.subTest(name), self.assertRaises(JevError):
+                _ask(answers)
+
+    def test_transport_failures_are_jev_errors(self):
+        def not_json(req, timeout=0):
+            return _Resp(b"<html>502</html>")
+
+        def too_slow(req, timeout=0):
+            raise TimeoutError
+
+        for opener in (not_json, too_slow):
+            with self.subTest(opener.__name__), self.assertRaises(JevError):
+                triage_track({}, api_key="sk-test", opener=opener)
+        with self.assertRaises(JevError):
+            triage_track({}, api_key="", opener=not_json)
+
+    def test_pen_call(self):
+        answers = {PEN_ID: _choice_answer("walk_now", PEN_CALLS)}
+        pen = triage_pen({}, api_key="sk-test", opener=lambda req, timeout=0: _Resp({"answers": answers}))
+        self.assertEqual(pen.call, "walk_now")
+        self.assertEqual(pen.to_json()["call"], "walk_now")
+        answers = {PEN_ID: {**_choice_answer("walk_now", PEN_CALLS), "choice": "panic"}}
+        with self.assertRaises(JevError):
+            triage_pen({}, api_key="sk-test", opener=lambda req, timeout=0: _Resp({"answers": answers}))
+
+
+class SpfesBadgeTests(unittest.TestCase):
+    def test_new_vocabulary(self):
+        self.assertEqual(badge_for("skip"), SKIP)
+        self.assertEqual(badge_for("cannot"), UNCHECKED)
+        triage = {"tracks": [{"track_id": 1, "decision": "cannot"}, {"track_id": 2, "decision": "skip"}]}
+        self.assertEqual(badges_from_triage(triage), {1: UNCHECKED, 2: SKIP})
+
+    def test_overlay_header_counts_not_checked_once_the_check_ran(self):
+        self.assertEqual(
+            header_parts({1: LOOK, 2: UNCHECKED}),
+            [("LOOK 1", LOOK), ("SKIP 0", SKIP), ("NOT CHECKED 1", UNCHECKED)],
+        )
+        self.assertEqual(
+            header_parts({1: UNCHECKED, 2: UNCHECKED}, ran=True),
+            [("LOOK 0", LOOK), ("SKIP 0", SKIP), ("NOT CHECKED 2", UNCHECKED)],
+        )
+        self.assertEqual(header_parts({1: UNCHECKED}, ran=False), [("NOT SORTED YET", UNCHECKED)])
+
+
+def _spfes_docs(rows: dict[int, dict[str, Any]], *, pen: Any = None) -> tuple[dict[str, Any], dict[str, Any]]:
+    tracks, _ = summarize_frames(spfes_frames(), fps=30.0, kpt_conf=0.4, min_frames=2)
+    tracks_doc = {"clip": "synthetic", "fps": 30.0, "n_frames": 90, "dropped_track_ids": [99], "tracks": tracks}
+    triage = {
+        "mode": "jev",
+        "pen": pen,
+        "tracks": [{"track_id": t["track_id"], "noul": 0.5, **rows.get(t["track_id"], {})} for t in tracks],
+    }
+    return tracks_doc, triage
+
+
+class FarmerReasonTests(unittest.TestCase):
+    def test_every_reason_reads_plainly_with_its_number(self):
+        cases = {
+            ("flutter", _pack(left=(1.0, 90.0, 31.0))): "Left ear kept changing position — its angle varied by about 31°.",
+            ("flutter", _pack(left=(1.0, 90.0, 31.0), right=(1.0, 90.0, 18.0))): (
+                "Both ears kept changing position — their angles varied by about 31°."
+            ),
+            ("asymmetry", _pack(asymmetry=38.2)): "Ears held unevenly — left and right differed by about 38°.",
+            ("carriage", _pack(right=(1.0, 151.0, 2.0))): "Right ear held unusually far back (about 151°).",
+            ("carriage", _pack(left=(1.0, 62.0, 2.0))): "Left ear held unusually far forward (about 62°).",
+            ("one_ear_missing", _pack(right=(0.1, None, None))): (
+                "Facing the camera, but its right ear was hard to see on most frames."
+            ),
+            ("steady", _pack()): "Both ears seen, even and steady.",
+            ("not_facing", _pack(facing=0.1)): "Couldn't see its face well enough — it was mostly turned away.",
+            ("ears_unmeasurable", _pack(left=(0.1, None, None))): "Couldn't see its ears well enough to check.",
+        }
+        for (reason, pack), expected in cases.items():
+            with self.subTest(reason):
+                self.assertEqual(farmer_reason(reason, pack), expected)  # type: ignore[arg-type]
+
+    def test_reasons_without_numbers_still_read(self):
+        empty = _pack(left=(0.0, None, None), right=(0.0, None, None), asymmetry=None)
+        for reason in REASONS:
+            with self.subTest(reason):
+                text = farmer_reason(reason, empty)
+                self.assertTrue(text.endswith("."))
+                self.assertNotIn("None", text)
+
+
+class SpfesGlanceListTests(unittest.TestCase):
+    def rows(self) -> dict[int, dict[str, Any]]:
+        return {tid: v.to_json() for tid, v in SPFES_EXPECTED.items()}
+
+    def test_cannot_is_not_checked_with_a_plain_reason(self):
+        tracks_doc, triage = _spfes_docs(self.rows())
+        cards = {c["track_id"]: c for c in build_cards(tracks_doc, triage)}
+        self.assertEqual(cards[15]["badge"], UNCHECKED)
+        self.assertEqual(cards[15]["status"], "cannot")
+        self.assertEqual(cards[15]["reason"], "Couldn't see its face well enough — it was mostly turned away.")
+        self.assertEqual(cards[3]["reason"], "Both ears seen, even and steady.")
+        self.assertIn("kept changing position", cards[5]["reason"])
+        page = render_html(tracks_doc, triage, video=None)
+        self.assertIn("4 of 6 need a look, 1 can be skipped, 1 could not be checked.", page)
+        self.assertIn("Not checked 1", page)
+        self.assertNotIn("The look/skip check failed", page)
+
+    def test_all_cannot_says_why(self):
+        tracks_doc, triage = _spfes_docs({tid: Verdict("cannot", "not_facing").to_json() for tid in SPFES_EXPECTED})
+        self.assertEqual(
+            headline(build_cards(tracks_doc, triage)),
+            "Couldn't check any of the 6 sheep — their faces or ears weren't clear enough.",
         )
 
-    return _call
+    def test_pen_line(self):
+        for call, text in (
+            ("walk_now", "Walk the pen now."),
+            ("later", "No rush — look them over on your next walk-through."),
+            ("fine", "The pen looks fine for now."),
+        ):
+            with self.subTest(call):
+                tracks_doc, triage = _spfes_docs(self.rows(), pen={"call": call, "confidence": 0.9})
+                self.assertEqual(pen_line(triage), (call, text))
+                self.assertIn(text, render_html(tracks_doc, triage, video=None))
+        for pen in (None, {"call": None, "error": "Jev HTTP 529"}, {"call": "panic"}):
+            with self.subTest(pen=pen):
+                tracks_doc, triage = _spfes_docs(self.rows(), pen=pen)
+                self.assertIsNone(pen_line(triage))
+                self.assertNotIn('class="pen', render_html(tracks_doc, triage, video=None))
+
+    def test_page_keeps_the_vocabulary_internal(self):
+        tracks_doc, triage = _spfes_docs(self.rows(), pen={"call": "walk_now"})
+        page = render_html(tracks_doc, triage, video="annotated.mp4").lower()
+        for word in ("cannot", "noul", "jev", "spfes", "walk_now", "one_ear_missing", "not_facing", "decision"):
+            self.assertNotIn(word, page)
+        markup = re.sub(r"<(style|script)>.*?</\1>", "", page, flags=re.DOTALL)
+        self.assertNotIn("{", markup)
+
+
+class SpfesPipelineTests(unittest.TestCase):
+    def run_from_fixture(self, tmp: str, *extra: str, jev: FakeJev | None = None, key: str | None = "sk-fixture") -> Path:
+        out = Path(tmp) / "out"
+        env = {"TYPESAFE_API_KEY": key} if key else {}
+        with mock.patch.dict(os.environ, env, clear=True):
+            self.code = run(["--from-run", str(spfes_run_dir(Path(tmp))), "--out", str(out), *extra], opener=jev)
+        return out
+
+    def test_from_run_asks_jev_per_track_then_the_pen(self):
+        jev = FakeJev(pen="walk_now")
+        with tempfile.TemporaryDirectory() as tmp:
+            out = self.run_from_fixture(tmp, jev=jev)
+            triage = json.loads((out / "triage.json").read_text())
+            tracks = json.loads((out / "tracks.json").read_text())
+            summary = (out / "summary.txt").read_text()
+        self.assertEqual(self.code, 0)
+        self.assertEqual(len(jev.bodies), len(SPFES_EXPECTED) + 1)
+        self.assertEqual(jev.pen_calls, 1)
+        self.assertEqual(
+            {r["track_id"]: Verdict(r["decision"], r["reason"]) for r in triage["tracks"]}, SPFES_EXPECTED
+        )
+        self.assertEqual(triage["pen"]["call"], "walk_now")
+        self.assertEqual(triage["question_set"], "spfes-ear-v1")
+        self.assertNotIn("book_rules", triage)
+        self.assertTrue(tracks["from_run"].endswith("spfes-source"))
+        self.assertIn("jev:  look 4  skip 1  cannot 1  failed 0", summary)
+        self.assertIn("pen: walk_now", summary)
+        pen_body = jev.bodies[-1]
+        self.assertEqual(pen_body["state"]["counts"], {"look": 4, "skip": 1, "cannot": 1, "check_failed": 0})
+
+    def test_book_baseline_sits_beside_jev(self):
+        always_look = FakeJev(lambda pack: ("look", 0.99, "flutter"))
+        with tempfile.TemporaryDirectory() as tmp:
+            out = self.run_from_fixture(tmp, "--triage", "book", jev=always_look)
+            triage = json.loads((out / "triage.json").read_text())
+            summary = (out / "summary.txt").read_text()
+            page = write_glance_list(out).read_text()
+        self.assertEqual(self.code, 0)
+        self.assertEqual(triage["book_rules"]["flutter_deg"], 15.0)
+        for row in triage["tracks"]:
+            self.assertEqual(row["decision"], "look")
+            self.assertEqual(Verdict(row["book"]["decision"], row["book"]["reason"]), SPFES_EXPECTED[row["track_id"]])
+        self.assertIn("book: look 4  skip 1  cannot 1", summary)
+        self.assertIn("book vs jev: same call on 4 of 6", summary)
+        self.assertIn("Every sheep in this clip needs a look (6 of 6).", page)
+
+    def test_book_without_a_key_still_writes_the_baseline(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = self.run_from_fixture(tmp, "--triage", "book", key=None)
+            triage = json.loads((out / "triage.json").read_text())
+            page = write_glance_list(out).read_text()
+        self.assertEqual(self.code, 0)
+        self.assertEqual(triage["mode"], "pose-only")
+        self.assertIsNone(triage["pen"])
+        self.assertTrue(all(row["decision"] is None and "book" in row for row in triage["tracks"]))
+        self.assertIn("Not sorted yet", page)
+
+    def test_failures_are_recorded_and_the_pen_still_runs(self):
+        jev = FakeJev(fail_track_ids=(8,))
+        with tempfile.TemporaryDirectory() as tmp:
+            out = self.run_from_fixture(tmp, jev=jev)
+            triage = json.loads((out / "triage.json").read_text())
+            page = write_glance_list(out).read_text()
+        self.assertEqual(self.code, 3)
+        row = next(r for r in triage["tracks"] if r["track_id"] == 8)
+        self.assertIsNone(row["decision"])
+        self.assertIn("HTTP 500", row["error"])
+        self.assertEqual(jev.bodies[-1]["state"]["counts"]["check_failed"], 1)
+        self.assertEqual(page.count("The look/skip check failed for this one."), 1)
+
+    def test_pen_failure_and_no_pen(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = self.run_from_fixture(tmp, jev=FakeJev(fail_pen=True))
+            triage = json.loads((out / "triage.json").read_text())
+            page = write_glance_list(out).read_text()
+        self.assertEqual(self.code, 3)
+        self.assertIn("529", triage["pen"]["error"])
+        self.assertNotIn('class="pen', page)
+
+        jev = FakeJev()
+        with tempfile.TemporaryDirectory() as tmp:
+            out = self.run_from_fixture(tmp, "--no-pen", jev=jev)
+            self.assertIsNone(json.loads((out / "triage.json").read_text())["pen"])
+        self.assertEqual((self.code, jev.pen_calls), (0, 0))
+
+    def test_from_run_needs_frames(self):
+        with tempfile.TemporaryDirectory() as tmp, self.assertRaises(SystemExit) as caught:
+            run(["--from-run", tmp, "--pose-only", "--out", str(Path(tmp) / "out")])
+        self.assertIn("--demo", str(caught.exception))
+
+
+@unittest.skipUnless(HAS_CV2, "OpenCV not installed; run in the sheep-yolo env")
+class SpfesOverlayTests(unittest.TestCase):
+    def test_demo_from_the_fixture(self):
+        import cv2
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "out"
+            with mock.patch.dict(os.environ, {"TYPESAFE_API_KEY": "sk-fixture"}, clear=True):
+                code = run(
+                    ["--from-run", str(spfes_run_dir(Path(tmp))), "--demo", "--out", str(out)],
+                    opener=FakeJev(pen="walk_now"),
+                )
+            cap = cv2.VideoCapture(str(out / "annotated.mp4"))
+            n = 0
+            while cap.read()[0]:
+                n += 1
+            cap.release()
+            page = (out / "glance-list.html").read_text()
+        self.assertEqual(code, 0)
+        self.assertEqual(n, 90)
+        self.assertIn("Walk the pen now.", page)
+        self.assertIn('<span class="badge unchecked">Not checked</span>', page)
+
+    def test_cannot_is_burned_grey(self):
+        import cv2
+        import numpy as np
+
+        from render_overlay import BADGE_BG, draw_track
+
+        img = np.zeros((600, 640, 3), np.uint8)
+        draw_track(cv2, img, _head_at(300, 300, 90, 90), 15, UNCHECKED, scale=1.0, kpt_conf=0.4, top=0)
+        grey = int(np.all(img == np.array(BADGE_BG[UNCHECKED], np.uint8), axis=-1).sum())
+        self.assertGreater(grey, 1000)
+        for badge in (LOOK, SKIP):
+            self.assertEqual(int(np.all(img == np.array(BADGE_BG[badge], np.uint8), axis=-1).sum()), 0)
 
 
 if __name__ == "__main__":
