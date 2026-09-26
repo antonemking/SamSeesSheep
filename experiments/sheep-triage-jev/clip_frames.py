@@ -7,12 +7,17 @@ depends on its build and backend, so one .MOV can decode upright on one machine
 and upside down on another. Tracking, the replay and the thumbnails all read
 frames here instead: PyAV decodes the stored pixels (it never rotates them) and
 the rotation the container asks for is applied once, before anything sees them.
+The boxes and keypoints in ``frames.json`` are therefore in the same upright
+frame as the replay's pixels.
 
-``tracks.json`` records that rotation as ``frame_rotation``. Runs made before
-it was recorded were tracked through OpenCV's default decoder, so their
-coordinates are turned to match by asking OpenCV how it turns the clip here.
+``tracks.json`` records that rotation as ``frame_rotation``. A skeleton is only
+drawn on a clip when the run's ``frame_rotation`` matches how this module turns
+it now. Runs tracked before it was recorded went through OpenCV, which may have
+handed the pose model the sheep upside down or sideways; their poses cannot be
+trusted against the upright video, so drawing them is refused with a re-track
+command instead.
 
-PyAV, NumPy and OpenCV are imported only when a clip is read.
+PyAV and NumPy are imported only when a clip is read.
 """
 
 from __future__ import annotations
@@ -23,7 +28,6 @@ from pathlib import Path
 from typing import Any
 
 TURNS = (0, 90, 180, 270)
-PROBE_FRAMES = 10  # frames compared when working out what OpenCV did to an old run
 
 
 @dataclass(frozen=True)
@@ -80,96 +84,37 @@ def upright_frames(clip: Path, *, max_frames: int | None = None) -> Generator[An
             yield turn(frame.to_ndarray(format="bgr24"), _clockwise(frame))
 
 
-def opencv_rotation(clip: Path) -> int:
-    """Clockwise degrees OpenCV's default ``VideoCapture`` turns ``clip`` on this machine.
-
-    Found by matching its frames against the stored ones, because backends
-    differ in whether they apply the container's rotation and in whether they
-    report doing so.
-    """
-    import cv2
-    import numpy as np
-
-    cap = cv2.VideoCapture(str(clip))
-    theirs: list[Any] = []
-    try:
-        while len(theirs) < PROBE_FRAMES:
-            ok, img = cap.read()
-            if not ok:
-                break
-            theirs.append(img.astype(np.int16))
-    finally:
-        cap.release()
-    av = _av()
-    stored: list[Any] = []
-    with av.open(str(clip)) as container:
-        for frame in container.decode(video=0):
-            if len(stored) == len(theirs):
-                break
-            stored.append(frame.to_ndarray(format="bgr24").astype(np.int16))
-    if not theirs or not stored:
-        return 0
-
-    def mismatch(degrees_cw: int) -> float:
-        total = 0.0
-        for a, b in zip(theirs, stored):
-            b = turn(b, degrees_cw)
-            if a.shape != b.shape:
-                return float("inf")
-            total += float(np.abs(a - b).mean())
-        return total
-
-    return min(TURNS, key=mismatch)
-
-
-def _turn_point(x: float, y: float, degrees_cw: int, width: float, height: float) -> tuple[float, float]:
-    if degrees_cw == 90:
-        return height - y, x
-    if degrees_cw == 180:
-        return width - x, height - y
-    if degrees_cw == 270:
-        return y, width - x
-    return x, y
-
-
-def turn_frames(
-    frames: list[dict[int, dict]], degrees_cw: int, width: float, height: float
-) -> list[dict[int, dict]]:
-    """Turn per-frame boxes and keypoints clockwise inside a ``width`` × ``height`` picture."""
-    degrees_cw %= 360
-    if degrees_cw == 0:
-        return frames
-    out: list[dict[int, dict]] = []
-    for frame in frames:
-        turned: dict[int, dict] = {}
-        for tid, obs in frame.items():
-            x1, y1, x2, y2 = obs["box"]
-            ax, ay = _turn_point(x1, y1, degrees_cw, width, height)
-            bx, by = _turn_point(x2, y2, degrees_cw, width, height)
-            kpts = []
-            for pt in obs["kpts"]:
-                px, py = _turn_point(pt[0], pt[1], degrees_cw, width, height)
-                kpts.append([px, py, *pt[2:]])
-            turned[tid] = {**obs, "box": [min(ax, bx), min(ay, by), max(ax, bx), max(ay, by)], "kpts": kpts}
-        out.append(turned)
-    return out
-
-
-def to_upright(
-    frames: list[dict[int, dict]], clip: Path, recorded: int | None
-) -> tuple[list[dict[int, dict]], int]:
-    """A run's coordinates turned to match ``upright_frames(clip)``, and the rotation they are now in.
-
-    ``recorded`` is the run's ``frame_rotation``; ``None`` means an older run,
-    tracked through OpenCV's default decoder.
-    """
-    shape = orientation(clip)
-    if recorded is None:
-        recorded = opencv_rotation(clip)
-    width, height = (shape.width, shape.height) if recorded in (0, 180) else (shape.height, shape.width)
-    return turn_frames(frames, shape.rotation - recorded, width, height), shape.rotation
-
-
 def recorded_rotation(tracks_doc: Mapping[str, Any]) -> int | None:
     value = tracks_doc.get("frame_rotation")
     return int(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+
+def frame_mismatch(clip: Path, recorded: int | None) -> str | None:
+    """Why a run's boxes and keypoints can't be drawn on ``upright_frames(clip)``, or None when they can."""
+    rotation = orientation(clip).rotation
+    if recorded == rotation or (recorded is None and rotation == 0):
+        return None
+    if recorded is None:
+        return (
+            f"{clip.name} is stored turned {rotation}° and this run was tracked before that was recorded, "
+            "so its skeletons may be upside down or sideways against the video."
+        )
+    return f"this run was tracked on frames turned {recorded}°, but {clip.name} now reads as turned {rotation}°."
+
+
+def retrack_hint(clip: Path) -> str:
+    return (
+        "Re-track the clip so the skeletons come from the same upright frames as the video:\n"
+        "  uv run --project sheep-yolo python experiments/sheep-triage-jev/run_pipeline.py \\\n"
+        f"    --clip {clip} --demo --out <new run folder>"
+    )
+
+
+def refusal(problem: str, clip: Path) -> str:
+    return f"Not drawing skeletons: {problem}\n{retrack_hint(clip)}"
+
+
+def require_same_frame(clip: Path, recorded: int | None) -> None:
+    problem = frame_mismatch(clip, recorded)
+    if problem:
+        raise SystemExit(refusal(problem, clip))

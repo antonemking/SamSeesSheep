@@ -38,7 +38,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from clip_frames import orientation, recorded_rotation, to_upright
+from clip_frames import frame_mismatch, orientation, recorded_rotation, refusal, retrack_hint
 from glance_list import iso_day, write_glance_list
 from jev_client import (
     DECISION_RULE,
@@ -230,11 +230,15 @@ def _load_from_run(args: argparse.Namespace) -> tuple[list[dict[int, dict]], flo
         )
     source = Path(clip) if clip and clip != "synthetic" and Path(clip).is_file() else None
     day = old.get("footage_date") or _file_day(source or tracks_path)
-    frames = load_frames(frames_path)
     rotation = 0 if clip == "synthetic" else recorded_rotation(old)
-    needs = ("av", "numpy") if rotation is not None else ("av", "numpy", "cv2")
-    if source is not None and all(importlib.util.find_spec(name) is not None for name in needs):
-        frames, rotation = to_upright(frames, source, rotation)
+    if source is not None and (args.demo or importlib.util.find_spec("av") is not None):
+        problem = frame_mismatch(source, rotation)
+        if problem and args.demo:
+            raise SystemExit(refusal(problem, source))
+        if problem:
+            print(f"warning: {problem}\nJev is re-asked on those poses anyway. {retrack_hint(source)}")
+        elif rotation is None:
+            rotation = 0
     meta = {
         "clip": clip,
         "weights": old.get("weights"),
@@ -245,7 +249,7 @@ def _load_from_run(args: argparse.Namespace) -> tuple[list[dict[int, dict]], flo
     }
     if rotation is not None:
         meta["frame_rotation"] = rotation
-    return frames, fps, meta
+    return load_frames(frames_path), fps, meta
 
 
 def _file_day(path: Path) -> str:
@@ -449,6 +453,7 @@ def run(argv: list[str] | None = None, *, opener: Opener | None = None) -> int:
             triage,
             clip=None if clip == "synthetic" else Path(clip),
             fps=fps,
+            frame_rotation=meta.get("frame_rotation"),
             kpt_conf=args.kpt_conf,
             max_width=args.demo_width,
         )

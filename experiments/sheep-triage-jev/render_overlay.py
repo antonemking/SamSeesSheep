@@ -12,8 +12,9 @@ the source video (from the drawn replay when there is no video).
         experiments/sheep-triage-jev/runs/<name>/
 
 OpenCV and NumPy are imported only when rendering. Clip frames come upright
-from ``clip_frames`` (the container's rotation applied), and older runs'
-coordinates are turned to match. The file is H.264 through PyAV
+from ``clip_frames`` (the container's rotation applied), the same frames the
+poses were tracked on; a run tracked any other way is refused rather than
+drawn with inverted skeletons. The file is H.264 through PyAV
 (``imageio[pyav]`` in the sheep-yolo env) so it seeks in a browser. If PyAV
 cannot encode H.264 it falls back to OpenCV mp4v, which QuickTime and VLC play
 but browsers may not.
@@ -29,7 +30,7 @@ from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
-from clip_frames import recorded_rotation, to_upright, upright_frames
+from clip_frames import recorded_rotation, require_same_frame, upright_frames
 from glance_list import LOOK, SKIP, THUMBS_DIR, UNCHECKED, badge_for, clock, decisions_ran, thumb_path
 from pose_features import ear_angles
 
@@ -294,12 +295,15 @@ def render(
     *,
     clip: Path | None,
     fps: float,
+    frame_rotation: int | None = None,
     kpt_conf: float = 0.4,
     max_width: int = 1280,
 ) -> Path:
     """Write ``annotated.mp4`` into ``run_dir``. ``clip=None`` draws on a plain field.
 
-    ``frames`` must be in the coordinates of ``upright_frames(clip)``; see ``clip_frames.to_upright``.
+    ``frame_rotation`` is the run's recorded turn. Skeletons are drawn on a clip
+    only when it matches how ``upright_frames`` turns that clip, so boxes,
+    sticks and pixels share one upright frame; otherwise this refuses.
     """
     import cv2
     import numpy as np
@@ -309,6 +313,7 @@ def render(
     source = None
     first = None
     if clip is not None:
+        require_same_frame(clip, frame_rotation)
         source = upright_frames(clip)
         first = next(source, None)
         if first is None:
@@ -383,15 +388,13 @@ def main(argv: list[str] | None = None) -> int:
         clip = Path(tracks_doc["clip"])
     if clip is not None and not clip.is_file():
         raise SystemExit(f"clip not found: {clip}. Pass --clip.")
-    frames = load_frames(args.run_dir / FRAMES_NAME)
-    if clip is not None:
-        frames, _ = to_upright(frames, clip, recorded_rotation(tracks_doc))
     render(
         args.run_dir,
-        frames,
+        load_frames(args.run_dir / FRAMES_NAME),
         triage,
         clip=clip,
         fps=tracks_doc["fps"],
+        frame_rotation=recorded_rotation(tracks_doc),
         kpt_conf=tracks_doc.get("kpt_conf", 0.4),
         max_width=args.max_width,
     )

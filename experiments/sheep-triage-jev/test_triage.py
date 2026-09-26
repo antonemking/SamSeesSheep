@@ -76,7 +76,7 @@ from pose_features import (
     synthetic_frames,
 )
 from pose_runner import frame_from_result
-from clip_frames import TURNS, Orientation, orientation, recorded_rotation, turn, turn_frames, upright_frames
+from clip_frames import TURNS, Orientation, orientation, recorded_rotation, turn, upright_frames
 from pose_runner import track_clip
 from render_overlay import badges_from_triage, crop_box, header_parts, load_frames, save_frames, thumb_frames
 from run_pipeline import run
@@ -1652,30 +1652,7 @@ class SpfesOverlayTests(unittest.TestCase):
             self.assertEqual(int(np.all(img == np.array(BADGE_BG[badge], np.uint8), axis=-1).sum()), 0)
 
 
-class TurnCoordinatesTests(unittest.TestCase):
-    """A 96 × 64 picture: a box and a keypoint near its top-left corner, turned clockwise."""
-
-    FRAME = [{1: {"box": [10.0, 5.0, 30.0, 20.0], "kpts": [[12.0, 6.0, 0.9]]}}]
-
-    def test_each_quarter_turn(self):
-        cases = {
-            90: ([44.0, 10.0, 59.0, 30.0], [58.0, 12.0, 0.9]),
-            180: ([66.0, 44.0, 86.0, 59.0], [84.0, 58.0, 0.9]),
-            270: ([5.0, 66.0, 20.0, 86.0], [6.0, 84.0, 0.9]),
-        }
-        for degrees, (box, kpt) in cases.items():
-            with self.subTest(degrees):
-                turned = turn_frames(self.FRAME, degrees, 96, 64)[0][1]
-                self.assertEqual(turned["box"], box)
-                self.assertEqual(turned["kpts"], [kpt])
-
-    def test_no_turn_is_the_same_frames_and_turns_undo(self):
-        self.assertIs(turn_frames(self.FRAME, 0, 96, 64), self.FRAME)
-        self.assertIs(turn_frames(self.FRAME, 360, 96, 64), self.FRAME)
-        there = turn_frames(self.FRAME, 90, 96, 64)
-        self.assertEqual(turn_frames(there, 270, 64, 96), self.FRAME)
-        self.assertEqual(turn_frames(self.FRAME, -90, 96, 64), turn_frames(self.FRAME, 270, 96, 64))
-
+class RecordedRotationTests(unittest.TestCase):
     def test_recorded_rotation(self):
         self.assertEqual(recorded_rotation({"frame_rotation": 180}), 180)
         for doc in ({}, {"frame_rotation": None}, {"frame_rotation": "180"}, {"frame_rotation": True}):
@@ -1686,8 +1663,18 @@ class TurnCoordinatesTests(unittest.TestCase):
 # The upright test picture: a grey sheep with a white strip of ears along its top.
 PIC_W, PIC_H = 96, 64
 SHEEP = (30, 16, 70, 48)
-# Where that sheep sits in the pixels a clip stores when it must be turned this far to show upright.
-STORED_SHEEP = {0: SHEEP, 90: (16, 26, 48, 66), 180: (26, 16, 66, 48), 270: (16, 30, 48, 70)}
+
+# The upright face for the skeleton check, BGR on a light grey head: ear tips
+# (blue) above ear bases (green) above the nose (red), image-left first.
+FACE_W, FACE_H = 320, 240
+FACE = {
+    "nose": (160, 170),
+    "L_ear_base": (130, 80),
+    "R_ear_base": (190, 80),
+    "L_ear_tip": (90, 50),
+    "R_ear_tip": (230, 50),
+}
+BLUE, GREEN, RED = (255, 0, 0), (0, 255, 0), (0, 0, 255)
 
 
 def _sheep_picture() -> Any:
@@ -1700,6 +1687,16 @@ def _sheep_picture() -> Any:
     return img
 
 
+def _face_picture() -> Any:
+    import numpy as np
+
+    img = np.full((FACE_H, FACE_W, 3), 40, np.uint8)
+    img[70:200, 110:210] = 170
+    for name, (x, y) in FACE.items():
+        img[y - 6 : y + 6, x - 6 : x + 6] = RED if name == "nose" else GREEN if "base" in name else BLUE
+    return img
+
+
 def _ears_up(img: Any) -> bool:
     """True when the brightest rows of the sheep are at its top, as in the upright picture."""
     import numpy as np
@@ -1709,6 +1706,27 @@ def _ears_up(img: Any) -> bool:
     sheep = grey[ys.min() : ys.max() + 1, xs.min() : xs.max() + 1].astype(float)
     quarter = max(1, sheep.shape[0] // 4)
     return float(sheep[:quarter].mean()) > float(sheep[-quarter:].mean()) + 40
+
+
+def _color_mask(img: Any, bgr: tuple[int, int, int]) -> Any:
+    import numpy as np
+
+    pixels = img.astype(int)
+    lit = np.array(bgr) > 0
+    return np.all(pixels[..., lit] > 150, axis=-1) & np.all(pixels[..., ~lit] < 100, axis=-1)
+
+
+def _centroids(mask: Any, n: int) -> list[tuple[float, float]]:
+    """Pixel-centre centroids of ``n`` blobs, image-left first (n is 1 or 2)."""
+    import numpy as np
+
+    ys, xs = np.nonzero(mask)
+    if not len(xs):
+        return []
+    groups = [xs >= 0] if n == 1 else [xs < xs.mean(), xs >= xs.mean()]
+    if any(not g.any() for g in groups):
+        return []
+    return [(float(xs[g].mean()) + 0.5, float(ys[g].mean()) + 0.5) for g in groups]
 
 
 def _mp4_boxes(data: bytes, start: int, end: int) -> Any:
@@ -1742,13 +1760,13 @@ def _set_track_rotation(path: Path, degrees_cw: int) -> None:
     path.write_bytes(bytes(data))
 
 
-def _turned_clip(path: Path, degrees_cw: int, n_frames: int = 6) -> Path:
+def _turned_clip(path: Path, degrees_cw: int, picture: Callable[[], Any] = _sheep_picture, n_frames: int = 6) -> Path:
     """A synthetic clip stored turned, whose container says to turn it ``degrees_cw`` to show it upright."""
     from fractions import Fraction
 
     import av
 
-    stored = turn(_sheep_picture(), -degrees_cw % 360)
+    stored = turn(picture(), -degrees_cw % 360)
     with av.open(str(path), "w") as out:
         stream = out.add_stream("libx264", rate=Fraction(10))
         stream.width, stream.height, stream.pix_fmt = stored.shape[1], stored.shape[0], "yuv420p"
@@ -1777,7 +1795,12 @@ class _FakeTensor:
 
 
 class FakeYOLO:
-    """Stands in for ultralytics.YOLO: 'detects' the bright block in whatever frame it is handed."""
+    """Stands in for ultralytics.YOLO and only looks at the pixels it is handed.
+
+    The box is the bright region. Keypoints are the coloured blobs of the face
+    picture (red nose, green ear bases, blue ear tips, image-left first); with
+    no blobs they come back unconfident, so the replay draws only the box.
+    """
 
     instances: list[FakeYOLO] = []
 
@@ -1789,9 +1812,15 @@ class FakeYOLO:
         import numpy as np
 
         self.seen.append((source.copy(), kwargs))
-        ys, xs = np.nonzero(source.max(axis=2) > 60)
+        ys, xs = np.nonzero(source.max(axis=2) > 100)
         box = [float(xs.min()), float(ys.min()), float(xs.max() + 1), float(ys.max() + 1)]
-        kpts = np.zeros((1, 5, 3))  # nothing confident, so the replay draws only the box
+        nose = _centroids(_color_mask(source, RED), 1)
+        bases = _centroids(_color_mask(source, GREEN), 2)
+        tips = _centroids(_color_mask(source, BLUE), 2)
+        if nose and bases and tips:
+            kpts = np.array([[[x, y, 0.9] for x, y in (*nose, *bases, *tips)]])
+        else:
+            kpts = np.zeros((1, 5, 3))
         boxes = types.SimpleNamespace(id=_FakeTensor(np.array([1])), xyxy=_FakeTensor(np.array([box])))
         return [types.SimpleNamespace(boxes=boxes, keypoints=types.SimpleNamespace(data=_FakeTensor(kpts)))]
 
@@ -1810,9 +1839,11 @@ class ClipOrientationTests(unittest.TestCase):
             self.addCleanup(sys.modules.pop, "ultralytics", None)
         else:
             self.addCleanup(sys.modules.__setitem__, "ultralytics", real)
+        self.weights = self.tmp / "fake.pt"
+        self.weights.write_bytes(b"")
 
-    def clip(self, degrees_cw: int) -> Path:
-        return _turned_clip(self.tmp / f"turned-{degrees_cw}.mp4", degrees_cw)
+    def clip(self, degrees_cw: int, picture: Callable[[], Any] = _sheep_picture) -> Path:
+        return _turned_clip(self.tmp / f"{picture.__name__}-{degrees_cw}.mp4", degrees_cw, picture)
 
     def test_the_fixture_is_stored_turned(self):
         import av
@@ -1844,23 +1875,11 @@ class ClipOrientationTests(unittest.TestCase):
         self.assertTrue(all(np.array_equal(a, b) for a, b in zip(upright_frames(self.clip(0)), stored)))
         self.assertEqual(len(list(upright_frames(self.clip(180), max_frames=2))), 2)
 
-    def test_image_and_coordinate_turns_agree(self):
-        import numpy as np
-
-        img = np.zeros((PIC_H, PIC_W), np.uint8)
-        img[5, 12] = 255  # the pixel whose centre is (12.5, 5.5)
+    def test_tracking_is_handed_upright_frames(self):
         for degrees in TURNS:
             with self.subTest(degrees):
-                turned = turn(img, degrees)
-                y, x = (int(v) for v in np.argwhere(turned == 255)[0])
-                point = [{1: {"box": [0, 0, 1, 1], "kpts": [[12.5, 5.5, 1.0]]}}]
-                self.assertEqual(turn_frames(point, degrees, PIC_W, PIC_H)[0][1]["kpts"][0][:2], [x + 0.5, y + 0.5])
-
-    def test_tracking_is_handed_upright_frames(self):
-        for degrees in (0, 90, 180, 270):
-            with self.subTest(degrees):
                 frames = track_clip(
-                    Path("fake.pt"), self.clip(degrees), conf=0.25, max_frames=4, tracker="bytetrack.yaml", imgsz=None
+                    self.weights, self.clip(degrees), conf=0.25, max_frames=4, tracker="bytetrack.yaml", imgsz=None
                 )
                 model = FakeYOLO.instances[-1]
                 self.assertEqual(len(model.seen), 4)
@@ -1874,11 +1893,12 @@ class ClipOrientationTests(unittest.TestCase):
 
     def run_demo(self, *argv: str) -> Path:
         out = self.tmp / f"out-{len(list(self.tmp.iterdir()))}"
-        with mock.patch.dict(os.environ, {}, clear=True):
+        with mock.patch.dict(os.environ, {}, clear=True), mock.patch("sys.stdout", io.StringIO()):
             self.assertEqual(run([*argv, "--pose-only", "--demo", "--out", str(out)]), 0)
         return out
 
     def replay_first_frame(self, out: Path) -> Any:
+        """The replay as the brief's player gets it: no rotation flag left for the browser to apply."""
         import av
 
         with av.open(str(out / "annotated.mp4")) as container:
@@ -1899,74 +1919,124 @@ class ClipOrientationTests(unittest.TestCase):
         self.assertGreater(ears, body + 40, "replay is not upright")
 
     def test_a_demo_run_from_a_turned_clip_is_upright_end_to_end(self):
-        weights = self.tmp / "fake.pt"
-        weights.write_bytes(b"")
-        for degrees in (0, 90, 180, 270):
+        for degrees in TURNS:
             with self.subTest(degrees):
-                out = self.run_demo("--clip", str(self.clip(degrees)), "--weights", str(weights))
+                out = self.run_demo("--clip", str(self.clip(degrees)), "--weights", str(self.weights))
                 self.assertEqual(json.loads((out / "tracks.json").read_text())["frame_rotation"], degrees)
                 self.assert_upright_outputs(out)
 
-    def old_run(self, degrees: int) -> tuple[Path, Path]:
-        """A run folder from before frame_rotation: frames.json in the clip's stored coordinates."""
-        import av
-        import numpy as np
+    def test_skeleton_and_video_share_one_upright_frame(self):
+        import render_overlay
 
+        drawn: list[Any] = []
+        write = render_overlay._Writer.write
+
+        def keep(writer: Any, img: Any) -> None:
+            drawn.append(img.copy())
+            write(writer, img)
+
+        for degrees in (180, 90, 270, 0):
+            with self.subTest(degrees), mock.patch.object(render_overlay._Writer, "write", keep):
+                drawn.clear()
+                out = self.run_demo("--clip", str(self.clip(degrees, _face_picture)), "--weights", str(self.weights))
+                kpts = load_frames(out / "frames.json")[0][1]["kpts"]
+                nose, l_base, r_base, l_tip, r_tip = ((x, y) for x, y, _ in kpts)
+
+                # frames.json: an upright face. Ear tips above ear bases above the nose, image-left on the left.
+                for tip, base in ((l_tip, l_base), (r_tip, r_base)):
+                    self.assertLess(tip[1], base[1])
+                    self.assertLess(base[1], nose[1])
+                self.assertLess(l_tip[0], l_base[0])
+                self.assertLess(l_base[0], nose[0])
+                self.assertLess(nose[0], r_base[0])
+                self.assertLess(r_base[0], r_tip[0])
+                for (x, y), (fx, fy) in zip((nose, l_base, r_base, l_tip, r_tip), FACE.values()):
+                    self.assertAlmostEqual(x, fx, delta=2)
+                    self.assertAlmostEqual(y, fy, delta=2)
+
+                # The overlay drew those sticks on an upright picture of the same face, not a turned one.
+                frame = drawn[0]
+                self.assertEqual(frame.shape, (FACE_H, FACE_W, 3))
+                for x, y in (nose, l_base, r_base, l_tip, r_tip):
+                    self.assertEqual(tuple(frame[round(y), round(x)]), render_overlay.KCOL)
+                red = _centroids(_color_mask(frame, RED), 1)
+                blue = _centroids(_color_mask(frame, BLUE), 2)
+                self.assertTrue(red and blue, "the face's colours are missing under the skeleton")
+                for (x, y), (kx, ky) in zip((*red, *blue), (nose, l_tip, r_tip)):
+                    self.assertAlmostEqual(x, kx, delta=4)
+                    self.assertAlmostEqual(y, ky, delta=4)
+
+                # And the file the brief plays is upright with nothing left for the browser to turn.
+                self.assertEqual(self.replay_first_frame(out).shape, (FACE_H, FACE_W, 3))
+
+    def old_run(self, degrees: int, *, recorded: int | None = None) -> tuple[Path, Path]:
+        """A run folder whose clip is turned ``degrees``; ``recorded=None`` is a run from before frame_rotation."""
         clip = self.clip(degrees)
-        box = STORED_SHEEP[degrees]
-        with av.open(str(clip)) as container:
-            stored = next(container.decode(video=0)).to_ndarray(format="bgr24")
-        ys, xs = np.nonzero(stored.max(axis=2) > 60)
-        for got, want in zip((xs.min(), ys.min(), xs.max() + 1, ys.max() + 1), box):
-            self.assertAlmostEqual(float(got), want, delta=2)
-        run_dir = self.tmp / f"old-{degrees}"
+        run_dir = self.tmp / f"old-{degrees}-{recorded}"
         run_dir.mkdir()
-        save_frames(run_dir / "frames.json", [{1: {"box": list(box), "kpts": [[0.0, 0.0, 0.0]] * 5}}] * 6)
-        old = {"clip": str(clip), "weights": None, "fps": 10.0, "tracks": []}
+        save_frames(run_dir / "frames.json", [{1: {"box": list(SHEEP), "kpts": [[0.0, 0.0, 0.0]] * 5}}] * 6)
+        old: dict[str, Any] = {"clip": str(clip), "weights": None, "fps": 10.0, "tracks": []}
+        if recorded is not None:
+            old["frame_rotation"] = recorded
         (run_dir / "tracks.json").write_text(json.dumps(old))
+        (run_dir / "triage.json").write_text(json.dumps({"mode": "pose-only", "tracks": [{"track_id": 1}]}))
         return run_dir, clip
 
-    def test_old_runs_tracked_on_stored_frames_are_turned_to_match(self):
-        # How the upside-down thumbnails happened: OpenCV on that machine left the clip as stored.
-        for degrees in (90, 180, 270):
-            with self.subTest(degrees), mock.patch("clip_frames.opencv_rotation", return_value=0):
-                run_dir, _ = self.old_run(degrees)
-                out = self.run_demo("--from-run", str(run_dir))
-                self.assertEqual(json.loads((out / "tracks.json").read_text())["frame_rotation"], degrees)
-                box = load_frames(out / "frames.json")[0][1]["box"]
-                self.assertEqual(box, [float(v) for v in SHEEP])
-                self.assert_upright_outputs(out)
+    def assert_refused(self, caught: Any, clip: Path, why: str) -> None:
+        message = str(caught.exception)
+        self.assertIn("Not drawing skeletons", message)
+        self.assertIn(why, message)
+        self.assertIn(f"--clip {clip} --demo", message)
 
-    def test_old_runs_opencv_already_turned_are_left_alone(self):
-        with mock.patch("clip_frames.opencv_rotation", return_value=180):
-            run_dir, clip = self.old_run(180)
-            upright = [{1: {"box": list(SHEEP), "kpts": [[0.0, 0.0, 0.0]] * 5}}] * 6
-            save_frames(run_dir / "frames.json", upright)
-            out = self.run_demo("--from-run", str(run_dir))
-        self.assertEqual(load_frames(out / "frames.json")[0][1]["box"], [float(v) for v in SHEEP])
-        self.assert_upright_outputs(out)
-
-    def test_opencv_probe_matches_what_opencv_does_here(self):
-        import cv2
-
-        from clip_frames import opencv_rotation
-
-        clip = self.clip(180)
-        cap = cv2.VideoCapture(str(clip))
-        ok, img = cap.read()
-        cap.release()
-        self.assertTrue(ok)
-        self.assertEqual(opencv_rotation(clip), 0 if not _ears_up(img) else 180)
-        self.assertEqual(opencv_rotation(self.clip(0)), 0)
-
-    def test_rebuilding_an_old_replay_turns_it_too(self):
+    def test_old_runs_of_a_turned_clip_are_refused_not_drawn(self):
         from render_overlay import main as rebuild
 
-        with mock.patch("clip_frames.opencv_rotation", return_value=0):
-            run_dir, _ = self.old_run(180)
-            (run_dir / "triage.json").write_text(json.dumps({"mode": "pose-only", "tracks": [{"track_id": 1}]}))
-            with mock.patch("sys.stdout", io.StringIO()):
-                self.assertEqual(rebuild([str(run_dir)]), 0)
+        for degrees in (90, 180, 270):
+            with self.subTest(degrees):
+                run_dir, clip = self.old_run(degrees)
+                out = self.tmp / f"refused-{degrees}"
+                jev = FakeJev()
+                env = {"TYPESAFE_API_KEY": "sk-fixture"}
+                with mock.patch.dict(os.environ, env, clear=True), self.assertRaises(SystemExit) as caught:
+                    run(["--from-run", str(run_dir), "--demo", "--out", str(out)], opener=jev)
+                self.assert_refused(caught, clip, f"stored turned {degrees}°")
+                self.assertEqual(jev.bodies, [])
+                self.assertFalse(out.exists())
+                with self.assertRaises(SystemExit) as caught:
+                    rebuild([str(run_dir)])
+                self.assert_refused(caught, clip, "tracked before that was recorded")
+                self.assertFalse((run_dir / "annotated.mp4").exists())
+
+    def test_a_run_whose_clip_now_reads_differently_is_refused(self):
+        from render_overlay import main as rebuild
+
+        run_dir, clip = self.old_run(180, recorded=90)
+        with self.assertRaises(SystemExit) as caught:
+            rebuild([str(run_dir)])
+        self.assert_refused(caught, clip, "tracked on frames turned 90°")
+
+    def test_old_runs_without_demo_warn_and_still_ask_jev(self):
+        run_dir, clip = self.old_run(180)
+        out = self.tmp / "reasked"
+        printed = io.StringIO()
+        with mock.patch.dict(os.environ, {}, clear=True), mock.patch("sys.stdout", printed):
+            self.assertEqual(run(["--from-run", str(run_dir), "--pose-only", "--out", str(out)]), 0)
+        self.assertIn("warning: " + clip.name + " is stored turned 180°", printed.getvalue())
+        self.assertIn(f"--clip {clip} --demo", printed.getvalue())
+        self.assertNotIn("frame_rotation", json.loads((out / "tracks.json").read_text()))
+
+    def test_old_runs_of_an_upright_clip_still_draw(self):
+        run_dir, _ = self.old_run(0)
+        out = self.run_demo("--from-run", str(run_dir))
+        self.assertEqual(json.loads((out / "tracks.json").read_text())["frame_rotation"], 0)
+        self.assert_upright_outputs(out)
+
+    def test_runs_with_a_matching_rotation_rebuild(self):
+        from render_overlay import main as rebuild
+
+        run_dir, _ = self.old_run(180, recorded=180)
+        with mock.patch("sys.stdout", io.StringIO()):
+            self.assertEqual(rebuild([str(run_dir)]), 0)
         self.assert_upright_outputs(run_dir)
 
 
