@@ -106,16 +106,19 @@ def _summary_text(meta: dict[str, Any], tracks: list[dict[str, Any]], triage: di
         f"tracks: {len(tracks)}  dropped_short: {meta.get('dropped_track_ids')}",
         "",
     ]
-    jev: list[tuple[str | None, str | None]] = []
+    typed: list[tuple[str | None, str | None]] = []
+    final: list[tuple[str | None, str | None]] = []
     book: list[tuple[str | None, str | None]] = []
     for track in tracks:
         pack = EarPack.from_json(track["ear_pack"])
         row = rows.get(track["track_id"], {})
-        jev.append((row.get("decision"), row.get("reason")))
+        typed.append((row.get("typed_class"), None))
+        final.append((row.get("decision"), row.get("reason")))
         line = (
             f"track {pack.track_id}  frames={pack.n_frames}  facing={pack.facing_fraction:.2f}  "
             f"L={_ear_text(pack.left_ear)}  R={_ear_text(pack.right_ear)}  |L−R|={_fmt(pack.asymmetry_deg)}  "
-            f"decision={_verdict_text(row.get('decision'), row.get('reason'))}  noul={_fmt(row.get('noul'))}"
+            f"typed={_fmt(row.get('typed_class'))}  noul={_fmt(row.get('noul'))}  "
+            f"decision={_verdict_text(row.get('decision'), row.get('reason'))}"
         )
         if "book" in row:
             book.append((row["book"]["decision"], row["book"]["reason"]))
@@ -123,13 +126,15 @@ def _summary_text(meta: dict[str, Any], tracks: list[dict[str, Any]], triage: di
         lines.append(line)
     lines.append("")
     if triage["mode"] == "jev":
-        lines.append(f"jev:  {_counts(jev)}  failed {triage['failures']}")
+        gated = sum(bool(row.get("gated")) for row in triage["tracks"])
+        lines.append(f"typed: {_counts(typed)}")
+        lines.append(f"final: {_counts(final)}  failed {triage['failures']}  (gate turned {gated} typed look into cannot)")
     if book:
-        lines.append(f"book: {_counts(book)}")
+        lines.append(f"book:  {_counts(book)}")
         if triage["mode"] == "jev":
-            compared = [(j, b) for j, b in zip(jev, book) if j[0] is not None]
-            agree = sum(j[0] == b[0] for j, b in compared)
-            lines.append(f"book vs jev: same call on {agree} of {len(compared)}")
+            compared = [(f, b) for f, b in zip(final, book) if f[0] is not None]
+            agree = sum(f[0] == b[0] for f, b in compared)
+            lines.append(f"book vs final: same call on {agree} of {len(compared)}")
     pen = triage.get("pen")
     if isinstance(pen, dict):
         lines.append(f"pen: {pen.get('call') or 'FAILED ' + str(pen.get('error'))}")
@@ -173,7 +178,10 @@ def _parse(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--imgsz", type=int, default=None)
     p.add_argument("--tracker", default="bytetrack.yaml")
     p.add_argument(
-        "--threshold", type=float, default=0.5, help="noul >= threshold → look, unless Jev picks cannot."
+        "--threshold",
+        type=float,
+        default=0.5,
+        help="Confidence gate on a typed look: noul below this turns it into cannot (Not checked).",
     )
     p.add_argument("--model", default="jev-latest")
     p.add_argument("--timeout", type=float, default=60.0)
@@ -283,7 +291,10 @@ def _jev_tracks(
             print(f"  track {summary['track_id']}: FAILED {exc}")
         else:
             record.update(result.to_json())
-            print(f"  track {summary['track_id']}: {result.decision} ({result.reason}, noul={result.noul:.3f})")
+            print(
+                f"  track {summary['track_id']}: typed {result.typed_class}, noul={result.noul:.3f} "
+                f"→ {result.decision} ({result.reason})"
+            )
         rows.append(record)
     return rows, failures
 

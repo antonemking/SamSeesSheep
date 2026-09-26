@@ -69,7 +69,7 @@ from pose_features import (
 from pose_runner import frame_from_result
 from render_overlay import badges_from_triage, header_parts, load_frames, save_frames
 from run_pipeline import run
-from spfes_ear import DECISIONS, REASONS, REASONS_FOR, Verdict, book_triage
+from spfes_ear import DECISIONS, JEV_REASONS, REASONS, REASONS_FOR, Verdict, book_triage
 
 HERE = Path(__file__).resolve().parent
 HAS_CV2 = all(importlib.util.find_spec(m) is not None for m in ("cv2", "numpy"))
@@ -220,8 +220,10 @@ class PoseParseTests(unittest.TestCase):
 class JevMappingTests(unittest.TestCase):
     def test_threshold(self):
         self.assertEqual(decide("look", 0.5, 0.5), "look")
-        self.assertEqual(decide("look", 0.49, 0.5), "skip")
+        self.assertEqual(decide("look", 0.49, 0.5), "cannot")
         self.assertEqual(decide("skip", 0.0, 0.5), "skip")
+        self.assertEqual(decide("skip", 0.99, 0.5), "skip")
+        self.assertEqual(decide("cannot", 0.99, 0.5), "cannot")
 
     def test_request_is_a_noul_and_omits_the_key(self):
         body = request_body({"track_id": 1})
@@ -578,7 +580,7 @@ def _track_answers(triage: str, noul: float, reason: str) -> dict[str, Any]:
     return {
         TRIAGE_ID: _choice_answer(triage, DECISIONS),
         LOOK_ID: {"type": "noul", "noul": noul},
-        REASON_ID: _choice_answer(reason, REASONS),
+        REASON_ID: _choice_answer(reason, JEV_REASONS),
     }
 
 
@@ -843,7 +845,8 @@ class JevQuestionTests(unittest.TestCase):
         questions = body["questions"]
         self.assertEqual({q: questions[q]["type"] for q in questions}, {"triage": "choice", "look": "noul", "reason": "choice"})
         self.assertEqual(tuple(questions[TRIAGE_ID]["criteria"]), DECISIONS)
-        self.assertEqual(tuple(questions[REASON_ID]["criteria"]), REASONS)
+        self.assertEqual(tuple(questions[REASON_ID]["criteria"]), JEV_REASONS)
+        self.assertNotIn("not_sure", questions[REASON_ID]["criteria"])
         self.assertEqual(set(questions[LOOK_ID]["criteria"]), {"true", "false"})
         for question in questions.values():
             self.assertEqual(question["instructions"]["protocol"], SPFES_EAR_PROTOCOL)
@@ -877,19 +880,28 @@ def _ask(answers: dict[str, Any], *, threshold: float = 0.5) -> Any:
 
 
 class JevResponseTests(unittest.TestCase):
-    def test_code_owns_the_look_skip_cut_and_jev_owns_cannot(self):
+    def test_typed_class_decides_and_noul_only_gates_a_look(self):
         cases = [
-            (("look", 0.8), "look"),
-            (("skip", 0.8), "look"),
-            (("look", 0.3), "skip"),
-            (("skip", 0.5), "look"),
-            (("cannot", 0.95), "cannot"),
+            # (typed class, noul, jev reason) -> (decision, reason, gated)
+            (("look", 0.8, "flutter"), ("look", "flutter", False)),
+            (("look", 0.5, "carriage"), ("look", "carriage", False)),
+            (("look", 0.49, "flutter"), ("cannot", "not_sure", True)),
+            (("look", 0.05, "asymmetry"), ("cannot", "not_sure", True)),
+            (("skip", 0.99, "steady"), ("skip", "steady", False)),
+            (("skip", 0.05, "steady"), ("skip", "steady", False)),
+            (("cannot", 0.99, "not_facing"), ("cannot", "not_facing", False)),
+            (("cannot", 0.02, "ears_unmeasurable"), ("cannot", "ears_unmeasurable", False)),
         ]
-        for (choice, noul), expected in cases:
-            with self.subTest(choice=choice, noul=noul):
-                reason = REASONS_FOR[expected][0]
-                self.assertEqual(_ask(_track_answers(choice, noul, reason)).decision, expected)
-        self.assertEqual(_ask(_track_answers("look", 0.8, "flutter"), threshold=0.9).decision, "skip")
+        for (typed, noul, reason), (decision, final_reason, gated) in cases:
+            with self.subTest(typed=typed, noul=noul):
+                out = _ask(_track_answers(typed, noul, reason))
+                self.assertEqual((out.typed_class, out.decision, out.reason, out.gated), (typed, decision, final_reason, gated))
+
+    def test_the_gate_moves_with_the_threshold(self):
+        answers = _track_answers("look", 0.8, "flutter")
+        self.assertEqual(_ask(answers, threshold=0.8).decision, "look")
+        self.assertEqual(_ask(answers, threshold=0.9).decision, "cannot")
+        self.assertEqual(_ask(_track_answers("skip", 0.95, "steady"), threshold=0.0).decision, "skip")
 
     def test_reason_is_bent_to_fit_the_decision(self):
         answer = ChoiceAnswer("steady", 0.4, {"steady": 0.5, "carriage": 0.3, "flutter": 0.1, "not_facing": 0.1})
@@ -903,7 +915,16 @@ class JevResponseTests(unittest.TestCase):
         self.assertEqual((out["decision"], out["reason"], out["noul"]), ("cannot", "not_facing", 0.7))
         self.assertEqual(out["choice"]["choice"], "cannot")
         self.assertAlmostEqual(sum(out["choice"]["probabilities"].values()), 1.0)
-        self.assertEqual(set(out["reason_choice"]["probabilities"]), set(REASONS))
+        self.assertEqual(set(out["reason_choice"]["probabilities"]), set(JEV_REASONS))
+
+    def test_record_puts_typed_class_noul_and_final_call_side_by_side(self):
+        out = _ask(_track_answers("look", 0.3, "carriage")).to_json()
+        self.assertEqual(list(out)[:6], ["typed_class", "noul", "threshold", "decision", "gated", "reason"])
+        self.assertEqual(
+            (out["typed_class"], out["noul"], out["decision"], out["gated"], out["reason"]),
+            ("look", 0.3, "cannot", True, "not_sure"),
+        )
+        self.assertEqual(out["reason_choice"]["choice"], "carriage")
 
     def test_malformed_answers_are_errors_not_defaults(self):
         good = _track_answers("look", 0.8, "flutter")
@@ -917,6 +938,7 @@ class JevResponseTests(unittest.TestCase):
             "wrong type": {**good, LOOK_ID: good[TRIAGE_ID]},
             "no confidence": {**good, REASON_ID: {k: v for k, v in good[REASON_ID].items() if k != "confidence"}},
             "no probabilities": {**good, REASON_ID: {"type": "choice", "choice": "flutter", "confidence": 1.0}},
+            "gate reason from jev": {**good, REASON_ID: {**good[REASON_ID], "choice": "not_sure"}},
         }
         for name, answers in broken.items():
             with self.subTest(name), self.assertRaises(JevError):
@@ -994,6 +1016,7 @@ class FarmerReasonTests(unittest.TestCase):
             ("steady", _pack()): "Both ears seen, even and steady.",
             ("not_facing", _pack(facing=0.1)): "Couldn't see its face well enough — it was mostly turned away.",
             ("ears_unmeasurable", _pack(left=(0.1, None, None))): "Couldn't see its ears well enough to check.",
+            ("not_sure", _pack(left=(1.0, 90.0, 31.0))): "Not sure enough to call — the ear signs were weak or mixed.",
         }
         for (reason, pack), expected in cases.items():
             with self.subTest(reason):
@@ -1082,7 +1105,8 @@ class SpfesPipelineTests(unittest.TestCase):
         self.assertEqual(triage["question_set"], "spfes-ear-v1")
         self.assertNotIn("book_rules", triage)
         self.assertTrue(tracks["from_run"].endswith("spfes-source"))
-        self.assertIn("jev:  look 4  skip 1  cannot 1  failed 0", summary)
+        self.assertIn("typed: look 4  skip 1  cannot 1", summary)
+        self.assertIn("final: look 4  skip 1  cannot 1  failed 0  (gate turned 0 typed look into cannot)", summary)
         self.assertIn("pen: walk_now", summary)
         pen_body = jev.bodies[-1]
         self.assertEqual(pen_body["state"]["counts"], {"look": 4, "skip": 1, "cannot": 1, "check_failed": 0})
@@ -1099,9 +1123,52 @@ class SpfesPipelineTests(unittest.TestCase):
         for row in triage["tracks"]:
             self.assertEqual(row["decision"], "look")
             self.assertEqual(Verdict(row["book"]["decision"], row["book"]["reason"]), SPFES_EXPECTED[row["track_id"]])
-        self.assertIn("book: look 4  skip 1  cannot 1", summary)
-        self.assertIn("book vs jev: same call on 4 of 6", summary)
+        self.assertIn("book:  look 4  skip 1  cannot 1", summary)
+        self.assertIn("book vs final: same call on 4 of 6", summary)
         self.assertIn("Every sheep in this clip needs a look (6 of 6).", page)
+
+    def test_gate_changes_only_unsure_looks_and_the_ab_uses_the_final_call(self):
+        # Book calls: 3 skip, 5/8/12/21 look, 15 cannot. Jev: sure looks on 5 and 8, unsure looks on 12
+        # and 21, a skip with a high noul on 3, and a typed cannot on 15.
+        answers = {
+            3: ("skip", 0.97, "steady"),
+            5: ("look", 0.9, "flutter"),
+            8: ("look", 0.8, "asymmetry"),
+            12: ("look", 0.3, "carriage"),
+            21: ("look", 0.2, "one_ear_missing"),
+            15: ("cannot", 0.9, "not_facing"),
+        }
+        jev = FakeJev(lambda pack: answers[pack.track_id])
+        with tempfile.TemporaryDirectory() as tmp:
+            out = self.run_from_fixture(tmp, "--triage", "book", jev=jev)
+            triage = json.loads((out / "triage.json").read_text())
+            tracks_doc = json.loads((out / "tracks.json").read_text())
+            summary = (out / "summary.txt").read_text()
+            page = write_glance_list(out).read_text()
+        self.assertEqual(self.code, 0)
+        badges = {c["track_id"]: c["badge"] for c in build_cards(tracks_doc, triage)}
+        self.assertEqual(badges, {3: SKIP, 5: LOOK, 8: LOOK, 12: UNCHECKED, 21: UNCHECKED, 15: UNCHECKED})
+        rows = {r["track_id"]: r for r in triage["tracks"]}
+        side_by_side = {tid: (r["typed_class"], r["noul"], r["decision"], r["gated"], r["reason"]) for tid, r in rows.items()}
+        self.assertEqual(
+            side_by_side,
+            {
+                3: ("skip", 0.97, "skip", False, "steady"),
+                5: ("look", 0.9, "look", False, "flutter"),
+                8: ("look", 0.8, "look", False, "asymmetry"),
+                12: ("look", 0.3, "cannot", True, "not_sure"),
+                21: ("look", 0.2, "cannot", True, "not_sure"),
+                15: ("cannot", 0.9, "cannot", False, "not_facing"),
+            },
+        )
+        self.assertIn("gate turned 2 typed look into cannot", summary)
+        self.assertIn("typed: look 4  skip 1  cannot 1", summary)
+        self.assertIn("final: look 2  skip 1  cannot 3", summary)
+        self.assertIn("book vs final: same call on 4 of 6", summary)
+        self.assertIn("typed=look  noul=0.3  decision=cannot/not_sure  book=look/carriage", summary)
+        self.assertEqual(jev.bodies[-1]["state"]["cannot_reasons"], {"not_facing": 1, "not_sure": 2})
+        self.assertIn("2 of 6 need a look, 1 can be skipped, 3 could not be checked.", page)
+        self.assertEqual(page.count("Not sure enough to call — the ear signs were weak or mixed."), 2)
 
     def test_book_without_a_key_still_writes_the_baseline(self):
         with tempfile.TemporaryDirectory() as tmp:

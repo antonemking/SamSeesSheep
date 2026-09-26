@@ -4,13 +4,17 @@ One POST per track to ``https://api.typesafe.ai/v1/systemone``. The state is
 the track's ``EarPack``; three questions are evaluated in parallel:
 
 - ``triage``: a Choice of look | skip | cannot under the SPFES ear protocol.
-- ``look``: a Noul for the same judgment, so code owns the look/skip cut.
+  This typed class is the decision.
+- ``look``: a Noul for the same judgment, used only as a confidence gate on
+  a typed look.
 - ``reason``: a Choice over a fixed reason vocabulary. Jev does not write
   text; code turns the reason into the farmer's one-line sentence.
 
-The decision is ``cannot`` when ``triage`` picks cannot, otherwise ``look``
-when ``noul >= threshold``, otherwise ``skip``. The reason is Jev's most
-probable reason among those that fit that decision.
+A typed look stays look when ``noul >= threshold`` and becomes cannot
+(reason ``not_sure``) when it does not. A typed skip is always skip and a
+typed cannot is always cannot; the noul never turns either into a look. The
+reason is otherwise Jev's most probable reason among those that fit the
+decision.
 
 After the tracks, one pen call turns the counts and reasons into
 walk_now | later | fine.
@@ -31,12 +35,23 @@ from contextlib import AbstractContextManager
 from dataclasses import asdict, dataclass
 from typing import Any, Literal, Protocol, cast, get_args
 
-from spfes_ear import DECISIONS, REASONS, REASONS_FOR, Decision, Reason, Verdict
+from spfes_ear import (
+    DECISIONS,
+    GATE_REASON,
+    JEV_REASONS,
+    REASONS_FOR,
+    Decision,
+    Reason,
+    Verdict,
+)
 
 ENDPOINT = "https://api.typesafe.ai/v1/systemone"
 DEFAULT_MODEL = "jev-latest"
 QUESTION_SET = "spfes-ear-v1"
-DECISION_RULE = "cannot if the triage choice is cannot; otherwise look if noul >= threshold, else skip"
+DECISION_RULE = (
+    "Jev's typed class decides. A typed look needs noul >= threshold, otherwise it becomes cannot "
+    "(not_sure). A typed skip stays skip and a typed cannot stays cannot, whatever the noul."
+)
 
 TRIAGE_ID = "triage"
 LOOK_ID = "look"
@@ -151,12 +166,23 @@ class TrackTriage:
     def verdict(self) -> Verdict:
         return Verdict(self.decision, self.reason)
 
+    @property
+    def typed_class(self) -> Decision:
+        return cast(Decision, self.triage.choice)
+
+    @property
+    def gated(self) -> bool:
+        """True when the noul gate changed Jev's typed class."""
+        return self.decision != self.typed_class
+
     def to_json(self) -> dict[str, Any]:
         return {
-            "decision": self.decision,
-            "reason": self.reason,
+            "typed_class": self.typed_class,
             "noul": self.noul,
             "threshold": self.threshold,
+            "decision": self.decision,
+            "gated": self.gated,
+            "reason": self.reason,
             "choice": self.triage.to_json(),
             "reason_choice": self.reason_answer.to_json(),
             "model": self.model,
@@ -181,10 +207,11 @@ class PenTriage:
         }
 
 
-def decide(choice: Decision, noul: float, threshold: float) -> Decision:
-    if choice == "cannot":
+def decide(typed_class: Decision, noul: float, threshold: float) -> Decision:
+    """Jev's typed class, with the noul gating a typed look only."""
+    if typed_class == "look" and noul < threshold:
         return "cannot"
-    return "look" if noul >= threshold else "skip"
+    return typed_class
 
 
 def fitting_reason(decision: Decision, answer: ChoiceAnswer) -> Reason:
@@ -333,11 +360,12 @@ def triage_track(
     payload = _post(request_body(state, model=model), api_key=api_key, endpoint=endpoint, timeout=timeout, opener=opener)
     triage = _choice(payload, TRIAGE_ID, DECISIONS)
     noul = _noul(payload, LOOK_ID)
-    reason = _choice(payload, REASON_ID, REASONS)
-    decision = decide(cast(Decision, triage.choice), noul, threshold)
+    reason = _choice(payload, REASON_ID, JEV_REASONS)
+    typed_class = cast(Decision, triage.choice)
+    decision = decide(typed_class, noul, threshold)
     return TrackTriage(
         decision=decision,
-        reason=fitting_reason(decision, reason),
+        reason=GATE_REASON if decision != typed_class else fitting_reason(decision, reason),
         noul=noul,
         threshold=threshold,
         triage=triage,

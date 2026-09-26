@@ -27,9 +27,12 @@ Reason = Literal[
     "steady",
     "not_facing",
     "ears_unmeasurable",
+    "not_sure",
 ]
 DECISIONS: tuple[Decision, ...] = get_args(Decision)
 REASONS: tuple[Reason, ...] = get_args(Reason)
+GATE_REASON: Reason = "not_sure"  # set by code when a typed look fails the noul gate; Jev never picks it
+JEV_REASONS: tuple[Reason, ...] = tuple(r for r in REASONS if r != GATE_REASON)
 REASONS_FOR: Mapping[Decision, tuple[Reason, ...]] = {
     "look": ("flutter", "asymmetry", "carriage", "one_ear_missing"),
     "skip": ("steady",),

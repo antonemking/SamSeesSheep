@@ -120,6 +120,8 @@ def farmer_reason(reason: Reason, pack: EarPack) -> str:
         return "Couldn't see its face well enough — it was mostly turned away."
     if reason == "ears_unmeasurable":
         return "Couldn't see its ears well enough to check."
+    if reason == "not_sure":
+        return "Not sure enough to call — the ear signs were weak or mixed."
     raise ValueError(f"no farmer wording for reason {reason!r}")
 
 
