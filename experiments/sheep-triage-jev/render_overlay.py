@@ -11,10 +11,12 @@ the source video (from the drawn replay when there is no video).
     uv run --project sheep-yolo python experiments/sheep-triage-jev/render_overlay.py \\
         experiments/sheep-triage-jev/runs/<name>/
 
-OpenCV and NumPy are imported only when rendering. The file is H.264 through
-PyAV (``imageio[pyav]`` in the sheep-yolo env) so it seeks in a browser. If
-PyAV cannot encode H.264 it falls back to OpenCV mp4v, which QuickTime and VLC
-play but browsers may not.
+OpenCV and NumPy are imported only when rendering. Clip frames come upright
+from ``clip_frames`` (the container's rotation applied), and older runs'
+coordinates are turned to match. The file is H.264 through PyAV
+(``imageio[pyav]`` in the sheep-yolo env) so it seeks in a browser. If PyAV
+cannot encode H.264 it falls back to OpenCV mp4v, which QuickTime and VLC play
+but browsers may not.
 """
 
 from __future__ import annotations
@@ -27,6 +29,7 @@ from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
+from clip_frames import recorded_rotation, to_upright, upright_frames
 from glance_list import LOOK, SKIP, THUMBS_DIR, UNCHECKED, badge_for, clock, decisions_ran, thumb_path
 from pose_features import ear_angles
 
@@ -294,19 +297,21 @@ def render(
     kpt_conf: float = 0.4,
     max_width: int = 1280,
 ) -> Path:
-    """Write ``annotated.mp4`` into ``run_dir``. ``clip=None`` draws on a plain field."""
+    """Write ``annotated.mp4`` into ``run_dir``. ``clip=None`` draws on a plain field.
+
+    ``frames`` must be in the coordinates of ``upright_frames(clip)``; see ``clip_frames.to_upright``.
+    """
     import cv2
     import numpy as np
 
     badges = badges_from_triage(triage)
     header = header_parts(badges, ran=decisions_ran(triage))
-    cap = None
+    source = None
     first = None
     if clip is not None:
-        cap = cv2.VideoCapture(str(clip))
-        ok, first = cap.read()
-        if not ok:
-            cap.release()
+        source = upright_frames(clip)
+        first = next(source, None)
+        if first is None:
             raise SystemExit(f"could not read frames from {clip}")
         src_h, src_w = first.shape[:2]
     else:
@@ -326,30 +331,28 @@ def render(
         due.setdefault(idx, []).append(tid)
     writer = _Writer(out, out_w, out_h, fps)
     written = n_thumbs = 0
+    img: Any
     try:
         for idx, tracks in enumerate(frames):
-            if cap is None:
+            if source is None:
                 img = np.full((out_h, out_w, 3), FIELD_BG, np.uint8)
             else:
-                if idx == 0:
-                    img = first
-                else:
-                    ok, img = cap.read()
-                    if not ok:
-                        break
+                img = first if idx == 0 else next(source, None)
+                if img is None:
+                    break
                 if img.shape[1] != out_w or img.shape[0] != out_h:
                     img = cv2.resize(img, (out_w, out_h), interpolation=cv2.INTER_AREA)
                 # Real footage: crop before the overlay, so the thumbnail is the sheep itself.
                 for tid in due.get(idx, ()):
                     _save_thumb(cv2, img, tracks[tid]["box"], scale, run_dir / thumb_path(tid))
                     n_thumbs += 1
-            top = _draw_header(cv2, img, header, idx / fps, cap is None)
+            top = _draw_header(cv2, img, header, idx / fps, source is None)
             for tid in sorted(tracks):
                 if tid in badges:  # dropped flickers have no decision and are not drawn
                     draw_track(
                         cv2, img, tracks[tid], tid, badges[tid], scale=scale, kpt_conf=kpt_conf, top=top
                     )
-            if cap is None:
+            if source is None:
                 # No footage to crop: the drawn head is the only picture there is.
                 for tid in due.get(idx, ()):
                     _save_thumb(cv2, img, tracks[tid]["box"], scale, run_dir / thumb_path(tid))
@@ -358,8 +361,8 @@ def render(
             written += 1
     finally:
         writer.close()
-        if cap is not None:
-            cap.release()
+        if source is not None:
+            source.close()
     print(f"wrote {out}  ({written} frames, {out_w}x{out_h}, {writer.codec}) and {n_thumbs} thumbnails")
     return out
 
@@ -380,9 +383,12 @@ def main(argv: list[str] | None = None) -> int:
         clip = Path(tracks_doc["clip"])
     if clip is not None and not clip.is_file():
         raise SystemExit(f"clip not found: {clip}. Pass --clip.")
+    frames = load_frames(args.run_dir / FRAMES_NAME)
+    if clip is not None:
+        frames, _ = to_upright(frames, clip, recorded_rotation(tracks_doc))
     render(
         args.run_dir,
-        load_frames(args.run_dir / FRAMES_NAME),
+        frames,
         triage,
         clip=clip,
         fps=tracks_doc["fps"],

@@ -29,6 +29,7 @@ Jev runs on this machine or in the cloud. It does not run on a Pi.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import sys
@@ -37,6 +38,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from clip_frames import orientation, recorded_rotation, to_upright
 from glance_list import iso_day, write_glance_list
 from jev_client import (
     DECISION_RULE,
@@ -226,10 +228,13 @@ def _load_from_run(args: argparse.Namespace) -> tuple[list[dict[int, dict]], flo
             "The replay needs the source video. Move it back, or drop --demo and rebuild the replay later with\n"
             "  render_overlay.py <out> --clip <video>"
         )
-    day = old.get("footage_date")
-    if not day:
-        recorded = Path(clip) if clip and clip != "synthetic" and Path(clip).is_file() else tracks_path
-        day = _file_day(recorded)
+    source = Path(clip) if clip and clip != "synthetic" and Path(clip).is_file() else None
+    day = old.get("footage_date") or _file_day(source or tracks_path)
+    frames = load_frames(frames_path)
+    rotation = 0 if clip == "synthetic" else recorded_rotation(old)
+    needs = ("av", "numpy") if rotation is not None else ("av", "numpy", "cv2")
+    if source is not None and all(importlib.util.find_spec(name) is not None for name in needs):
+        frames, rotation = to_upright(frames, source, rotation)
     meta = {
         "clip": clip,
         "weights": old.get("weights"),
@@ -238,7 +243,9 @@ def _load_from_run(args: argparse.Namespace) -> tuple[list[dict[int, dict]], flo
         "footage_date": day,
         "pen_label": old.get("pen_label"),
     }
-    return load_frames(frames_path), fps, meta
+    if rotation is not None:
+        meta["frame_rotation"] = rotation
+    return frames, fps, meta
 
 
 def _file_day(path: Path) -> str:
@@ -250,7 +257,7 @@ def _load_frames(args: argparse.Namespace) -> tuple[list[dict[int, dict]], float
         frames, default_fps = synthetic_frames()
         fps = float(args.fps or default_fps)
         meta = {"clip": "synthetic", "weights": None, "fps": fps, "footage_date": date.today().isoformat()}
-        return frames, fps, {**meta, "pen_label": None}
+        return frames, fps, {**meta, "pen_label": None, "frame_rotation": 0}
     if args.from_run is not None:
         return _load_from_run(args)
 
@@ -277,7 +284,9 @@ def _load_frames(args: argparse.Namespace) -> tuple[list[dict[int, dict]], float
     from pose_runner import read_fps, track_clip
 
     fps = args.fps if args.fps is not None else read_fps(clip)
-    print(f"tracking {clip.name} with {weights.name} (fps={fps:.2f})")
+    rotation = orientation(clip).rotation
+    turned = f", turned {rotation}° as the clip asks" if rotation else ""
+    print(f"tracking {clip.name} with {weights.name} (fps={fps:.2f}{turned})")
     frames = track_clip(
         weights,
         clip,
@@ -287,7 +296,7 @@ def _load_frames(args: argparse.Namespace) -> tuple[list[dict[int, dict]], float
         imgsz=args.imgsz,
     )
     meta = {"clip": str(clip), "weights": str(weights), "fps": fps, "footage_date": _file_day(clip)}
-    return frames, fps, {**meta, "pen_label": None}
+    return frames, fps, {**meta, "pen_label": None, "frame_rotation": rotation}
 
 
 def _out_stem(args: argparse.Namespace) -> str:
