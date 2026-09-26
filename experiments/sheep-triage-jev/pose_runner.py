@@ -1,4 +1,9 @@
-"""YOLO-pose tracking. Ultralytics is imported only when a clip is tracked."""
+"""YOLO-pose tracking. Ultralytics is imported only when a clip is tracked.
+
+Frames come from ``clip_frames.upright_frames``, turned the way the clip's
+container says to show them, rather than from Ultralytics' own OpenCV reader,
+which leaves phone clips upside down or sideways on some machines.
+"""
 
 from __future__ import annotations
 
@@ -58,11 +63,12 @@ def track_clip(
 ) -> list[dict[int, dict]]:
     from ultralytics import YOLO
 
+    from clip_frames import upright_frames
+
     model = YOLO(str(weights))
     kwargs: dict = {
-        "source": str(clip),
         "tracker": tracker,
-        "stream": True,
+        "persist": True,
         "conf": conf,
         "verbose": False,
         "save": False,
@@ -70,8 +76,7 @@ def track_clip(
     if imgsz is not None:
         kwargs["imgsz"] = imgsz
     frames: list[dict[int, dict]] = []
-    for result in model.track(**kwargs):
-        frames.append(frame_from_result(result))
-        if max_frames is not None and len(frames) >= max_frames:
-            break
+    for img in upright_frames(clip, max_frames=max_frames):
+        results = model.track(img, **kwargs)
+        frames.append(frame_from_result(results[0]))
     return frames

@@ -9,13 +9,18 @@ absolute angle between the nose-to-ear-midline vector and the ear base-to-tip
 vector — the same geometry as ``sheep-yolo/scripts/render_ekg.py``. The
 summary is a geometric description of a track. It is not a pain or welfare
 score.
+
+``EarPack`` is the slice of a summary that Jev sees: the ear items of the
+SPFES facial scale as numbers, and nothing about speed or motion.
 """
 
 from __future__ import annotations
 
 import math
 import statistics
-from typing import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import asdict, dataclass
+from typing import Any
 
 KPT_NAMES: tuple[str, ...] = (
     "nose",
@@ -28,6 +33,57 @@ NOSE, L_BASE, R_BASE, L_TIP, R_TIP = range(5)
 
 Point = Sequence[float]  # x, y, conf
 Box = Sequence[float]  # xyxy
+
+MIN_EAR_FRAMES = 3  # below this, an ear's median and spread are too thin to report
+
+
+@dataclass(frozen=True)
+class EarStats:
+    """One ear over one track. Degrees; ``None`` when measured on too few frames."""
+
+    measured_fraction: float  # share of facing frames where this ear's angle was measured
+    median_deg: float | None
+    std_deg: float | None
+
+    @classmethod
+    def from_json(cls, data: Mapping[str, Any]) -> EarStats:
+        return cls(
+            measured_fraction=float(data["measured_fraction"]),
+            median_deg=_opt_float(data.get("median_deg")),
+            std_deg=_opt_float(data.get("std_deg")),
+        )
+
+
+@dataclass(frozen=True)
+class EarPack:
+    """The per-track numbers Jev triages on."""
+
+    track_id: int
+    n_frames: int
+    duration_s: float
+    facing_fraction: float
+    left_ear: EarStats
+    right_ear: EarStats
+    asymmetry_deg: float | None  # median |left - right| over frames with both ears measured
+
+    def to_json(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_json(cls, data: Mapping[str, Any]) -> EarPack:
+        return cls(
+            track_id=int(data["track_id"]),
+            n_frames=int(data["n_frames"]),
+            duration_s=float(data["duration_s"]),
+            facing_fraction=float(data["facing_fraction"]),
+            left_ear=EarStats.from_json(data["left_ear"]),
+            right_ear=EarStats.from_json(data["right_ear"]),
+            asymmetry_deg=_opt_float(data.get("asymmetry_deg")),
+        )
+
+
+def _opt_float(value: Any) -> float | None:
+    return None if value is None else float(value)
 
 
 def _ang(midline: tuple[float, float], ear: tuple[float, float]) -> float:
@@ -85,6 +141,46 @@ def _round(value: float | None, ndigits: int = 3) -> float | None:
     return round(float(value), ndigits)
 
 
+def _fraction(part: int, whole: int) -> float:
+    return round(part / whole, 2) if whole else 0.0
+
+
+def ear_pack(
+    track_id: int,
+    *,
+    n_frames: int,
+    n_facing: int,
+    duration_s: float,
+    left: Sequence[float],
+    right: Sequence[float],
+    pair_diffs: Sequence[float],
+) -> EarPack:
+    """Pack one track's per-frame ear angles. Degrees are rounded to 0.1."""
+
+    def stats(values: Sequence[float]) -> EarStats:
+        measured = _fraction(len(values), n_facing)
+        if len(values) < MIN_EAR_FRAMES:
+            return EarStats(measured, None, None)
+        return EarStats(
+            measured,
+            round(statistics.median(values), 1),
+            round(statistics.pstdev(values), 1),
+        )
+
+    asymmetry = None
+    if len(pair_diffs) >= MIN_EAR_FRAMES:
+        asymmetry = round(statistics.median(pair_diffs), 1)
+    return EarPack(
+        track_id=int(track_id),
+        n_frames=n_frames,
+        duration_s=round(duration_s, 2),
+        facing_fraction=_fraction(n_facing, n_frames),
+        left_ear=stats(left),
+        right_ear=stats(right),
+        asymmetry_deg=asymmetry,
+    )
+
+
 def summarize_track(
     track_id: int,
     observations: list[dict],
@@ -98,6 +194,7 @@ def summarize_track(
     n = len(observations)
     left: list[float] = []
     right: list[float] = []
+    pair_diffs: list[float] = []
     vis = [0] * len(KPT_NAMES)
     widths: list[float] = []
     heights: list[float] = []
@@ -113,6 +210,8 @@ def summarize_track(
             left.append(la)
         if ra is not None:
             right.append(ra)
+        if la is not None and ra is not None:
+            pair_diffs.append(abs(la - ra))
         x1, y1, x2, y2 = obs["box"]
         widths.append(float(x2) - float(x1))
         heights.append(float(y2) - float(y1))
@@ -140,6 +239,16 @@ def summarize_track(
         ):
             facing += 1
 
+    duration = n / fps if fps else 0.0
+    pack = ear_pack(
+        track_id,
+        n_frames=n,
+        n_facing=facing,
+        duration_s=duration,
+        left=left,
+        right=right,
+        pair_diffs=pair_diffs,
+    )
     return {
         "track_id": int(track_id),
         "n_frames": n,
@@ -147,11 +256,12 @@ def summarize_track(
         "frame_last": frames[-1],
         "gap_frames": gaps,
         "coverage": _round(n / n_source_frames if n_source_frames else 0.0),
-        "duration_s": _round(n / fps if fps else 0.0),
+        "duration_s": _round(duration),
         "keypoint_visibility": {
             name: _round(vis[i] / n if n else 0.0) for i, name in enumerate(KPT_NAMES)
         },
         "facing_fraction": _round(facing / n if n else 0.0),
+        "ear_pack": pack.to_json(),
         "ear_angle_deg": {
             "left_median": _round(_median(left)),
             "left_std": _round(_std(left)),
@@ -213,27 +323,35 @@ def summarize_frames(
     return kept, dropped
 
 
-def state_for_jev(summary: dict) -> dict:
-    """Text/JSON state for one TypeSafe Jev call. No image, no secrets."""
+FIELD_NOTES: dict[str, str] = {
+    "ear angle": (
+        "Degrees between the head midline (from between the ear bases toward the nose) "
+        "and one ear from base to tip, in the image. About 90 is out to the side, lower "
+        "points forward toward the nose, higher points back toward the neck."
+    ),
+    "median_deg": "That ear's typical angle over the track.",
+    "std_deg": (
+        "How much that ear's angle changed from frame to frame. "
+        "Even an ear held still shows a few degrees of keypoint noise."
+    ),
+    "asymmetry_deg": "Median of |left - right| over frames where both ears were measured.",
+    "facing_fraction": "Share of frames with the nose and both ear bases visible, so the face is toward the camera.",
+    "measured_fraction": "Share of facing frames where that ear's tip was found and its angle measured.",
+    "null": f"Measured on fewer than {MIN_EAR_FRAMES} frames.",
+    "left / right": "Image left and right.",
+}
+
+
+def state_for_jev(summary: Mapping[str, Any]) -> dict[str, Any]:
+    """Text/JSON state for one TypeSafe Jev call: the ear pack only. No image, no secrets."""
     return {
         "task": (
-            "Triage one tracked sheep from pose numbers only. "
-            "No image is attached. These are geometric measurements "
-            "from a five-keypoint sheep-head model."
+            "Ear check for one tracked sheep, from head-pose numbers only. "
+            "No image is attached. The numbers come from a five-keypoint "
+            "sheep-head model: nose, both ear bases, both ear tips."
         ),
-        "keypoint_order": list(KPT_NAMES),
-        "field_notes": {
-            "ear_angle_deg": (
-                "Absolute degrees between the nose-to-ear-midline vector "
-                "and that ear's base-to-tip vector. left_std / right_std "
-                "are the spread across frames where the ear was measurable."
-            ),
-            "keypoint_visibility": "Fraction of this track's frames where that keypoint confidence cleared the threshold.",
-            "facing_fraction": "Fraction of frames with nose and both ear bases visible.",
-            "motion": "Centroid path and spread are in source-frame pixels.",
-            "coverage": "Fraction of source frames that contain this track id.",
-        },
-        "track": summary,
+        "field_notes": FIELD_NOTES,
+        "track": dict(summary["ear_pack"]),
     }
 
 
