@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Burn Look / Skip into a replay of one run.
+"""Burn Look / Skip / Not checked into a replay of one run.
 
 Reads a run folder written by ``run_pipeline.py --demo`` (``frames.json``,
 ``triage.json``, ``tracks.json``) and writes ``annotated.mp4``: pose boxes,
-the ear-angle lines, and a Look / Skip badge per track. Badges come from
-``triage.json`` only; the raw score is never drawn.
+the ear-angle lines, and a Look / Skip / Not checked badge per track. Badges
+come from ``triage.json`` only; the raw score is never drawn.
 
     uv run --project sheep-yolo python experiments/sheep-triage-jev/render_overlay.py \\
         experiments/sheep-triage-jev/runs/<name>/
@@ -20,10 +20,12 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Mapping
 from fractions import Fraction
 from pathlib import Path
+from typing import Any
 
-from glance_list import LOOK, SKIP, UNCHECKED, badge_for, clock
+from glance_list import LOOK, SKIP, UNCHECKED, badge_for, clock, decisions_ran
 from pose_features import ear_angles
 
 VIDEO_NAME = "annotated.mp4"
@@ -65,16 +67,26 @@ def load_frames(path: Path) -> list[dict[int, dict]]:
     return [{int(tid): obs for tid, obs in row.items()} for row in rows]
 
 
-def badges_from_triage(triage: dict) -> dict[int, str]:
+def badges_from_triage(triage: Mapping[str, Any]) -> dict[int, str]:
     return {int(row["track_id"]): badge_for(row.get("decision")) for row in triage.get("tracks", [])}
 
 
-def header_parts(badges: dict[int, str]) -> list[tuple[str, str]]:
-    """(text, badge) segments for the top bar. All-Look runs show SKIP 0, never a fake Skip."""
+def header_parts(badges: Mapping[int, str], *, ran: bool | None = None) -> list[tuple[str, str]]:
+    """(text, badge) segments for the top bar. All-Look runs show SKIP 0, never a fake Skip.
+
+    ``ran`` says whether the check produced any decision; by default it is
+    inferred from the badges, which cannot tell an all-cannot run from one
+    that never ran.
+    """
     values = list(badges.values())
-    if values and all(v == UNCHECKED for v in values):
+    if ran is None:
+        ran = any(v != UNCHECKED for v in values)
+    if not ran:
         return [("NOT SORTED YET", UNCHECKED)]
-    return [(f"LOOK {values.count(LOOK)}", LOOK), (f"SKIP {values.count(SKIP)}", SKIP)]
+    parts = [(f"LOOK {values.count(LOOK)}", LOOK), (f"SKIP {values.count(SKIP)}", SKIP)]
+    if UNCHECKED in values:
+        parts.append((f"NOT CHECKED {values.count(UNCHECKED)}", UNCHECKED))
+    return parts
 
 
 class _Writer:
@@ -230,7 +242,7 @@ def _draw_header(cv2, img, parts: list[tuple[str, str]], seconds: float, synthet
 def render(
     run_dir: Path,
     frames: list[dict[int, dict]],
-    triage: dict,
+    triage: Mapping[str, Any],
     *,
     clip: Path | None,
     fps: float,
@@ -242,7 +254,7 @@ def render(
     import numpy as np
 
     badges = badges_from_triage(triage)
-    header = header_parts(badges)
+    header = header_parts(badges, ran=decisions_ran(triage))
     cap = None
     first = None
     if clip is not None:
