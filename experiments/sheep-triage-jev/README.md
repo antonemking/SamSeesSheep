@@ -110,7 +110,7 @@ python experiments/sheep-triage-jev/run_pipeline.py \
   --out experiments/sheep-triage-jev/runs/img3877-spfes/
 ```
 
-Add `--demo` (in the sheep-yolo env) to rebuild the replay and the morning brief for the new answers; the source clip must still be at the path recorded in the old `tracks.json`. Fresh from the clip:
+Add `--demo` (in the sheep-yolo env) to rebuild the replay and the morning brief for the new answers; the source clip must still be at the path recorded in the old `tracks.json`. A folder tracked before the rotation fix on a turned clip (IMG_3877 is one) gets a warning here, and `--demo` refuses to draw its skeletons (see Phone clips and rotation). Track it fresh from the clip instead:
 
 ```bash
 uv run --project sheep-yolo python experiments/sheep-triage-jev/run_pipeline.py \
@@ -148,15 +148,15 @@ open experiments/sheep-triage-jev/runs/2026-09-24-north-pen/morning-brief.html
 
 `sheep-yolo/test-clips/` is gitignored, so copy `IMG_3877.MOV` there yourself or point `--clip` at another local source clip you have the rights to show. `--max-frames 900` gives a 30 s cut if you want a quicker first pass.
 
-Already tracked IMG_3877 with `--demo`? Re-ask Jev and get a fresh brief without running YOLO again (the clip must still be at the path in the old `tracks.json`):
+Once that run exists, re-ask Jev and get a fresh brief without running YOLO again (the clip must still be at the path in its `tracks.json`). Folders tracked before the rotation fix, such as the old `runs/img3877-demo/`, are refused here for turned clips; see Phone clips and rotation below.
 
 ```bash
 export TYPESAFE_API_KEY=...
 uv run --project sheep-yolo python experiments/sheep-triage-jev/run_pipeline.py \
-  --from-run experiments/sheep-triage-jev/runs/img3877-demo/ \
+  --from-run experiments/sheep-triage-jev/runs/2026-09-24-north-pen/ \
   --demo --pen "North pen" --date 2026-09-24 \
-  --out experiments/sheep-triage-jev/runs/img3877-brief/
-open experiments/sheep-triage-jev/runs/img3877-brief/morning-brief.html
+  --out experiments/sheep-triage-jev/runs/2026-09-24-north-pen-reasked/
+open experiments/sheep-triage-jev/runs/2026-09-24-north-pen-reasked/morning-brief.html
 ```
 
 Offline smoke with no key, weights or clip. Every sheep is Not checked and the brief says "Not sorted yet":
@@ -172,19 +172,29 @@ Rebuild pieces of an existing run folder without re-tracking. `render_overlay.py
 
 ```bash
 uv run --project sheep-yolo python experiments/sheep-triage-jev/render_overlay.py \
-  experiments/sheep-triage-jev/runs/img3877-demo/
-python experiments/sheep-triage-jev/glance_list.py experiments/sheep-triage-jev/runs/img3877-demo/ \
+  experiments/sheep-triage-jev/runs/2026-09-24-north-pen/
+python experiments/sheep-triage-jev/glance_list.py experiments/sheep-triage-jev/runs/2026-09-24-north-pen/ \
   --pen "North pen" --date 2026-09-24
-open experiments/sheep-triage-jev/runs/img3877-demo/morning-brief.html
+open experiments/sheep-triage-jev/runs/2026-09-24-north-pen/morning-brief.html
 ```
 
 Older run folders still render: ones from before the SPFES check (`look` / `dont`), ones whose pen call is `walk_now`, and ones with only a `glance-list.html`. Without a recorded date the brief uses the date of the folder's `tracks.json`.
 
 ### Phone clips and rotation
 
-An iPhone stores the picture as the sensor saw it and writes how to turn it for display into the clip (the video track's display matrix): 180° for a clip filmed with the phone upside down, 90° or 270° for portrait. Players apply it. OpenCV may or may not, depending on the machine, which is how the replay and thumbnails came out upside down. Every clip is now read through `clip_frames.py`: PyAV decodes the stored pixels, and the rotation the clip asks for is applied before tracking, the replay and the thumbnails see a frame. So the pose model sees the sheep upright and the crops match what you saw on the phone, whatever OpenCV does. Upright clips are left alone. `tracks.json` records the turn as `frame_rotation`.
+An iPhone stores the picture as the sensor saw it and writes how to turn it for display into the clip (the video track's display matrix): 180° for a clip filmed with the phone upside down, 90° or 270° for portrait. Players apply it; OpenCV may or may not, depending on the machine. That is how the replay's skeletons and thumbnails came out upside down.
 
-Run folders from before this fix were tracked on whatever OpenCV handed over. `--from-run` and `render_overlay.py` check how OpenCV turns that clip on this machine and turn the old boxes and keypoints to match, so the new replay and thumbnails are upright and in the right place. The poses themselves came from the model seeing the clip as stored. For a turned clip such as IMG_3877, re-track it with `--clip` (the first Mac command above) rather than `--from-run`.
+Every clip is now read through one path, `clip_frames.py`. PyAV decodes the stored pixels, and the rotation the clip asks for is applied once. The pose model tracks those upright frames, `frames.json` keeps the boxes and keypoints in that same upright frame, and the replay and thumbnails are drawn on the same frames. So the skeleton sits on the sheep the way you saw it on the phone: ear tips above ear bases above the nose. The replay (`annotated.mp4`) is written upright with no rotation flag, so the brief's player shows it as is. Upright clips are left alone. `tracks.json` records the turn as `frame_rotation`.
+
+**Run folders from before this fix need a fresh re-track.** They were tracked on whatever OpenCV handed over, so their skeletons may be upside down or sideways against the upright video, and there is no reliable way to fix that afterwards. For a turned clip, `--from-run --demo` and `render_overlay.py` refuse to draw rather than show inverted sticks. They print the re-track command, which is the first Mac command above:
+
+```bash
+uv run --project sheep-yolo python experiments/sheep-triage-jev/run_pipeline.py \
+  --clip sheep-yolo/test-clips/IMG_3877.MOV --demo --pen "North pen" --date 2026-09-24 \
+  --out experiments/sheep-triage-jev/runs/2026-09-24-north-pen/
+```
+
+`--from-run` without `--demo` still re-asks Jev on the old poses, with a warning. Old folders whose clip was never turned (0°) still render as before.
 
 `annotated.mp4` is H.264 through PyAV (already in the sheep-yolo env), so it plays and seeks in Safari and Chrome. If PyAV cannot encode H.264 the renderer says so and writes mp4v instead; QuickTime plays that, browsers may not. `--demo-width` (default 1280) caps the replay width. The thumbnails are frames of real sheep when the clip is real; `runs/` is gitignored, so keep it that way and don't copy a run folder into the repo.
 
@@ -241,6 +251,6 @@ uv run --project sheep-yolo python experiments/sheep-triage-jev/test_triage.py
 - Nothing here measures whether `look` agrees with a person, or with a full SPFES score. That eval is future work.
 - The book thresholds (15° spread, 25° asymmetry, 75°–140° band, half the frames) are guesses from the ear-angle geometry, not from labelled SPFES data. Tune them after a real IMG_3877 run.
 - The morning brief is checked on synthetic fixtures only. Nobody has seen thumbnails cropped from real footage, or watched a real-clip replay from the brief, yet.
-- Rotation is tested on synthetic MP4s whose track header says 0, 90, 180 or 270, and on a fake YOLO. It has not been run on an actual iPhone .MOV yet; IMG_3877 is the first one to try.
+- Rotation is tested on synthetic MP4s whose track header says 0, 90, 180 or 270. A fake YOLO reads a coloured face (ear tips, ear bases, nose) off whatever frame it is handed, and the test checks that the skeleton in `frames.json` and the one drawn on the replay are upright and sit on that face. It has not been run on an actual iPhone .MOV or with the real pose model yet; IMG_3877 is the first one to try.
 - The brief's order within the Look list comes from the same uncalibrated noul. It says which Look was flagged more clearly, not which sheep is worse off.
 - Jev-Omni and multimodal Gemma are out of scope. So is Pi / Pico deployment.
