@@ -18,8 +18,10 @@ turns the pen's counts into walk_tomorrow / later / fine. --triage book also
 writes the fixed ear-rule baseline beside Jev in triage.json. --from-run
 re-asks an earlier --demo run folder without tracking the clip again.
 
-Add --demo to also write annotated.mp4 (Look / Skip / Not checked replay) and
-glance-list.html into the same --out folder.
+Meant to run overnight on the day's footage. Add --demo to also write
+annotated.mp4 (Look / Skip / Not checked replay), one thumbnail per sheep, and
+morning-brief.html into the same --out folder. --pen names the pen on the
+brief; --date is the day the footage was taken (default: the clip file's date).
 
 Jev runs on this machine or in the cloud. It does not run on a Pi.
 """
@@ -31,11 +33,11 @@ import json
 import os
 import sys
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from glance_list import write_glance_list
+from glance_list import iso_day, write_glance_list
 from jev_client import (
     DECISION_RULE,
     ENDPOINT,
@@ -97,6 +99,7 @@ def _summary_text(meta: dict[str, Any], tracks: list[dict[str, Any]], triage: di
     rows = {row["track_id"]: row for row in triage["tracks"]}
     lines = [
         f"clip: {meta.get('clip')}",
+        f"footage date: {meta.get('footage_date')}  pen label: {meta.get('pen_label') or '—'}",
         (
             f"mode: {triage['mode']}  model: {triage.get('model')}  threshold: {triage.get('threshold')}  "
             f"questions: {QUESTION_SET}"
@@ -172,6 +175,14 @@ def _parse(argv: list[str]) -> argparse.Namespace:
     p.add_argument(
         "--no-pen", action="store_true", help="Skip the pen-level walk tomorrow / later / fine call."
     )
+    p.add_argument("--pen", default=None, help='Pen or flock name for the morning brief, e.g. "North pen".')
+    p.add_argument(
+        "--date",
+        type=iso_day,
+        default=None,
+        help="Day the footage was taken, YYYY-MM-DD. Default: the clip file's date "
+        "(--from-run: the earlier run's; --synthetic: today).",
+    )
     p.add_argument("--max-frames", type=int, default=None)
     p.add_argument("--conf", type=float, default=0.25, help="Detection confidence.")
     p.add_argument("--kpt-conf", type=float, default=0.4, help="Keypoint confidence.")
@@ -191,8 +202,8 @@ def _parse(argv: list[str]) -> argparse.Namespace:
     p.add_argument(
         "--demo",
         action="store_true",
-        help="Also write frames.json, annotated.mp4 (Look / Skip / Not checked replay) and glance-list.html. "
-        "Needs OpenCV.",
+        help="Also write frames.json, annotated.mp4 (Look / Skip / Not checked replay), thumbs/ and "
+        "morning-brief.html. Needs OpenCV.",
     )
     p.add_argument("--demo-width", type=int, default=1280, help="Max width of annotated.mp4.")
     return p.parse_args(argv)
@@ -215,15 +226,31 @@ def _load_from_run(args: argparse.Namespace) -> tuple[list[dict[int, dict]], flo
             "The replay needs the source video. Move it back, or drop --demo and rebuild the replay later with\n"
             "  render_overlay.py <out> --clip <video>"
         )
-    meta = {"clip": clip, "weights": old.get("weights"), "fps": fps, "from_run": str(run_dir)}
+    day = old.get("footage_date")
+    if not day:
+        recorded = Path(clip) if clip and clip != "synthetic" and Path(clip).is_file() else tracks_path
+        day = _file_day(recorded)
+    meta = {
+        "clip": clip,
+        "weights": old.get("weights"),
+        "fps": fps,
+        "from_run": str(run_dir),
+        "footage_date": day,
+        "pen_label": old.get("pen_label"),
+    }
     return load_frames(frames_path), fps, meta
+
+
+def _file_day(path: Path) -> str:
+    return date.fromtimestamp(path.stat().st_mtime).isoformat()
 
 
 def _load_frames(args: argparse.Namespace) -> tuple[list[dict[int, dict]], float, dict[str, Any]]:
     if args.synthetic:
         frames, default_fps = synthetic_frames()
         fps = float(args.fps or default_fps)
-        return frames, fps, {"clip": "synthetic", "weights": None, "fps": fps}
+        meta = {"clip": "synthetic", "weights": None, "fps": fps, "footage_date": date.today().isoformat()}
+        return frames, fps, {**meta, "pen_label": None}
     if args.from_run is not None:
         return _load_from_run(args)
 
@@ -259,7 +286,8 @@ def _load_frames(args: argparse.Namespace) -> tuple[list[dict[int, dict]], float
         tracker=args.tracker,
         imgsz=args.imgsz,
     )
-    return frames, fps, {"clip": str(clip), "weights": str(weights), "fps": fps}
+    meta = {"clip": str(clip), "weights": str(weights), "fps": fps, "footage_date": _file_day(clip)}
+    return frames, fps, {**meta, "pen_label": None}
 
 
 def _out_stem(args: argparse.Namespace) -> str:
@@ -335,6 +363,10 @@ def run(argv: list[str] | None = None, *, opener: Opener | None = None) -> int:
                 "  uv run --project sheep-yolo python experiments/sheep-triage-jev/run_pipeline.py ... --demo"
             )
     frames, fps, meta = _load_frames(args)
+    if args.date is not None:
+        meta["footage_date"] = args.date.isoformat()
+    if args.pen and args.pen.strip():
+        meta["pen_label"] = args.pen.strip()
     tracks, dropped = summarize_frames(
         frames,
         fps=fps,

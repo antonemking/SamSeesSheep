@@ -1,5 +1,5 @@
 """Stdlib tests for pose summaries, the SPFES ear pack, the book rules, the Jev
-look / skip / cannot mapping, the pen call, and the farmer demo.
+look / skip / cannot mapping, the pen call, and the farmer's morning brief.
 
     python experiments/sheep-triage-jev/test_triage.py
 
@@ -10,31 +10,37 @@ fail the test if anything reaches for the network.
 
 from __future__ import annotations
 
+import html
 import importlib.util
 import io
 import json
 import math
 import os
 import re
+import shutil
 import tempfile
 import unittest
 import urllib.error
 from collections.abc import Callable
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 from unittest import mock
 
 from glance_list import (
     LOOK,
+    PAGE_NAME,
     SKIP,
     UNCHECKED,
     badge_for,
     build_cards,
+    detail,
     farmer_reason,
     headline,
     pen_line,
     reason_for,
     render_html,
+    thumb_path,
     write_glance_list,
 )
 from jev_client import (
@@ -67,7 +73,7 @@ from pose_features import (
     synthetic_frames,
 )
 from pose_runner import frame_from_result
-from render_overlay import badges_from_triage, header_parts, load_frames, save_frames
+from render_overlay import badges_from_triage, crop_box, header_parts, load_frames, save_frames, thumb_frames
 from run_pipeline import run
 from spfes_ear import DECISIONS, JEV_REASONS, REASONS, REASONS_FOR, Verdict, book_triage
 
@@ -426,6 +432,70 @@ class FarmerBadgeTests(unittest.TestCase):
         self.assertEqual(loaded[3][7]["kpts"][0], frames[3][7]["kpts"][0])
 
 
+def visible_text(page: str) -> str:
+    """What a reader sees: the page without style, script, tags or attributes."""
+    text = re.sub(r"<(style|script)\b.*?</\1>", " ", page, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", " ", text)
+    return re.sub(r"\s+", " ", html.unescape(text))
+
+
+def main_view(page: str) -> str:
+    """The page above the collapsed section: masthead, summary and the Look list."""
+    return page.split('<details class="rest">')[0].split("<footer>")[0]
+
+
+def rest_section(page: str) -> str:
+    match = re.search(r'<details class="rest">.*?</details>', page, flags=re.DOTALL)
+    return match.group(0) if match else ""
+
+
+# Never on the farmer's page: engine and model names, raw numbers and internal
+# vocabulary, file paths, and diagnosis language.
+FORBIDDEN_TEXT = (
+    "noul",
+    "jev",
+    "typesafe",
+    "model",
+    "json",
+    "yolo",
+    "spfes",
+    "threshold",
+    "probab",
+    "confidence",
+    "score",
+    "decision",
+    "track",
+    "cannot",
+    "pain",
+    "diagnos",
+    "welfare",
+    "walk_now",
+    "walk_tomorrow",
+    "not_sure",
+    "one_ear_missing",
+    "not_facing",
+    "ears_unmeasurable",
+    "0.123",
+    ".mp4",
+    ".jpg",
+    "http",
+    "/",
+    "\\",
+)
+FORBIDDEN_MARKUP = (
+    "noul",
+    "jev",
+    "typesafe",
+    "0.123",
+    "track_id",
+    "/users/",
+    "walk_now",
+    "not_sure",
+    "decision",
+    "http",
+)
+
+
 class GlanceListTests(unittest.TestCase):
     def test_look_cards_come_first_with_time_reason_and_jump(self):
         tracks_doc, triage = _docs({1: "dont", 4: "look", 9: "look", 12: "dont"})
@@ -433,41 +503,48 @@ class GlanceListTests(unittest.TestCase):
         self.assertEqual([c["badge"] for c in cards], [LOOK, LOOK, SKIP, SKIP])
         self.assertEqual([c["track_id"] for c in cards], [4, 9, 1, 12])
         page = render_html(tracks_doc, triage, video="annotated.mp4")
-        self.assertIn("2 of 4 need a look, 2 can be skipped.", page)
+        self.assertIn("Check these 2 tomorrow.", page)
         self.assertIn('<video id="replay" src="annotated.mp4"', page)
-        self.assertIn('href="annotated.mp4#t=2.00" data-t="2.00">Jump to 0:02</a>', page)
-        self.assertIn("In view 0:02 – 0:08", page)
+        self.assertIn(
+            'href="annotated.mp4#t=2.00" data-t="2.00" data-label="Sheep #4 · from 0:02">Watch from 0:02</a>', page
+        )
+        self.assertIn("Seen 0:02 – 0:08", page)
         self.assertIn("Left ear kept moving — its angle varied by about 28°.", page)
         self.assertLess(page.index("Sheep #9"), page.index("Sheep #1<"))
+        self.assertIn("2 looked fine", rest_section(page))
 
     def test_all_look_says_everyone_needs_a_look(self):
         tracks_doc, triage = _docs({1: "look", 4: "look", 9: "look", 12: "look"})
         page = render_html(tracks_doc, triage, video="annotated.mp4")
-        self.assertIn("Every sheep in this clip needs a look (4 of 4).", page)
-        self.assertIn("Skip 0", page)
-        self.assertNotIn('class="card skip"', page)
-        self.assertEqual(page.count('class="card look"'), 4)
+        self.assertIn("Check all 4 tomorrow.", page)
+        self.assertIn("Every sheep seen was flagged (4 of 4).", page)
+        self.assertEqual(rest_section(page), "")
+        self.assertEqual(page.count('class="card look'), 4)
         self.assertIn("still flagged for a glance", page)
 
     def test_pose_only_run_is_not_sorted(self):
         tracks_doc, triage = _docs({}, mode="pose-only")
         page = render_html(tracks_doc, triage, video=None)
         self.assertIn("Not sorted yet", page)
-        self.assertNotIn('class="card look"', page)
-        self.assertNotIn('class="card skip"', page)
+        self.assertNotIn('class="card look', page)
+        self.assertNotIn("Looked fine", rest_section(page))
+        self.assertIn("4 not checked", rest_section(page))
 
     def test_failed_checks_are_not_dressed_up(self):
         tracks_doc, triage = _docs({1: "dont", 4: "look"}, errors=(9, 12))
         page = render_html(tracks_doc, triage, video=None)
-        self.assertIn("1 of 4 need a look, 1 can be skipped, 2 could not be checked.", page)
-        self.assertEqual(page.count("The look/skip check failed for this one."), 2)
+        self.assertIn("Check this one tomorrow.", page)
+        self.assertIn("2 not checked · 1 looked fine", rest_section(page))
+        self.assertEqual(rest_section(page).count("The ear check failed for this one."), 2)
+        self.assertNotIn("failed", main_view(page))
 
     def test_without_video_names_the_timestamp(self):
         tracks_doc, triage = _docs({4: "look"})
         page = render_html(tracks_doc, triage, video=None)
         self.assertNotIn("<video", page)
-        self.assertNotIn("a class=\"jump\"", page)
-        self.assertIn("At 0:02 in the clip.", page)
+        self.assertNotIn("<script", page)
+        self.assertNotIn('class="watch', page)
+        self.assertIn("Seen 0:02 – 0:08", page)
 
     def test_farmer_words_only(self):
         tracks_doc, triage = _docs({1: "dont", 4: "look"})
@@ -496,7 +573,7 @@ class GlanceListTests(unittest.TestCase):
             with mock.patch.dict(os.environ, {"TYPESAFE_API_KEY": key}, clear=True):
                 self.assertEqual(run(["--synthetic", "--out", str(out)], opener=jev), 0)
             page = write_glance_list(out).read_text()
-        self.assertIn("1 of 2 need a look, 1 can be skipped.", page)
+        self.assertIn("Check this one tomorrow.", page)
         self.assertLess(page.index("Sheep #7"), page.index("Sheep #1<"))
         self.assertNotIn(key, page)
         self.assertNotIn("<video", page)
@@ -516,11 +593,15 @@ class OverlayTests(unittest.TestCase):
             while cap.read()[0]:
                 n += 1
             cap.release()
-            page = (out / "glance-list.html").read_text()
+            page = (out / PAGE_NAME).read_text()
+            thumbs = sorted(p.name for p in (out / "thumbs").iterdir())
             self.assertEqual(n, 8)
             self.assertEqual(len(load_frames(out / "frames.json")), 8)
             self.assertIn('<video id="replay" src="annotated.mp4"', page)
             self.assertIn("Not sorted yet", page)
+            self.assertEqual(thumbs, ["sheep-1.jpg", "sheep-7.jpg"])
+            self.assertIn(f'src="{thumb_path(7)}"', page)
+            self.assertEqual(cv2.imread(str(out / thumb_path(7))).shape, (240, 320, 3))
 
     def test_badges_are_burned_from_the_decision(self):
         import cv2
@@ -1054,15 +1135,21 @@ class SpfesGlanceListTests(unittest.TestCase):
         self.assertEqual(cards[3]["reason"], "Both ears seen, even and steady.")
         self.assertIn("kept changing position", cards[5]["reason"])
         page = render_html(tracks_doc, triage, video=None)
-        self.assertIn("4 of 6 need a look, 1 can be skipped, 1 could not be checked.", page)
-        self.assertIn("Not checked 1", page)
-        self.assertNotIn("The look/skip check failed", page)
+        self.assertIn("Check these 4 tomorrow.", page)
+        self.assertIn("1 not checked · 1 looked fine", rest_section(page))
+        self.assertIn("Couldn't see its face well enough — it was mostly turned away.", rest_section(page))
+        self.assertNotIn("The ear check failed", page)
 
     def test_all_cannot_says_why(self):
         tracks_doc, triage = _spfes_docs({tid: Verdict("cannot", "not_facing").to_json() for tid in SPFES_EXPECTED})
         self.assertEqual(
             headline(build_cards(tracks_doc, triage)),
             "Couldn't check any of the 6 sheep — their faces or ears weren't clear enough.",
+        )
+        unsure = {tid: Verdict("cannot", "not_sure").to_json() for tid in SPFES_EXPECTED}
+        self.assertEqual(
+            headline(build_cards(*_spfes_docs(unsure))),
+            "Couldn't check any of the 6 sheep, so there's no list for tomorrow.",
         )
 
     def test_pen_line(self):
@@ -1074,7 +1161,7 @@ class SpfesGlanceListTests(unittest.TestCase):
             with self.subTest(call):
                 tracks_doc, triage = _spfes_docs(self.rows(), pen={"call": call, "confidence": 0.9})
                 self.assertEqual(pen_line(triage), (call, text))
-                self.assertIn(text, render_html(tracks_doc, triage, video=None))
+                self.assertIn(text, main_view(render_html(tracks_doc, triage, video=None)))
         for pen in (None, {"call": None, "error": "Jev HTTP 529"}, {"call": "panic"}):
             with self.subTest(pen=pen):
                 tracks_doc, triage = _spfes_docs(self.rows(), pen=pen)
@@ -1085,8 +1172,8 @@ class SpfesGlanceListTests(unittest.TestCase):
         tracks_doc, triage = _spfes_docs(self.rows(), pen={"call": "walk_now", "confidence": 0.9})
         self.assertEqual(pen_line(triage), ("walk_tomorrow", "Walk the pen first thing tomorrow."))
         page = render_html(tracks_doc, triage, video=None)
-        self.assertIn("Walk the pen first thing tomorrow.", page)
-        self.assertNotIn("Walk the pen now", page)
+        self.assertIn('<section class="summary pen-walk-tomorrow">', page)
+        self.assertIsNone(re.search(r"\bnow\b", visible_text(main_view(page)), flags=re.IGNORECASE))
 
     def test_page_keeps_the_vocabulary_internal(self):
         tracks_doc, triage = _spfes_docs(self.rows(), pen={"call": "walk_now"})
@@ -1095,6 +1182,283 @@ class SpfesGlanceListTests(unittest.TestCase):
             self.assertNotIn(word, page)
         markup = re.sub(r"<(style|script)>.*?</\1>", "", page, flags=re.DOTALL)
         self.assertNotIn("{", markup)
+
+
+def _brief_rows(decisions: dict[int, tuple[str, float | None, str]]) -> dict[int, dict[str, Any]]:
+    return {tid: {"decision": d, "noul": noul, "reason": r} for tid, (d, noul, r) in decisions.items()}
+
+
+def _only(decisions: dict[int, tuple[str, float | None, str]]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """The SPFES fixture cut down to just these sheep."""
+    tracks_doc, triage = _spfes_docs(_brief_rows(decisions))
+    tracks_doc["tracks"] = [t for t in tracks_doc["tracks"] if t["track_id"] in decisions]
+    triage["tracks"] = [r for r in triage["tracks"] if r["track_id"] in decisions]
+    return tracks_doc, triage
+
+
+MIXED = {
+    3: ("skip", 0.05, "steady"),
+    5: ("look", 0.71, "flutter"),
+    8: ("look", 0.93, "asymmetry"),
+    12: ("look", 0.86, "carriage"),
+    15: ("cannot", 0.9, "not_facing"),
+    21: ("look", 0.71, "one_ear_missing"),
+}
+
+
+class MorningBriefTests(unittest.TestCase):
+    def page(self, decisions=MIXED, **kwargs: Any) -> str:
+        tracks_doc, triage = _spfes_docs(_brief_rows(decisions), pen=kwargs.pop("pen", None))
+        return render_html(tracks_doc, triage, video=kwargs.pop("video", "annotated.mp4"), **kwargs)
+
+    def test_look_cards_are_ranked_most_clearly_flagged_first(self):
+        cards = build_cards(*_spfes_docs(_brief_rows(MIXED)))
+        looks = [(c["track_id"], c["rank"]) for c in cards if c["badge"] == LOOK]
+        # 8 (0.93), 12 (0.86), then the 0.71 tie in the order they were first seen: 5 at 0:00, 21 at 0:01.
+        self.assertEqual(looks, [(8, 1), (12, 2), (5, 3), (21, 4)])
+        self.assertTrue(all(c["rank"] is None for c in cards if c["badge"] != LOOK))
+        checklist = re.search(r'<ol class="checklist">.*?</ol>', self.page(), flags=re.DOTALL).group(0)
+        self.assertEqual(re.findall(r"<h2>Sheep #(\d+)</h2>", checklist), ["8", "12", "5", "21"])
+        ranks = re.findall(r'<span class="rank" aria-hidden="true">(\d)</span>', checklist)
+        self.assertEqual(ranks, ["1", "2", "3", "4"])
+
+    def test_a_look_without_a_strength_goes_last(self):
+        decisions = {**MIXED, 5: ("look", None, "flutter")}
+        looks = [c["track_id"] for c in build_cards(*_spfes_docs(_brief_rows(decisions))) if c["badge"] == LOOK]
+        self.assertEqual(looks, [8, 12, 21, 5])
+
+    def test_main_view_is_the_date_the_count_and_look_cards_only(self):
+        page = self.page(pen={"call": "later"}, day=date(2026, 9, 24), pen_label="North pen")
+        top = main_view(page)
+        self.assertLess(top.index("Thursday 24 September"), top.index("Check these 4 tomorrow."))
+        self.assertLess(top.index("Check these 4 tomorrow."), top.index('<ol class="checklist">'))
+        self.assertEqual(sorted(re.findall(r"Sheep #(\d+)", visible_text(top))), ["12", "21", "5", "8"])
+        for word in ("looked fine", "not checked", "skip"):
+            self.assertNotIn(word, visible_text(top).lower())
+
+    def test_skip_and_not_checked_sit_in_a_collapsed_section_after_the_list(self):
+        page = self.page()
+        rest = rest_section(page)
+        self.assertTrue(rest.startswith('<details class="rest">'), rest[:40])
+        self.assertNotIn("open", rest.split(">")[0])
+        self.assertLess(page.index('<ol class="checklist">'), page.index('<details class="rest">'))
+        self.assertIn("1 not checked · 1 looked fine", rest)
+        self.assertLess(rest.index("<h3>Not checked</h3>"), rest.index("<h3>Looked fine</h3>"))
+        self.assertLess(rest.index("Sheep #15"), rest.index("Sheep #3<"))
+        self.assertIn("Couldn't see its face well enough", rest)
+        self.assertIn("Both ears seen, even and steady.", rest)
+
+    def test_nothing_to_check(self):
+        all_fine = {tid: ("skip", 0.05, "steady") for tid in MIXED}
+        page = self.page(all_fine, pen={"call": "fine"})
+        self.assertIn("Nothing needs a check tomorrow.", page)
+        self.assertIn("All 6 sheep looked fine.", page)
+        self.assertIn("The pen looks fine — no special walk needed.", page)
+        self.assertNotIn('<ol class="checklist">', page)
+        self.assertIn("6 looked fine", rest_section(page))
+
+        one = build_cards(*_only({3: ("skip", 0.05, "steady")}))
+        self.assertEqual(headline(one), "Nothing needs a check tomorrow.")
+        self.assertEqual(detail(one), "The one sheep seen looked fine.")
+
+        unsure = {
+            **all_fine,
+            **{tid: ("cannot", 0.4, "not_sure") for tid in (5, 8, 12, 21)},
+            15: ("cannot", 0.9, "not_facing"),
+        }
+        mixed_empty = self.page(unsure)
+        self.assertIn("Nothing flagged for tomorrow.", mixed_empty)
+        self.assertIn("1 looked fine and 5 couldn't be checked — see below.", mixed_empty)
+        self.assertNotIn("Nothing needs a check", mixed_empty)
+
+    def test_no_sheep_at_all(self):
+        tracks_doc = {"clip": "synthetic", "fps": 30.0, "n_frames": 90, "tracks": []}
+        page = render_html(tracks_doc, {"mode": "jev", "tracks": []}, video=None)
+        self.assertIn("No sheep were seen in this footage.", page)
+        self.assertEqual(rest_section(page), "")
+        self.assertNotIn('<ol class="checklist">', page)
+
+    def test_one_sheep_all_look(self):
+        cards = build_cards(*_only({5: ("look", 0.9, "flutter")}))
+        self.assertEqual(headline(cards), "Check the one sheep tomorrow.")
+        self.assertIsNone(detail(cards))
+        partial = build_cards(*_spfes_docs(_brief_rows({5: ("look", 0.9, "flutter")})))
+        self.assertEqual(headline(partial), "Check this one tomorrow.")
+
+    def test_no_engine_words_numbers_paths_or_diagnosis_in_any_state(self):
+        tracks_doc, triage = _docs({1: "dont", 4: "look"}, errors=(9,))
+        states = {
+            "mixed": self.page(pen={"call": "walk_tomorrow"}, day=date(2026, 9, 24), pen_label="North pen"),
+            "old walk_now": self.page(pen={"call": "walk_now"}),
+            "all look": self.page({tid: ("look", 0.9, "flutter") for tid in MIXED}),
+            "all fine": self.page({tid: ("skip", 0.05, "steady") for tid in MIXED}, pen={"call": "fine"}),
+            "all unsure": self.page({tid: ("cannot", 0.3, "not_sure") for tid in MIXED}, pen={"call": "later"}),
+            "no video": self.page(video=None),
+            "thumbs": self.page(thumbs={tid: thumb_path(tid) for tid in MIXED}),
+            "failed": render_html(tracks_doc, triage, video="annotated.mp4"),
+            "pose-only": render_html(*_docs({}, mode="pose-only"), video=None),
+        }
+        for name, page in states.items():
+            with self.subTest(name):
+                text = visible_text(page).lower()
+                for word in FORBIDDEN_TEXT:
+                    self.assertNotIn(word, text, f"{word!r} is visible")
+                for word in FORBIDDEN_MARKUP:
+                    self.assertNotIn(word, page.lower(), f"{word!r} is in the markup")
+                self.assertNotIn("{", re.sub(r"<(style|script)>.*?</\1>", "", page, flags=re.DOTALL))
+                self.assertNotIn("@import", page)
+                self.assertNotIn("0.9", text)
+
+    def test_date_and_pen_label(self):
+        page = self.page(day=date(2026, 9, 24), pen_label="North pen")
+        self.assertIn('<h1><time datetime="2026-09-24">Thursday 24 September</time></h1>', page)
+        self.assertIn('<p class="eyebrow">North pen · Morning brief</p>', page)
+        self.assertIn("<title>Thursday 24 September — North pen — morning brief</title>", page)
+        self.assertIn("3 s of footage, sorted overnight", page)
+
+        undated = self.page()
+        self.assertIn("<h1><time>Morning brief</time></h1>", undated)
+        self.assertIn("Your flock · Morning brief", undated)
+
+        tracks_doc, triage = _spfes_docs(_brief_rows(MIXED))
+        tracks_doc.update({"footage_date": "2026-03-01", "pen_label": "Lambing shed"})
+        page = render_html(tracks_doc, triage, video=None)
+        self.assertIn("Sunday 1 March", page)
+        self.assertIn("Lambing shed · Morning brief", page)
+        overridden = render_html(tracks_doc, triage, video=None, day=date(2026, 3, 2), pen_label="Top field")
+        self.assertIn("Monday 2 March", overridden)
+        self.assertIn("Top field · Morning brief", overridden)
+        tracks_doc["footage_date"] = "last tuesday"
+        self.assertIn("<h1><time>Morning brief</time></h1>", render_html(tracks_doc, triage, video=None))
+
+    def test_watch_buttons_open_a_hidden_player(self):
+        page = self.page()
+        self.assertIn('<div class="player" id="player" hidden>', page)
+        self.assertIn("<script>", page)
+        self.assertIn('data-t="1.00" data-label="Sheep #12 · from 0:01">Watch from 0:01</a>', page)
+        self.assertIn('data-label="Sheep #3 · from 0:00">Watch</a>', rest_section(page))
+        self.assertIn('href="annotated.mp4" data-t="0" data-label="Full replay">Watch the full replay</a>', page)
+
+    def test_thumbnails_only_when_the_replay_made_them(self):
+        page = self.page(thumbs={8: thumb_path(8), 3: thumb_path(3)})
+        self.assertIn('<img class="thumb" src="thumbs/sheep-8.jpg" alt="Sheep #8"', page)
+        self.assertIn('<img class="mini" src="thumbs/sheep-3.jpg" alt="Sheep #3"', page)
+        self.assertEqual(page.count("<img"), 2)
+        self.assertEqual(page.count('class="card look no-thumb"'), 3)
+
+
+def _write_run(root: Path, tracks_doc: dict[str, Any], triage: dict[str, Any], *, mtime: date | None = None) -> Path:
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "tracks.json").write_text(json.dumps(tracks_doc))
+    (root / "triage.json").write_text(json.dumps(triage))
+    if mtime is not None:
+        stamp = datetime.combine(mtime, datetime.min.time()).replace(hour=12).timestamp()
+        os.utime(root / "tracks.json", (stamp, stamp))
+    return root
+
+
+class BriefRunFolderTests(unittest.TestCase):
+    def test_old_run_folders_still_render(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            # Before the SPFES check: look / dont, no reasons, no ear pack, no pen call, no date.
+            tracks_doc, triage = _docs({1: "dont", 4: "look", 9: "look", 12: "dont"})
+            old = _write_run(Path(tmp) / "pr2", tracks_doc, triage, mtime=date(2026, 9, 20))
+            (old / "annotated.mp4").write_bytes(b"")
+            page = write_glance_list(old).read_text()
+            # Before the overnight framing: walk_now, and a glance list beside it.
+            spfes_tracks, spfes_triage = _spfes_docs(_brief_rows(MIXED), pen={"call": "walk_now"})
+            pr3 = _write_run(Path(tmp) / "pr3", spfes_tracks, spfes_triage, mtime=date(2026, 9, 25))
+            (pr3 / "glance-list.html").write_text("old page")
+            pr3_page = write_glance_list(pr3).read_text()
+            names = sorted(p.name for p in pr3.iterdir())
+            self.assertEqual(names, ["glance-list.html", PAGE_NAME, "tracks.json", "triage.json"])
+        self.assertIn("Sunday 20 September", page)
+        self.assertIn("Check these 2 tomorrow.", page)
+        self.assertIn("Your flock · Morning brief", page)
+        self.assertIn('<video id="replay" src="annotated.mp4"', page)
+        self.assertIn("2 looked fine", rest_section(page))
+        self.assertIn("Friday 25 September", pr3_page)
+        self.assertIn("Walk the pen first thing tomorrow.", pr3_page)
+
+    def test_rebuild_takes_pen_and_date_flags(self):
+        from glance_list import main as rebuild
+
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = _write_run(Path(tmp) / "run", *_spfes_docs(_brief_rows(MIXED)))
+            thumbs = run_dir / "thumbs"
+            thumbs.mkdir()
+            (run_dir / thumb_path(12)).write_bytes(b"")
+            with mock.patch("sys.stdout", io.StringIO()):
+                self.assertEqual(rebuild([str(run_dir), "--pen", "North pen", "--date", "2026-09-24"]), 0)
+            page = (run_dir / PAGE_NAME).read_text()
+            with self.assertRaises(SystemExit), mock.patch("sys.stderr", io.StringIO()):
+                rebuild([str(run_dir), "--date", "24/09/2026"])
+        self.assertIn("Thursday 24 September", page)
+        self.assertIn("North pen · Morning brief", page)
+        self.assertEqual(page.count("<img"), 1)
+
+    def test_pipeline_records_the_date_and_pen(self):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {}, clear=True):
+            out = Path(tmp) / "run"
+            args = ["--synthetic", "--pose-only", "--out", str(out), "--pen", " North pen ", "--date", "2026-09-24"]
+            self.assertEqual(run(args), 0)
+            tracks_doc = json.loads((out / "tracks.json").read_text())
+            summary = (out / "summary.txt").read_text()
+            default = Path(tmp) / "default"
+            self.assertEqual(run(["--synthetic", "--pose-only", "--out", str(default)]), 0)
+            default_doc = json.loads((default / "tracks.json").read_text())
+            with self.assertRaises(SystemExit), mock.patch("sys.stderr", io.StringIO()):
+                run(["--synthetic", "--pose-only", "--out", str(out), "--date", "tomorrow"])
+        self.assertEqual((tracks_doc["footage_date"], tracks_doc["pen_label"]), ("2026-09-24", "North pen"))
+        self.assertIn("footage date: 2026-09-24  pen label: North pen", summary)
+        self.assertEqual((default_doc["footage_date"], default_doc["pen_label"]), (date.today().isoformat(), None))
+
+    def test_from_run_keeps_the_earlier_date_and_pen_unless_told_otherwise(self):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {}, clear=True):
+            src = spfes_run_dir(Path(tmp))
+            stamp = datetime(2026, 9, 21, 12).timestamp()
+            os.utime(src / "tracks.json", (stamp, stamp))
+            first, again, moved = (Path(tmp) / name for name in ("first", "again", "moved"))
+            self.assertEqual(run(["--from-run", str(src), "--pose-only", "--out", str(first), "--pen", "North pen"]), 0)
+            first_doc = json.loads((first / "tracks.json").read_text())
+            shutil.copy(src / "frames.json", first / "frames.json")  # as a --demo run would have kept it
+            self.assertEqual(run(["--from-run", str(first), "--pose-only", "--out", str(again)]), 0)
+            again_doc = json.loads((again / "tracks.json").read_text())
+            redated = ["--from-run", str(first), "--pose-only", "--out", str(moved), "--date", "2026-09-22"]
+            self.assertEqual(run(redated), 0)
+            moved_doc = json.loads((moved / "tracks.json").read_text())
+        self.assertEqual((first_doc["footage_date"], first_doc["pen_label"]), ("2026-09-21", "North pen"))
+        self.assertEqual((again_doc["footage_date"], again_doc["pen_label"]), ("2026-09-21", "North pen"))
+        self.assertEqual((moved_doc["footage_date"], moved_doc["pen_label"]), ("2026-09-22", "North pen"))
+
+
+class ThumbnailPickTests(unittest.TestCase):
+    def test_picks_a_frame_with_the_face_toward_the_camera(self):
+        frames = spfes_frames()
+        picks = thumb_frames(frames, {3, 5, 15, 21}, 0.4)
+        self.assertEqual(set(picks), {3, 5, 15, 21})
+        self.assertEqual(picks[15] % 5, 0)  # sheep 15 shows its face on every fifth frame only
+        self.assertEqual(picks[3], 44)  # all frames equal: the one nearest the middle of 0..89
+        self.assertNotIn(99, thumb_frames(frames, {3}, 0.4))
+
+    def test_crop_is_four_by_three_and_stays_in_frame(self):
+        boxes = (
+            ([100, 100, 280, 240], 1.0),
+            ([0, 0, 60, 40], 1.0),
+            ([1180, 560, 1240, 620], 1.0),
+            ([0, 0, 2000, 900], 0.5),
+        )
+        for box, scale in boxes:
+            with self.subTest(box=box):
+                left, top, right, bottom = crop_box(box, scale, 1240, 620)
+                self.assertGreaterEqual(left, 0)
+                self.assertGreaterEqual(top, 0)
+                self.assertLessEqual(right, 1240)
+                self.assertLessEqual(bottom, 620)
+                self.assertAlmostEqual((right - left) / (bottom - top), 4 / 3, delta=0.02)
+        left, top, right, bottom = crop_box([100, 100, 280, 240], 1.0, 1240, 620)
+        self.assertLessEqual(left, 100)
+        self.assertGreaterEqual(right, 280)
 
 
 class SpfesPipelineTests(unittest.TestCase):
@@ -1142,7 +1506,8 @@ class SpfesPipelineTests(unittest.TestCase):
             self.assertEqual(Verdict(row["book"]["decision"], row["book"]["reason"]), SPFES_EXPECTED[row["track_id"]])
         self.assertIn("book:  look 4  skip 1  cannot 1", summary)
         self.assertIn("book vs final: same call on 4 of 6", summary)
-        self.assertIn("Every sheep in this clip needs a look (6 of 6).", page)
+        self.assertIn("Check all 6 tomorrow.", page)
+        self.assertIn("Every sheep seen was flagged (6 of 6).", page)
 
     def test_gate_changes_only_unsure_looks_and_the_ab_uses_the_final_call(self):
         # Book calls: 3 skip, 5/8/12/21 look, 15 cannot. Jev: sure looks on 5 and 8, unsure looks on 12
@@ -1184,8 +1549,10 @@ class SpfesPipelineTests(unittest.TestCase):
         self.assertIn("book vs final: same call on 4 of 6", summary)
         self.assertIn("typed=look  noul=0.3  decision=cannot/not_sure  book=look/carriage", summary)
         self.assertEqual(jev.bodies[-1]["state"]["cannot_reasons"], {"not_facing": 1, "not_sure": 2})
-        self.assertIn("2 of 6 need a look, 1 can be skipped, 3 could not be checked.", page)
-        self.assertEqual(page.count("Not sure enough to call — the ear signs were weak or mixed."), 2)
+        self.assertIn("Check these 2 tomorrow.", page)
+        self.assertIn("3 not checked · 1 looked fine", rest_section(page))
+        unsure = "Not sure enough to call — the ear signs were weak or mixed."
+        self.assertEqual(rest_section(page).count(unsure), 2)
 
     def test_book_without_a_key_still_writes_the_baseline(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1209,7 +1576,7 @@ class SpfesPipelineTests(unittest.TestCase):
         self.assertIsNone(row["decision"])
         self.assertIn("HTTP 500", row["error"])
         self.assertEqual(jev.bodies[-1]["state"]["counts"]["check_failed"], 1)
-        self.assertEqual(page.count("The look/skip check failed for this one."), 1)
+        self.assertEqual(rest_section(page).count("The ear check failed for this one."), 1)
 
     def test_pen_failure_and_no_pen(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1241,7 +1608,10 @@ class SpfesOverlayTests(unittest.TestCase):
             out = Path(tmp) / "out"
             with mock.patch.dict(os.environ, {"TYPESAFE_API_KEY": "sk-fixture"}, clear=True):
                 code = run(
-                    ["--from-run", str(spfes_run_dir(Path(tmp))), "--demo", "--out", str(out)],
+                    [
+                        "--from-run", str(spfes_run_dir(Path(tmp))), "--demo", "--out", str(out),
+                        "--pen", "North pen", "--date", "2026-09-24",
+                    ],
                     opener=FakeJev(pen="walk_tomorrow"),
                 )
             cap = cv2.VideoCapture(str(out / "annotated.mp4"))
@@ -1249,11 +1619,17 @@ class SpfesOverlayTests(unittest.TestCase):
             while cap.read()[0]:
                 n += 1
             cap.release()
-            page = (out / "glance-list.html").read_text()
+            page = (out / PAGE_NAME).read_text()
+            thumbs = sorted(p.name for p in (out / "thumbs").iterdir())
         self.assertEqual(code, 0)
         self.assertEqual(n, 90)
+        self.assertIn("Thursday 24 September", page)
+        self.assertIn("North pen · Morning brief", page)
         self.assertIn("Walk the pen first thing tomorrow.", page)
-        self.assertIn('<span class="badge unchecked">Not checked</span>', page)
+        self.assertIn("<h3>Not checked</h3>", rest_section(page))
+        self.assertEqual(thumbs, sorted(f"sheep-{tid}.jpg" for tid in SPFES_EXPECTED))
+        for tid in SPFES_EXPECTED:
+            self.assertEqual(page.count(f'src="{thumb_path(tid)}"'), 1)
 
     def test_cannot_is_burned_grey(self):
         import cv2

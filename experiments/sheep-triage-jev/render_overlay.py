@@ -4,7 +4,9 @@
 Reads a run folder written by ``run_pipeline.py --demo`` (``frames.json``,
 ``triage.json``, ``tracks.json``) and writes ``annotated.mp4``: pose boxes,
 the ear-angle lines, and a Look / Skip / Not checked badge per track. Badges
-come from ``triage.json`` only; the raw score is never drawn.
+come from ``triage.json`` only; the raw score is never drawn. It also saves
+one small JPEG per sheep under ``thumbs/`` for the morning brief, cropped from
+the source video (from the drawn replay when there is no video).
 
     uv run --project sheep-yolo python experiments/sheep-triage-jev/render_overlay.py \\
         experiments/sheep-triage-jev/runs/<name>/
@@ -25,11 +27,13 @@ from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
-from glance_list import LOOK, SKIP, UNCHECKED, badge_for, clock, decisions_ran
+from glance_list import LOOK, SKIP, THUMBS_DIR, UNCHECKED, badge_for, clock, decisions_ran, thumb_path
 from pose_features import ear_angles
 
 VIDEO_NAME = "annotated.mp4"
 FRAMES_NAME = "frames.json"
+THUMB_SIZE = (320, 240)
+THUMB_PAD = 1.35  # crop this much wider than the box, so the head is not cut at the edge
 
 SKEL = [(0, 1), (0, 2)]  # nose to each ear base; ear base to tip is drawn per ear
 UI_WIDTH = 1280.0  # line and text sizes are tuned for this output width
@@ -87,6 +91,47 @@ def header_parts(badges: Mapping[int, str], *, ran: bool | None = None) -> list[
     if UNCHECKED in values:
         parts.append((f"NOT CHECKED {values.count(UNCHECKED)}", UNCHECKED))
     return parts
+
+
+def thumb_frames(frames: list[dict[int, dict]], track_ids: set[int], kpt_conf: float) -> dict[int, int]:
+    """Frame index to crop each sheep's thumbnail from.
+
+    Prefers a frame with the face toward the camera (nose and both ear bases
+    found), then the most keypoints found, then the frame nearest the middle
+    of its time in view.
+    """
+    seen: dict[int, list[int]] = {}
+    for idx, frame in enumerate(frames):
+        for tid in frame:
+            if tid in track_ids:
+                seen.setdefault(tid, []).append(idx)
+    picks: dict[int, int] = {}
+    for tid, idxs in seen.items():
+        mid = (idxs[0] + idxs[-1]) / 2
+
+        def key(idx: int, tid: int = tid, mid: float = mid) -> tuple[bool, int, float]:
+            found = [len(pt) >= 3 and pt[2] > kpt_conf for pt in frames[idx][tid]["kpts"][:5]]
+            return (len(found) >= 3 and all(found[:3]), sum(found), -abs(idx - mid))
+
+        picks[tid] = max(idxs, key=key)
+    return picks
+
+
+def crop_box(box: list[float], scale: float, width: int, height: int) -> tuple[int, int, int, int]:
+    """A 4:3 crop around one box, padded and kept inside a ``width`` × ``height`` frame."""
+    x1, y1, x2, y2 = (v * scale for v in box)
+    w = max(x2 - x1, (y2 - y1) * 4 / 3, 8.0) * THUMB_PAD
+    w = min(w, float(width), height * 4 / 3)
+    h = w * 3 / 4
+    left = min(max(0.0, (x1 + x2 - w) / 2), width - w)
+    top = min(max(0.0, (y1 + y2 - h) / 2), height - h)
+    return round(left), round(top), round(left + w), round(top + h)
+
+
+def _save_thumb(cv2, img, box: list[float], scale: float, path: Path) -> None:
+    left, top, right, bottom = crop_box(box, scale, img.shape[1], img.shape[0])
+    crop = cv2.resize(img[top:bottom, left:right], THUMB_SIZE, interpolation=cv2.INTER_AREA)
+    cv2.imwrite(str(path), crop, [cv2.IMWRITE_JPEG_QUALITY, 85])
 
 
 class _Writer:
@@ -272,8 +317,15 @@ def render(
     scale = out_w / src_w
 
     out = run_dir / VIDEO_NAME
+    thumbs_dir = run_dir / THUMBS_DIR
+    thumbs_dir.mkdir(exist_ok=True)
+    for stale in thumbs_dir.glob("sheep-*.jpg"):
+        stale.unlink()
+    due: dict[int, list[int]] = {}
+    for tid, idx in thumb_frames(frames, set(badges), kpt_conf).items():
+        due.setdefault(idx, []).append(tid)
     writer = _Writer(out, out_w, out_h, fps)
-    written = 0
+    written = n_thumbs = 0
     try:
         for idx, tracks in enumerate(frames):
             if cap is None:
@@ -287,19 +339,28 @@ def render(
                         break
                 if img.shape[1] != out_w or img.shape[0] != out_h:
                     img = cv2.resize(img, (out_w, out_h), interpolation=cv2.INTER_AREA)
+                # Real footage: crop before the overlay, so the thumbnail is the sheep itself.
+                for tid in due.get(idx, ()):
+                    _save_thumb(cv2, img, tracks[tid]["box"], scale, run_dir / thumb_path(tid))
+                    n_thumbs += 1
             top = _draw_header(cv2, img, header, idx / fps, cap is None)
             for tid in sorted(tracks):
                 if tid in badges:  # dropped flickers have no decision and are not drawn
                     draw_track(
                         cv2, img, tracks[tid], tid, badges[tid], scale=scale, kpt_conf=kpt_conf, top=top
                     )
+            if cap is None:
+                # No footage to crop: the drawn head is the only picture there is.
+                for tid in due.get(idx, ()):
+                    _save_thumb(cv2, img, tracks[tid]["box"], scale, run_dir / thumb_path(tid))
+                    n_thumbs += 1
             writer.write(img)
             written += 1
     finally:
         writer.close()
         if cap is not None:
             cap.release()
-    print(f"wrote {out}  ({written} frames, {out_w}x{out_h}, {writer.codec})")
+    print(f"wrote {out}  ({written} frames, {out_w}x{out_h}, {writer.codec}) and {n_thumbs} thumbnails")
     return out
 
 

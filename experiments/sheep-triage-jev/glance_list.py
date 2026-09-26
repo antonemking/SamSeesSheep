@@ -1,18 +1,23 @@
 #!/usr/bin/env python3
-"""Farmer glance list: one static HTML page per run.
+"""Morning brief: one static HTML check list per run.
 
-Reads ``tracks.json`` and ``triage.json`` from a run folder and writes
-``glance-list.html`` next to them. Look cards come first. Each card has the
-track number, when it is in view, one plain-English reason, and a jump link
-into ``annotated.mp4`` when that file exists. The reason comes from Jev's
-reason choice, worded here from the track's ear numbers; runs without one
-fall back to a reason read off the pose summary. If the run has a pen call,
-the page opens with it.
+The day's footage is tracked and ear-checked overnight; this page is what the
+farmer opens next morning. It reads ``tracks.json`` and ``triage.json`` from a
+run folder and writes ``morning-brief.html`` next to them.
 
-    python experiments/sheep-triage-jev/glance_list.py experiments/sheep-triage-jev/runs/<name>/
+The main view is the date, the pen, "Check these N tomorrow" with the pen
+call, then one card per Look sheep, most clearly flagged first: the sheep
+number, a thumbnail when the replay made one, when it was seen, one
+plain-English reason, and a Watch button that seeks ``annotated.mp4``. Sheep
+that looked fine or could not be checked sit in a collapsed section under the
+list. Reasons come from Jev's reason choice, worded here from the track's ear
+numbers; runs without one fall back to a reason read off the pose summary.
 
-Stdlib only. The page says Look / Skip / Not checked. It never shows the raw
-score, the model name, or JSON.
+    python experiments/sheep-triage-jev/glance_list.py experiments/sheep-triage-jev/runs/<name>/ \\
+        [--pen "North pen"] [--date 2026-09-24]
+
+Stdlib only, no network. The page never shows the raw score, the model name,
+JSON or file paths.
 """
 
 from __future__ import annotations
@@ -21,6 +26,7 @@ import argparse
 import json
 import sys
 from collections.abc import Mapping
+from datetime import date
 from html import escape
 from pathlib import Path
 from typing import Any, Literal, TypedDict
@@ -28,8 +34,10 @@ from typing import Any, Literal, TypedDict
 from pose_features import EarPack
 from spfes_ear import CARRIAGE_HIGH_DEG, CARRIAGE_LOW_DEG, FLUTTER_DEG, REASONS, Reason
 
-PAGE_NAME = "glance-list.html"
+PAGE_NAME = "morning-brief.html"
 VIDEO_NAME = "annotated.mp4"
+THUMBS_DIR = "thumbs"
+DEFAULT_PEN = "Your flock"
 
 LOOK = "Look"
 SKIP = "Skip"
@@ -37,6 +45,7 @@ UNCHECKED = "Not checked"
 # "dont" is how runs from before the SPFES ear check spelled skip.
 BADGES = {"look": LOOK, "skip": SKIP, "cannot": UNCHECKED, "dont": SKIP}
 ORDER = {LOOK: 0, UNCHECKED: 1, SKIP: 2}
+FACE_OR_EARS_UNSEEN = ("not_facing", "ears_unmeasurable")
 
 SPREAD_DEG = 15.0  # ear-angle spread worth a glance
 SEEN_MOST = 0.5  # ear or head measured on at least half the frames
@@ -50,6 +59,7 @@ PEN_LINES = {
 }
 # Runs from before the overnight framing asked for walk_now.
 OLD_PEN_CALLS = {"walk_now": "walk_tomorrow"}
+FAILED_TEXT = "The ear check failed for this one."
 
 Status = Literal["sorted", "cannot", "failed", "not_run"]
 
@@ -58,7 +68,9 @@ class Card(TypedDict):
     track_id: int
     badge: str
     status: Status
+    reason_code: str | None
     reason: str
+    rank: int | None
     start_s: float | None
     end_s: float | None
 
@@ -87,6 +99,24 @@ def status_for(row: Mapping[str, Any]) -> Status:
 def clock(seconds: float) -> str:
     whole = max(0, int(seconds))
     return f"{whole // 60}:{whole % 60:02d}"
+
+
+def thumb_path(track_id: int) -> str:
+    """Where the replay renderer saves a sheep's thumbnail, relative to the run folder."""
+    return f"{THUMBS_DIR}/sheep-{track_id}.jpg"
+
+
+def day_text(day: date) -> str:
+    return f"{day:%A} {day.day} {day:%B}"
+
+
+def footage_length(seconds: float) -> str:
+    if seconds < 90:
+        return f"{max(1, round(seconds))} s"
+    minutes = round(seconds / 60)
+    if minutes < 60:
+        return f"{minutes} min"
+    return f"{minutes // 60} h {minutes % 60} min"
 
 
 def farmer_reason(reason: Reason, pack: EarPack) -> str:
@@ -171,57 +201,87 @@ def card_reason(track: Mapping[str, Any], row: Mapping[str, Any], badge: str) ->
     return reason_for(track, badge)
 
 
+def _strength(row: Mapping[str, Any]) -> float | None:
+    noul = row.get("noul")
+    if isinstance(noul, bool) or not isinstance(noul, (int, float)):
+        return None
+    return float(noul)
+
+
 def build_cards(tracks_doc: Mapping[str, Any], triage_doc: Mapping[str, Any]) -> list[Card]:
+    """Look cards first, most clearly flagged first, then Not checked, then Skip."""
     fps = tracks_doc.get("fps")
     rows = {row["track_id"]: row for row in triage_doc.get("tracks", [])}
-    cards: list[Card] = []
+    keyed: list[tuple[tuple[Any, ...], Card]] = []
     for track in tracks_doc.get("tracks", []):
         row = rows.get(track["track_id"], {})
         badge = badge_for(row.get("decision"))
+        status = status_for(row)
         start_s = end_s = None
         if fps:
             start_s = track["frame_first"] / fps
             end_s = (track["frame_last"] + 1) / fps
-        cards.append(
-            Card(
-                track_id=track["track_id"],
-                badge=badge,
-                status=status_for(row),
-                reason=card_reason(track, row, badge),
-                start_s=start_s,
-                end_s=end_s,
-            )
+        card = Card(
+            track_id=track["track_id"],
+            badge=badge,
+            status=status,
+            reason_code=row.get("reason"),
+            reason=FAILED_TEXT if status == "failed" else card_reason(track, row, badge),
+            rank=None,
+            start_s=start_s,
+            end_s=end_s,
         )
-    cards.sort(key=lambda c: (ORDER[c["badge"]], c["start_s"] or 0.0, c["track_id"]))
+        strength = _strength(row) if badge == LOOK else None
+        key = (ORDER[badge], strength is None, -(strength or 0.0), start_s or 0.0, track["track_id"])
+        keyed.append((key, card))
+    cards = [card for _, card in sorted(keyed, key=lambda kc: kc[0])]
+    for rank, card in enumerate((c for c in cards if c["badge"] == LOOK), start=1):
+        card["rank"] = rank
     return cards
 
 
-def headline(cards: list[Card]) -> str:
+def _counts(cards: list[Card]) -> tuple[int, int, int, int]:
     n = len(cards)
     look = sum(c["badge"] == LOOK for c in cards)
     skip = sum(c["badge"] == SKIP for c in cards)
-    unchecked = n - look - skip
+    return n, look, skip, n - look - skip
+
+
+def headline(cards: list[Card]) -> str:
+    """The one line under the date. Counts Look sheep only; the rest never make the headline."""
+    n, look, skip, _ = _counts(cards)
     statuses = {c["status"] for c in cards}
     if n == 0:
-        return "No sheep were tracked in this clip."
-    if statuses == {"not_run"}:
-        return "Not sorted yet — the look/skip check did not run, so nothing is marked Look or Skip."
-    if "failed" in statuses and statuses <= {"failed", "not_run"}:
-        return "The look/skip check failed, so nothing is marked Look or Skip."
-    if statuses == {"cannot"}:
+        return "No sheep were seen in this footage."
+    if look == 0 and skip == 0:
+        if statuses == {"not_run"}:
+            return "Not sorted yet — the ear check didn't run, so there's no list for tomorrow."
+        if statuses <= {"failed", "not_run"}:
+            return "The ear check failed, so there's no list for tomorrow."
+        if statuses == {"cannot"} and all(c["reason_code"] in FACE_OR_EARS_UNSEEN for c in cards):
+            if n == 1:
+                return "Couldn't check the one sheep — its face or ears weren't clear enough."
+            return f"Couldn't check any of the {n} sheep — their faces or ears weren't clear enough."
         if n == 1:
-            return "Couldn't check the one sheep — its face or ears weren't clear enough."
-        return f"Couldn't check any of the {n} sheep — their faces or ears weren't clear enough."
+            return "Couldn't check the one sheep, so there's no list for tomorrow."
+        return f"Couldn't check any of the {n} sheep, so there's no list for tomorrow."
+    if look == 0:
+        return "Nothing needs a check tomorrow." if skip == n else "Nothing flagged for tomorrow."
     if look == n:
-        return f"Every sheep in this clip needs a look ({n} of {n})."
-    if skip == n:
-        return f"Nothing stood out — all {n} can be skipped."
-    parts = [f"{look} of {n} need a look"]
-    if skip:
-        parts.append(f"{skip} can be skipped")
-    if unchecked:
-        parts.append(f"{unchecked} could not be checked")
-    return ", ".join(parts) + "."
+        return "Check the one sheep tomorrow." if n == 1 else f"Check all {n} tomorrow."
+    return "Check this one tomorrow." if look == 1 else f"Check these {look} tomorrow."
+
+
+def detail(cards: list[Card]) -> str | None:
+    """A second line for the states the headline alone would leave unclear."""
+    n, look, skip, unchecked = _counts(cards)
+    if look == n and n > 1:
+        return f"Every sheep seen was flagged ({n} of {n})."
+    if look == 0 and skip:
+        if skip == n:
+            return "The one sheep seen looked fine." if n == 1 else f"All {n} sheep looked fine."
+        return f"{skip} looked fine and {unchecked} couldn't be checked — see below."
+    return None
 
 
 def pen_line(triage_doc: Mapping[str, Any]) -> tuple[str, str] | None:
@@ -236,163 +296,378 @@ def pen_line(triage_doc: Mapping[str, Any]) -> tuple[str, str] | None:
     return call, PEN_LINES[call]
 
 
-def _card_html(card: Card, video: str | None) -> str:
-    kind = {LOOK: "look", SKIP: "skip", UNCHECKED: "unchecked"}[card["badge"]]
-    lines = [
-        f'<li class="card {kind}">',
-        f'  <span class="badge {kind}">{escape(card["badge"])}</span>',
-        f"  <h2>Sheep #{card['track_id']}</h2>",
-    ]
+def _text(value: str) -> str:
+    return escape(value, quote=False)
+
+
+def _watch(video: str | None, start: float | None, label: str, text: str, extra: str = "") -> str:
+    if not video or start is None:
+        return ""
+    return (
+        f'<a class="watch{extra}" href="{escape(video)}#t={start:.2f}" data-t="{start:.2f}" '
+        f'data-label="{escape(label)} · from {clock(start)}">{_text(text)}</a>'
+    )
+
+
+def _when(card: Card) -> str:
     start, end = card["start_s"], card["end_s"]
-    if start is not None and end is not None:
-        lines.append(f'  <p class="when">In view {clock(start)} – {clock(end)}</p>')
-    lines.append(f'  <p class="why">{escape(card["reason"])}</p>')
-    if card["status"] == "failed":
-        lines.append('  <p class="note">The look/skip check failed for this one.</p>')
-    if start is not None and video:
+    if start is None or end is None:
+        return ""
+    return f"Seen {clock(start)} – {clock(end)}"
+
+
+def _look_card_html(card: Card, video: str | None, thumb: str | None) -> str:
+    name = f"Sheep #{card['track_id']}"
+    when = _when(card)
+    lines = [
+        f'<li class="card look{"" if thumb else " no-thumb"}">',
+        f'  <span class="rank" aria-hidden="true">{card["rank"]}</span>',
+        '  <div class="head">',
+        f"    <h2>{name}</h2>",
+    ]
+    if when:
+        lines.append(f'    <p class="when">{when}</p>')
+    lines.append("  </div>")
+    if thumb:
         lines.append(
-            f'  <a class="jump" href="{escape(video)}#t={start:.2f}" data-t="{start:.2f}">'
-            f"Jump to {clock(start)}</a>"
+            f'  <img class="thumb" src="{escape(thumb)}" alt="{name}" width="320" height="240" loading="lazy">'
         )
-    elif start is not None:
-        lines.append(f'  <p class="jump-missing">At {clock(start)} in the clip.</p>')
+    lines.append(f'  <p class="why">{_text(card["reason"])}</p>')
+    start = card["start_s"]
+    watch = _watch(video, start, name, f"Watch from {clock(start)}" if start is not None else "")
+    if watch:
+        lines.append(f"  {watch}")
     lines.append("</li>")
     return "\n".join(lines)
 
 
+def _row_html(card: Card, video: str | None, thumb: str | None) -> str:
+    name = f"Sheep #{card['track_id']}"
+    when = _when(card)
+    lines = [f'<li class="row{"" if thumb else " no-thumb"}">']
+    if thumb:
+        lines.append(f'  <img class="mini" src="{escape(thumb)}" alt="{name}" width="320" height="240" loading="lazy">')
+    head = f"<strong>{name}</strong>" + (f' <span class="when">{when}</span>' if when else "")
+    lines.append(f'  <p class="row-head">{head}</p>')
+    lines.append(f'  <p class="why">{_text(card["reason"])}</p>')
+    watch = _watch(video, card["start_s"], name, "Watch", " small")
+    if watch:
+        lines.append(f"  {watch}")
+    lines.append("</li>")
+    return "\n".join(lines)
+
+
+def _rest_html(cards: list[Card], video: str | None, thumbs: Mapping[int, str]) -> str:
+    groups = [
+        ("Not checked", [c for c in cards if c["badge"] == UNCHECKED]),
+        ("Looked fine", [c for c in cards if c["badge"] == SKIP]),
+    ]
+    groups = [(title, group) for title, group in groups if group]
+    if not groups:
+        return ""
+    counts = " · ".join(f"{len(group)} {title.lower()}" for title, group in groups)
+    body = []
+    for title, group in groups:
+        rows = "\n".join(_row_html(c, video, thumbs.get(c["track_id"])) for c in group)
+        body.append(f'<h3>{title}</h3>\n<ul class="rows">\n{rows}\n</ul>')
+    return (
+        '<details class="rest">\n'
+        '<summary><span class="rest-title">Not on the list</span> '
+        f'<span class="rest-counts">{counts}</span></summary>\n'
+        f'<div class="rest-body">\n{chr(10).join(body)}\n</div>\n'
+        "</details>"
+    )
+
+
 STYLE = """
-body { font: 18px/1.4 -apple-system, system-ui, sans-serif; margin: 0 auto; max-width: 1280px; padding: 16px; color: #1d1d1b; background: #f6f4ee; }
-h1 { font-size: 28px; margin: 0 0 4px; }
-.clip { color: #666; margin: 0 0 12px; }
-.headline { font-size: 22px; font-weight: 600; margin: 0 0 8px; }
-main { display: grid; gap: 16px; margin-top: 8px; }
-@media (min-width: 900px) { main.with-video { grid-template-columns: 3fr 2fr; align-items: start; } .player { position: sticky; top: 12px; } }
-video { width: 100%; background: #000; border-radius: 8px; }
-.cards { list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }
-.card { background: #fff; border-radius: 10px; padding: 12px 16px; border-left: 8px solid #bbb; }
-.card.look { border-left-color: #ff9f1a; }
-.card.skip { border-left-color: #3caf50; opacity: 0.85; }
-.card h2 { display: inline; font-size: 20px; margin-left: 8px; }
-.card p { margin: 6px 0; }
-.when { color: #555; }
-.note { color: #a33; }
-.badge { display: inline-block; font-weight: 700; padding: 2px 12px; border-radius: 999px; background: #bbb; color: #1d1d1b; }
-.badge.look { background: #ff9f1a; }
-.badge.skip { background: #3caf50; color: #fff; }
-.pen { display: inline-block; font-size: 20px; font-weight: 700; margin: 4px 0 10px; padding: 6px 16px; border-radius: 8px; background: #e4e1d8; }
-.pen.walk-now { background: #ff9f1a; }
-.pen.later { background: #ffe0a8; }
-.pen.fine { background: #cfe9d2; }
-.jump { display: inline-block; margin-top: 4px; padding: 6px 14px; border-radius: 6px; background: #1d1d1b; color: #fff; text-decoration: none; font-weight: 600; }
-footer { color: #666; font-size: 15px; margin-top: 24px; }
+:root {
+  color-scheme: light;
+  --bg: #f4f1e8; --card: #fff; --ink: #1d221f; --muted: #56605a; --line: #e0dacb;
+  --look: #f2a23a; --button: #1d221f; --focus: #2a64d0;
+  --walk-tomorrow: #fbe2bf; --walk-tomorrow-dot: #d97a0c;
+  --later: #f7eecb; --later-dot: #b8911a;
+  --fine: #dfeee1; --fine-dot: #3b8753;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 17px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+.page { max-width: 760px; margin: 0 auto; padding: 24px 16px 120px; }
+.eyebrow { margin: 0; font-size: 13px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+h1 { margin: 6px 0 4px; font-size: 28px; line-height: 1.15; letter-spacing: -.01em; }
+.meta { margin: 0; color: var(--muted); }
+.summary { margin: 20px 0 18px; padding: 16px 18px; border-radius: 16px; background: var(--card); box-shadow: 0 0 0 1px var(--line); }
+.summary.pen-walk-tomorrow { background: var(--walk-tomorrow); box-shadow: none; }
+.summary.pen-later { background: var(--later); box-shadow: none; }
+.summary.pen-fine { background: var(--fine); box-shadow: none; }
+.headline { margin: 0; font-size: 24px; line-height: 1.2; font-weight: 750; }
+.detail { margin: 6px 0 0; color: var(--muted); }
+.pen { display: flex; align-items: center; gap: 10px; margin: 10px 0 0; font-weight: 650; }
+.dot { flex: none; width: 12px; height: 12px; border-radius: 50%; background: var(--muted); }
+.pen-walk-tomorrow .dot { background: var(--walk-tomorrow-dot); }
+.pen-later .dot { background: var(--later-dot); }
+.pen-fine .dot { background: var(--fine-dot); }
+.list-note { margin: 0 0 8px; font-size: 14px; color: var(--muted); }
+.checklist { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.card { display: grid; align-items: start; gap: 4px 12px; padding: 14px; background: var(--card); border-radius: 16px;
+  box-shadow: 0 0 0 1px var(--line), 0 2px 6px rgba(40, 35, 20, .05);
+  grid-template-columns: 34px 1fr 104px; grid-template-areas: "rank head thumb" "why why why" "watch watch watch"; }
+.card.no-thumb { grid-template-columns: 34px 1fr; grid-template-areas: "rank head" "why why" "watch watch"; }
+.rank { grid-area: rank; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%;
+  background: var(--look); font-weight: 800; }
+.head { grid-area: head; min-width: 0; }
+.card h2 { margin: 3px 0 0; font-size: 20px; line-height: 1.2; }
+.when { margin: 2px 0 0; color: var(--muted); font-size: 15px; }
+.thumb { grid-area: thumb; display: block; width: 100%; height: auto; aspect-ratio: 4 / 3; object-fit: cover;
+  border-radius: 10px; background: #d9d3c4; }
+.why { grid-area: why; margin: 6px 0 0; }
+.watch { grid-area: watch; justify-self: start; display: inline-flex; align-items: center; gap: 9px; min-height: 44px;
+  margin-top: 8px; padding: 0 16px; border-radius: 10px; background: var(--button); color: #fff;
+  font-size: 16px; font-weight: 650; text-decoration: none; }
+.watch::before { content: ""; border-style: solid; border-width: 6px 0 6px 10px;
+  border-color: transparent transparent transparent currentColor; }
+.watch:hover { background: #3a423c; }
+.watch.small { min-height: 38px; padding: 0 12px; font-size: 15px; }
+.rest { margin-top: 20px; background: var(--card); border-radius: 16px; box-shadow: 0 0 0 1px var(--line); }
+.rest summary { position: relative; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px;
+  min-height: 52px; padding: 14px 48px 14px 16px; cursor: pointer; list-style: none; }
+.rest summary::-webkit-details-marker { display: none; }
+.rest summary::after { content: ""; position: absolute; right: 20px; top: 50%; width: 9px; height: 9px;
+  border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: translateY(-70%) rotate(45deg); }
+.rest[open] summary::after { transform: translateY(-20%) rotate(-135deg); }
+.rest-title { font-weight: 700; }
+.rest-counts { color: var(--muted); }
+.rest-body { padding: 0 16px 8px; border-top: 1px solid var(--line); }
+.rest h3 { margin: 16px 0 2px; font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.rows { list-style: none; margin: 0; padding: 0; }
+.row { display: grid; align-items: start; gap: 2px 12px; padding: 12px 0; border-top: 1px solid var(--line);
+  grid-template-columns: 64px 1fr; grid-template-areas: "mini head" "why why" "watch watch"; }
+.row:first-child { border-top: 0; }
+.row.no-thumb { grid-template-columns: 1fr; grid-template-areas: "head" "why" "watch"; }
+.mini { grid-area: mini; display: block; width: 64px; height: auto; aspect-ratio: 4 / 3; object-fit: cover;
+  border-radius: 8px; background: #d9d3c4; }
+.row-head { grid-area: head; margin: 0; min-width: 0; }
+.row-head .when { display: block; margin: 0; }
+.row .why { margin: 4px 0 0; }
+.row .watch { margin-top: 8px; }
+footer { margin-top: 28px; color: var(--muted); font-size: 15px; }
+footer p { margin: 0 0 10px; }
+.watch-all { color: var(--ink); font-weight: 650; }
+.player { position: fixed; z-index: 10; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; gap: 8px;
+  padding: 10px 10px calc(10px + env(safe-area-inset-bottom)); background: #161a17; color: #fff;
+  box-shadow: 0 -8px 28px rgba(0, 0, 0, .28); }
+.player[hidden] { display: none; }
+.player-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-weight: 650; }
+.player-bar button { min-height: 40px; padding: 0 14px; border: 0; border-radius: 8px; background: #333a35; color: #fff;
+  font: inherit; cursor: pointer; }
+.player video { display: block; width: 100%; max-height: 45vh; background: #000; border-radius: 8px; }
+a:focus-visible, button:focus-visible, summary:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+@media (min-width: 700px) {
+  body { font-size: 18px; }
+  .page { padding: 44px 24px 140px; }
+  h1 { font-size: 42px; }
+  .summary { padding: 20px 24px; }
+  .headline { font-size: 28px; }
+  .card { gap: 4px 18px; padding: 16px; grid-template-columns: 40px 184px 1fr; grid-template-rows: auto auto 1fr;
+    grid-template-areas: "rank thumb head" "rank thumb why" "rank thumb watch"; }
+  .card.no-thumb { grid-template-columns: 40px 1fr; grid-template-areas: "rank head" "rank why" "rank watch"; }
+  .rank { width: 40px; height: 40px; }
+  .row { align-items: center; grid-template-columns: 72px 1fr auto; grid-template-areas: "mini head watch" "mini why watch"; }
+  .row.no-thumb { grid-template-columns: 1fr auto; grid-template-areas: "head watch" "why watch"; }
+  .row-head .when { display: inline; margin-left: 6px; }
+  .mini { width: 72px; }
+  .row .watch { margin-top: 0; }
+}
+@media (min-width: 1000px) {
+  .player { left: auto; right: 24px; bottom: 24px; width: 520px; padding: 12px; border-radius: 14px; }
+}
 """.strip()
 
 SCRIPT = """
-document.querySelectorAll("a.jump").forEach(function (link) {
-  link.addEventListener("click", function (event) {
-    var video = document.getElementById("replay");
-    if (!video) return;
-    event.preventDefault();
-    video.currentTime = parseFloat(link.dataset.t);
-    video.play();
-    video.scrollIntoView({ behavior: "smooth", block: "nearest" });
+(function () {
+  var player = document.getElementById("player");
+  var video = document.getElementById("replay");
+  var label = document.getElementById("player-label");
+  if (!player || !video) return;
+  function seek(t) {
+    function go() {
+      video.currentTime = t;
+      var playing = video.play();
+      if (playing && playing.catch) playing.catch(function () {});
+    }
+    if (video.readyState >= 1) go();
+    else video.addEventListener("loadedmetadata", go, { once: true });
+  }
+  document.querySelectorAll("a[data-t]").forEach(function (link) {
+    link.addEventListener("click", function (event) {
+      event.preventDefault();
+      label.textContent = link.dataset.label;
+      player.hidden = false;
+      seek(parseFloat(link.dataset.t));
+    });
   });
-});
+  function close() {
+    video.pause();
+    player.hidden = true;
+  }
+  document.getElementById("player-close").addEventListener("click", close);
+  document.addEventListener("keydown", function (event) {
+    if (event.key === "Escape" && !player.hidden) close();
+  });
+})();
 """.strip()
 
 
-def render_html(tracks_doc: Mapping[str, Any], triage_doc: Mapping[str, Any], *, video: str | None) -> str:
+def _footage_day(tracks_doc: Mapping[str, Any]) -> date | None:
+    value = tracks_doc.get("footage_date")
+    if not isinstance(value, str):
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def render_html(
+    tracks_doc: Mapping[str, Any],
+    triage_doc: Mapping[str, Any],
+    *,
+    video: str | None,
+    thumbs: Mapping[int, str] | None = None,
+    day: date | None = None,
+    pen_label: str | None = None,
+) -> str:
+    """The brief as one self-contained page. ``day`` and ``pen_label`` default to the run's own."""
+    thumbs = thumbs or {}
     cards = build_cards(tracks_doc, triage_doc)
-    look = sum(c["badge"] == LOOK for c in cards)
-    skip = sum(c["badge"] == SKIP for c in cards)
-    unchecked = len(cards) - look - skip
+    looks = [c for c in cards if c["badge"] == LOOK]
+    day = day or _footage_day(tracks_doc)
+    pen_name = (pen_label or tracks_doc.get("pen_label") or DEFAULT_PEN).strip() or DEFAULT_PEN
+    when = day_text(day) if day else "Morning brief"
     clip = tracks_doc.get("clip") or "clip"
     clip_name = "synthetic test (no real video)" if clip == "synthetic" else Path(clip).name
     fps = tracks_doc.get("fps")
     n_frames = tracks_doc.get("n_frames")
-    clip_line = escape(clip_name)
-    if fps and n_frames:
-        clip_line += f" · {clock(n_frames / fps)} long"
-    pen = ""
+    length = n_frames / fps if fps and n_frames else None
+    meta = f"{footage_length(length)} of footage, sorted overnight" if length else "Sorted overnight"
+    source = f"Footage: {clip_name}" + (f" · {clock(length)} long." if length else ".")
+
     call = pen_line(triage_doc)
-    if call is not None:
-        pen = f'<p class="pen {call[0].replace("_", "-")}">{escape(call[1])}</p>'
-    counts = ""
-    if decisions_ran(triage_doc):
-        pills = [
-            f'<span class="badge look">Look {look}</span>',
-            f'<span class="badge skip">Skip {skip}</span>',
-        ]
-        if unchecked:
-            pills.append(f'<span class="badge unchecked">Not checked {unchecked}</span>')
-        counts = f'<p class="counts">{" ".join(pills)}</p>'
-    player = ""
-    if video:
-        player = (
-            f'<div class="player"><video id="replay" src="{escape(video)}" '
-            f'controls preload="metadata" playsinline></video></div>'
-        )
+    summary_class = f"summary pen-{call[0].replace('_', '-')}" if call else "summary"
+    summary = [f'<p class="headline">{_text(headline(cards))}</p>']
+    extra = detail(cards)
+    if extra:
+        summary.append(f'<p class="detail">{_text(extra)}</p>')
+    if call:
+        summary.append(f'<p class="pen"><span class="dot" aria-hidden="true"></span>{_text(call[1])}</p>')
+
+    checklist = ""
+    if looks:
+        note = '<p class="list-note">Most clearly flagged first.</p>\n' if len(looks) > 1 else ""
+        items = "\n".join(_look_card_html(c, video, thumbs.get(c["track_id"])) for c in looks)
+        checklist = f'{note}<ol class="checklist">\n{items}\n</ol>'
+    rest = _rest_html(cards, video, thumbs)
+
     dropped = len(tracks_doc.get("dropped_track_ids") or [])
     ignored = ""
     if dropped:
         ignored = f" {dropped} very brief detection{'s were' if dropped != 1 else ' was'} ignored."
-    body = "\n".join(_card_html(card, video) for card in cards)
+    watch_all = player = script = ""
+    if video:
+        watch_all = (
+            f'<p><a class="watch-all" href="{escape(video)}" data-t="0" data-label="Full replay">'
+            "Watch the full replay</a></p>\n"
+        )
+        player = (
+            '<div class="player" id="player" hidden>\n'
+            '<div class="player-bar"><span id="player-label">Replay</span>'
+            '<button type="button" id="player-close">Close</button></div>\n'
+            f'<video id="replay" src="{escape(video)}" controls preload="metadata" playsinline></video>\n'
+            "</div>"
+        )
+        script = f"<script>\n{SCRIPT}\n</script>"
+    iso = f' datetime="{day.isoformat()}"' if day else ""
+    title = f"{when} — {pen_name} — morning brief" if day else f"{pen_name} — morning brief"
     return f"""<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Which sheep need a glance — {escape(clip_name)}</title>
+<title>{_text(title)}</title>
 <style>
 {STYLE}
 </style>
 </head>
 <body>
+<div class="page">
 <header>
-<h1>Which sheep need a glance</h1>
-<p class="clip">{clip_line}</p>
-<p class="headline">{escape(headline(cards))}</p>
-{pen}
-{counts}
+<p class="eyebrow">{_text(pen_name)} · Morning brief</p>
+<h1><time{iso}>{_text(when)}</time></h1>
+<p class="meta">{_text(meta)}</p>
 </header>
-<main class="{"with-video" if video else "no-video"}">
-{player}
-<ol class="cards">
-{body}
-</ol>
+<main>
+<section class="{summary_class}">
+{chr(10).join(summary)}
+</section>
+{checklist}
+{rest}
 </main>
 <footer>
-<p>Look means the ears showed something worth a quick glance: an unusual angle, one ear held
-differently from the other, or ears that kept changing position. Skip means both ears looked even and steady.
-Not checked means its face or ears weren't clear enough to judge. This looks at ear position only;
-it is not a health or pain score.</p>
-<p>Sheep numbers are tracking labels for this clip only, not ear tags.{ignored}</p>
+{watch_all}<p>Overnight, each sheep in the footage gets an ear check: how its ears are held, whether one sits
+differently from the other, and whether they keep changing position. Sheep worth a look go on the list, most
+clearly flagged first. Looked fine means both ears were even and steady. Not checked means its face or ears
+weren't clear enough to judge, or the check wasn't sure. This only looks at ears — it can't tell you what's
+wrong with a sheep, and it can miss things.</p>
+<p>Sheep numbers are labels for this footage only, not ear tags.{ignored}</p>
+<p>{_text(source)}</p>
 </footer>
-<script>
-{SCRIPT}
-</script>
+</div>
+{player}
+{script}
 </body>
 </html>
 """
 
 
-def write_glance_list(run_dir: Path) -> Path:
-    tracks_doc = json.loads((run_dir / "tracks.json").read_text())
+def write_glance_list(run_dir: Path, *, day: date | None = None, pen_label: str | None = None) -> Path:
+    """Write ``morning-brief.html`` into ``run_dir``. Without a recorded date, the brief uses the run's file date."""
+    tracks_path = run_dir / "tracks.json"
+    tracks_doc = json.loads(tracks_path.read_text())
     triage_doc = json.loads((run_dir / "triage.json").read_text())
     video = VIDEO_NAME if (run_dir / VIDEO_NAME).is_file() else None
+    thumbs = {
+        t["track_id"]: thumb_path(t["track_id"])
+        for t in tracks_doc.get("tracks", [])
+        if (run_dir / thumb_path(t["track_id"])).is_file()
+    }
+    day = day or _footage_day(tracks_doc) or date.fromtimestamp(tracks_path.stat().st_mtime)
     page = run_dir / PAGE_NAME
-    page.write_text(render_html(tracks_doc, triage_doc, video=video))
+    page.write_text(render_html(tracks_doc, triage_doc, video=video, thumbs=thumbs, day=day, pen_label=pen_label))
     return page
+
+
+def iso_day(value: str) -> date:
+    """argparse type for --date."""
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{value!r} is not a date like 2026-09-24") from None
 
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("run_dir", type=Path, help="Run folder with tracks.json and triage.json.")
+    p.add_argument(
+        "--pen", default=None, help=f'Pen or flock name for the top of the brief (default: the run\'s, else "{DEFAULT_PEN}").'
+    )
+    p.add_argument(
+        "--date", type=iso_day, default=None, help="Day the footage was taken, YYYY-MM-DD (default: the run's)."
+    )
     args = p.parse_args(sys.argv[1:] if argv is None else argv)
     for name in ("tracks.json", "triage.json"):
         if not (args.run_dir / name).is_file():
             raise SystemExit(f"{name} not found in {args.run_dir}. Run run_pipeline.py first.")
-    print(f"wrote {write_glance_list(args.run_dir)}")
+    print(f"wrote {write_glance_list(args.run_dir, day=args.date, pen_label=args.pen)}")
     return 0
 
 
