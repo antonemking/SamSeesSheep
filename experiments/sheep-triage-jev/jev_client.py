@@ -16,8 +16,8 @@ typed cannot is always cannot; the noul never turns either into a look. The
 reason is otherwise Jev's most probable reason among those that fit the
 decision.
 
-After the tracks, one pen call turns the counts and reasons into
-walk_now | later | fine.
+After the tracks, one pen call turns the day's counts and reasons into
+walk_tomorrow | later | fine for the next morning.
 
 The key is read from ``TYPESAFE_API_KEY`` by the caller and sent only as a
 Bearer token. It is never written into request bodies, artifacts, or errors.
@@ -47,7 +47,7 @@ from spfes_ear import (
 
 ENDPOINT = "https://api.typesafe.ai/v1/systemone"
 DEFAULT_MODEL = "jev-latest"
-QUESTION_SET = "spfes-ear-v1"
+QUESTION_SET = "spfes-ear-v2"  # v2: overnight pen question (walk_tomorrow); track questions as in v1
 DECISION_RULE = (
     "Jev's typed class decides. A typed look needs noul >= threshold, otherwise it becomes cannot "
     "(not_sure). A typed skip stays skip and a typed cannot stays cannot, whatever the noul."
@@ -58,7 +58,7 @@ LOOK_ID = "look"
 REASON_ID = "reason"
 PEN_ID = "pen"
 
-PenCall = Literal["walk_now", "later", "fine"]
+PenCall = Literal["walk_tomorrow", "later", "fine"]
 PEN_CALLS: tuple[PenCall, ...] = get_args(PenCall)
 
 SPFES_EAR_PROTOCOL = (
@@ -115,15 +115,19 @@ PEN_QUESTIONS: dict[str, dict[str, Any]] = {
     PEN_ID: {
         "type": "choice",
         "instructions": _instructions(
-            "These are the ear checks for every sheep tracked in one clip of one pen. What should the farmer do?"
+            "These are the overnight ear checks for every sheep tracked in one day's footage of one pen. "
+            "The farmer reads this the next morning. What should the farmer do tomorrow?"
         ),
         "criteria": {
-            "walk_now": "Several sheep, or a large share of the pen, show ear signs worth a look. Walk the pen now.",
+            "walk_tomorrow": (
+                "Several sheep, or a large share of the pen, show ear signs worth a look. "
+                "Walk the pen first thing tomorrow."
+            ),
             "later": (
                 "One or two sheep show ear signs, or many could not be checked. "
                 "Look at them on the next routine walk-through."
             ),
-            "fine": "No sheep, or almost none, show ear signs, and most were checked. Nothing to do now.",
+            "fine": "No sheep, or almost none, show ear signs, and most were checked. No special walk needed.",
         },
     },
 }
@@ -239,7 +243,7 @@ def pen_state(verdicts: Sequence[Verdict], *, failed: int = 0) -> dict[str, Any]
     counts = Counter(v.decision for v in verdicts)
     return {
         "task": (
-            "Pen-level ear check from one clip. No image is attached. "
+            "Pen-level ear check from one day's footage, run overnight. No image is attached. "
             "Each tracked sheep was already checked on its own under the protocol."
         ),
         "sheep_tracked": len(verdicts) + failed,

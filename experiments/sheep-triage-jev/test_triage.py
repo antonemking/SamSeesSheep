@@ -961,13 +961,23 @@ class JevResponseTests(unittest.TestCase):
             triage_track({}, api_key="", opener=not_json)
 
     def test_pen_call(self):
-        answers = {PEN_ID: _choice_answer("walk_now", PEN_CALLS)}
+        answers = {PEN_ID: _choice_answer("walk_tomorrow", PEN_CALLS)}
         pen = triage_pen({}, api_key="sk-test", opener=lambda req, timeout=0: _Resp({"answers": answers}))
-        self.assertEqual(pen.call, "walk_now")
-        self.assertEqual(pen.to_json()["call"], "walk_now")
-        answers = {PEN_ID: {**_choice_answer("walk_now", PEN_CALLS), "choice": "panic"}}
-        with self.assertRaises(JevError):
-            triage_pen({}, api_key="sk-test", opener=lambda req, timeout=0: _Resp({"answers": answers}))
+        self.assertEqual(pen.call, "walk_tomorrow")
+        self.assertEqual(pen.to_json()["call"], "walk_tomorrow")
+        for stale in ("panic", "walk_now"):
+            answers = {PEN_ID: {**_choice_answer("walk_tomorrow", PEN_CALLS), "choice": stale}}
+            with self.subTest(stale), self.assertRaises(JevError):
+                triage_pen({}, api_key="sk-test", opener=lambda req, timeout=0: _Resp({"answers": answers}))
+
+    def test_pen_question_is_framed_for_the_next_morning(self):
+        question = PEN_QUESTIONS[PEN_ID]
+        self.assertEqual(tuple(question["criteria"]), ("walk_tomorrow", "later", "fine"))
+        text = json.dumps(question).lower()
+        self.assertIn("overnight", text)
+        self.assertIn("tomorrow", text)
+        self.assertNotIn("walk the pen now", text)
+        self.assertIn("overnight", pen_state([Verdict("look", "flutter")])["task"])
 
 
 class SpfesBadgeTests(unittest.TestCase):
@@ -1057,9 +1067,9 @@ class SpfesGlanceListTests(unittest.TestCase):
 
     def test_pen_line(self):
         for call, text in (
-            ("walk_now", "Walk the pen now."),
-            ("later", "No rush — look them over on your next walk-through."),
-            ("fine", "The pen looks fine for now."),
+            ("walk_tomorrow", "Walk the pen first thing tomorrow."),
+            ("later", "No rush — your next routine walk-through is soon enough."),
+            ("fine", "The pen looks fine — no special walk needed."),
         ):
             with self.subTest(call):
                 tracks_doc, triage = _spfes_docs(self.rows(), pen={"call": call, "confidence": 0.9})
@@ -1070,6 +1080,13 @@ class SpfesGlanceListTests(unittest.TestCase):
                 tracks_doc, triage = _spfes_docs(self.rows(), pen=pen)
                 self.assertIsNone(pen_line(triage))
                 self.assertNotIn('class="pen', render_html(tracks_doc, triage, video=None))
+
+    def test_old_walk_now_runs_read_as_tomorrow(self):
+        tracks_doc, triage = _spfes_docs(self.rows(), pen={"call": "walk_now", "confidence": 0.9})
+        self.assertEqual(pen_line(triage), ("walk_tomorrow", "Walk the pen first thing tomorrow."))
+        page = render_html(tracks_doc, triage, video=None)
+        self.assertIn("Walk the pen first thing tomorrow.", page)
+        self.assertNotIn("Walk the pen now", page)
 
     def test_page_keeps_the_vocabulary_internal(self):
         tracks_doc, triage = _spfes_docs(self.rows(), pen={"call": "walk_now"})
@@ -1089,7 +1106,7 @@ class SpfesPipelineTests(unittest.TestCase):
         return out
 
     def test_from_run_asks_jev_per_track_then_the_pen(self):
-        jev = FakeJev(pen="walk_now")
+        jev = FakeJev(pen="walk_tomorrow")
         with tempfile.TemporaryDirectory() as tmp:
             out = self.run_from_fixture(tmp, jev=jev)
             triage = json.loads((out / "triage.json").read_text())
@@ -1101,13 +1118,13 @@ class SpfesPipelineTests(unittest.TestCase):
         self.assertEqual(
             {r["track_id"]: Verdict(r["decision"], r["reason"]) for r in triage["tracks"]}, SPFES_EXPECTED
         )
-        self.assertEqual(triage["pen"]["call"], "walk_now")
-        self.assertEqual(triage["question_set"], "spfes-ear-v1")
+        self.assertEqual(triage["pen"]["call"], "walk_tomorrow")
+        self.assertEqual(triage["question_set"], "spfes-ear-v2")
         self.assertNotIn("book_rules", triage)
         self.assertTrue(tracks["from_run"].endswith("spfes-source"))
         self.assertIn("typed: look 4  skip 1  cannot 1", summary)
         self.assertIn("final: look 4  skip 1  cannot 1  failed 0  (gate turned 0 typed look into cannot)", summary)
-        self.assertIn("pen: walk_now", summary)
+        self.assertIn("pen: walk_tomorrow", summary)
         pen_body = jev.bodies[-1]
         self.assertEqual(pen_body["state"]["counts"], {"look": 4, "skip": 1, "cannot": 1, "check_failed": 0})
 
@@ -1225,7 +1242,7 @@ class SpfesOverlayTests(unittest.TestCase):
             with mock.patch.dict(os.environ, {"TYPESAFE_API_KEY": "sk-fixture"}, clear=True):
                 code = run(
                     ["--from-run", str(spfes_run_dir(Path(tmp))), "--demo", "--out", str(out)],
-                    opener=FakeJev(pen="walk_now"),
+                    opener=FakeJev(pen="walk_tomorrow"),
                 )
             cap = cv2.VideoCapture(str(out / "annotated.mp4"))
             n = 0
@@ -1235,7 +1252,7 @@ class SpfesOverlayTests(unittest.TestCase):
             page = (out / "glance-list.html").read_text()
         self.assertEqual(code, 0)
         self.assertEqual(n, 90)
-        self.assertIn("Walk the pen now.", page)
+        self.assertIn("Walk the pen first thing tomorrow.", page)
         self.assertIn('<span class="badge unchecked">Not checked</span>', page)
 
     def test_cannot_is_burned_grey(self):

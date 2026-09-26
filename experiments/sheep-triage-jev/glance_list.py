@@ -44,10 +44,12 @@ BRIEF_S = 1.0
 MOVING_WIDTHS_PER_S = 0.5  # centroid speed in box widths per second; well above tracker jitter
 
 PEN_LINES = {
-    "walk_now": "Walk the pen now.",
-    "later": "No rush — look them over on your next walk-through.",
-    "fine": "The pen looks fine for now.",
+    "walk_tomorrow": "Walk the pen first thing tomorrow.",
+    "later": "No rush — your next routine walk-through is soon enough.",
+    "fine": "The pen looks fine — no special walk needed.",
 }
+# Runs from before the overnight framing asked for walk_now.
+OLD_PEN_CALLS = {"walk_now": "walk_tomorrow"}
 
 Status = Literal["sorted", "cannot", "failed", "not_run"]
 
@@ -226,6 +228,9 @@ def pen_line(triage_doc: Mapping[str, Any]) -> tuple[str, str] | None:
     """(call, sentence) for the pen call, or None when there is none."""
     pen = triage_doc.get("pen")
     call = pen.get("call") if isinstance(pen, Mapping) else None
+    if not isinstance(call, str):
+        return None
+    call = OLD_PEN_CALLS.get(call, call)
     if call not in PEN_LINES:
         return None
     return call, PEN_LINES[call]

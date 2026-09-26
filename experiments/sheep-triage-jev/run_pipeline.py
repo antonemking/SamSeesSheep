@@ -14,7 +14,7 @@ Full triage (TYPESAFE_API_KEY must be set in the environment, never committed):
         --clip test-clips/Test_Clip_Morning.mov
 
 Each track gets look / skip / cannot and a reason from Jev; one more call
-turns the pen's counts into walk_now / later / fine. --triage book also
+turns the pen's counts into walk_tomorrow / later / fine. --triage book also
 writes the fixed ear-rule baseline beside Jev in triage.json. --from-run
 re-asks an earlier --demo run folder without tracking the clip again.
 
@@ -169,7 +169,9 @@ def _parse(argv: list[str]) -> argparse.Namespace:
         help="jev (default): Jev decides. book: also write the fixed ear-rule baseline beside Jev "
         "in triage.json for A/B. Jev still drives the demo.",
     )
-    p.add_argument("--no-pen", action="store_true", help="Skip the pen-level walk now / later / fine call.")
+    p.add_argument(
+        "--no-pen", action="store_true", help="Skip the pen-level walk tomorrow / later / fine call."
+    )
     p.add_argument("--max-frames", type=int, default=None)
     p.add_argument("--conf", type=float, default=0.25, help="Detection confidence.")
     p.add_argument("--kpt-conf", type=float, default=0.4, help="Keypoint confidence.")
