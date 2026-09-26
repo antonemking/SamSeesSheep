@@ -260,6 +260,8 @@ def _post(
         raise JevError(f"Jev request failed: {_scrub(str(exc.reason), api_key)}") from exc
     except TimeoutError as exc:
         raise JevError(f"Jev request timed out after {timeout:g} s") from exc
+    except OSError as exc:  # resets mid-read, and socket.timeout before Python 3.10
+        raise JevError(f"Jev request failed: {_scrub(str(exc), api_key)}") from exc
 
     try:
         payload = json.loads(payload_bytes.decode("utf-8"))

@@ -929,7 +929,10 @@ class JevResponseTests(unittest.TestCase):
         def too_slow(req, timeout=0):
             raise TimeoutError
 
-        for opener in (not_json, too_slow):
+        def reset(req, timeout=0):
+            raise ConnectionResetError("peer reset")
+
+        for opener in (not_json, too_slow, reset):
             with self.subTest(opener.__name__), self.assertRaises(JevError):
                 triage_track({}, api_key="sk-test", opener=opener)
         with self.assertRaises(JevError):
