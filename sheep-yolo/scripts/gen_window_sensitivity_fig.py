@@ -5,8 +5,8 @@ hand-picked paper window is highlighted. Reads artifacts/window_sensitivity.json
 (produced by window_sensitivity.py).
 
 Shows that the reported noise floor is not an artifact of selecting the stillest
-5 s: across all windows sigma_avg stays a small fraction of the SPFES 40 deg
-band, and rises only modestly with head motion.
+5 s: across all windows sigma_avg stays a small fraction of the 40 deg
+reference-band span, and rises only modestly with head motion.
 
 Run from sheep-yolo/:
     python scripts/gen_window_sensitivity_fig.py

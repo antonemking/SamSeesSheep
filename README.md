@@ -40,7 +40,7 @@ Ear-angle residual σ on a held-out clip — never pushed to the labeler, never 
 | v0.6 | 4.65° ⚠️ | 3.55° |
 | **v0.7** | **3.70°** | **4.46°** |
 
-*This table is on the IMG_3651 held-out clip (never seen by labeler or trainer). On a second held-out clip (Test_Clip_Morning, different lighting and flock arrangement), v0.7 achieves σ_avg = 2.84° (left 2.39°, right 3.29°) — ~7.1% of the SPFES 40° classification band. ⚠️ v0.6 shows right ear at best-ever 3.55° but left ear regressed to 4.65° — more data does not monotonically improve every keypoint.*
+*This table is on the IMG_3651 held-out clip (never seen by labeler or trainer). On a second held-out clip (Test_Clip_Morning, different lighting and flock arrangement), v0.7 achieves σ_avg = 2.84° (left 2.39°, right 3.29°) — ~7.1% of the project's 40° ear-angle reference span (reference bands informed by the ear-posture literature; SPFES itself scores ears 0/1/2 with no degree thresholds). ⚠️ v0.6 shows right ear at best-ever 3.55° but left ear regressed to 4.65° — more data does not monotonically improve every keypoint.*
 
 <p align="center">
   <img src="docs/v0.7-ear-angle-chart.png" width="92%"

@@ -41,7 +41,7 @@ video{width:100%;max-height:520px;border-radius:4px;background:#000;display:bloc
 </head>
 <body>
 <h1>sheep-yolo</h1>
-<p class="sub">YOLOE-seg out-of-the-box benchmark for sheep head / ear / nose part detection. Ear angles computed against SPFES thresholds (<a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC6523241/">McLennan &amp; Mahmoud 2019</a>). v2 of sheep-seg — see <code>sheep-chat.md</code> for the why.</p>
+<p class="sub">YOLOE-seg out-of-the-box benchmark for sheep head / ear / nose part detection. Ear angles shown against literature-informed reference bands (not SPFES categories; SPFES context: <a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC6523241/">McLennan &amp; Mahmoud 2019</a>). v2 of sheep-seg — see <code>sheep-chat.md</code> for the why.</p>
 
 <div class="upload" id="upload-zone">
   <p><strong>Drop a sheep video</strong> or click to browse</p>
@@ -86,7 +86,7 @@ video{width:100%;max-height:520px;border-radius:4px;background:#000;display:bloc
 
   <div class="card">
     <div class="dash-h" id="chart-title">Ear angle timeline</div>
-    <div class="dash-cap" id="chart-caption">Angle relative to head dorsal axis · positive = up/forward · negative = back/down. Shaded bands mark SPFES up / neutral / down regions.</div>
+    <div class="dash-cap" id="chart-caption">Angle relative to head dorsal axis · positive = up/forward · negative = back/down. Shaded bands mark the project's up / neutral / down reference regions (not SPFES categories).</div>
     <div class="sheep-legend" id="sheep-legend"></div>
     <div style="position:relative;height:360px;margin-top:.5rem">
       <canvas id="chart"></canvas>
@@ -100,7 +100,7 @@ video{width:100%;max-height:520px;border-radius:4px;background:#000;display:bloc
       <div>· Model: <code>ultralytics YOLOE-seg</code>, text prompts <code>"sheep head" / "sheep ear" / "sheep nose"</code> — no fine-tuning</div>
       <div>· Tracking: Ultralytics built-in (ByteTrack) — stable per-sheep track IDs across frames</div>
       <div>· Ear angle: nose → ear-midpoint for the dorsal axis (PCA fallback); ear vector from base → tip</div>
-      <div>· Thresholds: <a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC6523241/">McLennan &amp; Mahmoud 2019 (SPFES)</a>, Reefmann 2009, Boissy 2011</div>
+      <div>· Reference bands (project operationalization, not SPFES categories): Reefmann 2009, Boissy 2011; SPFES context: <a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC6523241/">McLennan &amp; Mahmoud 2019</a></div>
       <div>· This repo exists to measure <strong>out-of-the-box</strong> YOLO performance on sheep anatomy. Custom training lives in a separate repo.</div>
     </div>
   </div>
@@ -218,7 +218,7 @@ function renderResults(d){
     $('chart-caption').textContent='Whole-sheep tracking via COCO-pretrained YOLO26-seg. Each step trace lifts when that sheep is visible on that frame. No ear-angle measurement in this mode.';
   } else {
     $('chart-title').textContent='Ear angle timeline';
-    $('chart-caption').textContent='Angle relative to head dorsal axis · positive = up/forward · negative = back/down. Shaded bands mark SPFES up / neutral / down regions.';
+    $('chart-caption').textContent='Angle relative to head dorsal axis · positive = up/forward · negative = back/down. Shaded bands mark the project's up / neutral / down reference regions (not SPFES categories).';
   }
 
   renderChart(d);

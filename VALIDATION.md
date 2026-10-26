@@ -38,7 +38,7 @@ The project went through two scope shifts since day 0. This section supersedes a
 
 | Aspect | Trustworthy? |
 |---|---|
-| **Keypoint stability on held-out clips** | **Measured.** v0.7 achieves σ_avg = 2.84° ear-angle on a genuinely held-out clip (Test_Clip_Morning), ~7.1% of the SPFES 40° classification band. Two-clip ablation (IMG_3651 + Test_Clip_Morning) published. |
+| **Keypoint stability on held-out clips** | **Measured.** v0.7 achieves σ_avg = 2.84° ear-angle on a genuinely held-out clip (Test_Clip_Morning), ~7.1% of the project's 40° ear-angle reference span (reference bands, not SPFES categories). Two-clip ablation (IMG_3651 + Test_Clip_Morning) published. |
 | **Pain detection** | **No.** This project does not detect pain. It will, at best, detect *ear-position features* whose threshold values come from the published welfare literature. |
 | **Welfare scoring** | **No.** "Welfare" is a multi-feature construct that requires veterinary assessment. This project measures one geometric feature on one species under one set of conditions. |
 | **Generalization to other flocks / breeds / farms** | **No.** v0 runs on five sheep on one Delaware homestead. Any claim that generalizes beyond that requires evidence this project does not yet have. |
@@ -58,7 +58,7 @@ The ear-position thresholds and the up/down classification will be drawn from th
 
 ## What this project explicitly does NOT claim to measure
 
-- **Pain.** The published grimace-scale literature on sheep (SPFES) was validated by trained veterinary observers in clinical pain conditions: foot rot, mastitis, post-surgical recovery. Generalizing those facial expressions to ambient pasture observation is a real and unresolved gap. Even if EUP% correlates with documented stress events on this homestead, that is not a pain claim.
+- **Pain.** The published grimace-scale literature on sheep (SPFES, McLennan et al. 2016) was validated by trained observers scoring still photographs in clinical pain conditions: footrot and mastitis. SPFES scores five facial areas 0/1/2 and specifies no ear-angle thresholds; the degree bands in this repo are our own operationalization. Generalizing those facial expressions to ambient pasture observation is a real and unresolved gap. Even if EUP% correlates with documented stress events on this homestead, that is not a pain claim.
 - **Welfare** as a construct. Welfare is multi-dimensional and requires expert veterinary assessment. EUP% is one signal that may correlate with one dimension under some conditions.
 - **Affect, mood, emotion.** These are anthropomorphizations that the project will not use even informally.
 - **Disease.** EUP% is not a clinical screening tool. Off-feed, lameness, isolation from herd, vocalization, body condition score, and direct veterinary examination are the actual disease indicators.

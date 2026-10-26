@@ -33,9 +33,11 @@ Extraction from Ambient Pasture Video Using Foundation-Model Annotation}
 \maketitle
 
 \begin{abstract}
-The Sheep Pain Facial Expression Scale (SPFES) \citep{mclennan2019} requires
-trained human observers to score pain frame-by-frame from video, a bottleneck
-that limits the scale and reproducibility of ovine welfare research. No
+The Sheep Pain Facial Expression Scale (SPFES) \citep{mclennan2016,mclennan2019}
+scores five facial action units, including ear position, from photographs by
+trained human observers; applied over time to video, this requires a scoring
+decision per animal per sampled moment, a bottleneck that limits the scale and
+reproducibility of ovine welfare research. No
 automated system currently exists to extract the relevant ear-angle
 measurements from ambient pasture video. I present SamSeesSheep, a measurement
 pipeline that uses a foundation video segmentation model (SAM~3 Video) as an
@@ -81,17 +83,17 @@ researchers who need reproducible ear-angle features from ambient footage.
 \section{Introduction}
 
 Sheep welfare assessment has advanced through the development of facial
-expression scales. The Sheep Pain Facial Expression Scale (SPFES), validated by
-McLennan and Mahmoud \citep{mclennan2019}, identifies five facial action units,
-including ear posture, that correlate with pain states in clinical conditions
-such as foot rot, mastitis, and post-surgical recovery. Ear posture in
-particular has been established as an indicator of emotional valence in sheep by
-multiple independent groups \citep{reefmann2009,boissy2011}. The SPFES protocol,
-however, requires trained human observers to score each frame of video
-manually. For a single 30-second clip at even a modest frame rate, this is
-hundreds of individual scoring decisions. Scaling to continuous monitoring
-across multiple animals and days is operationally infeasible without
-automation.
+expression scales. The Sheep Pain Facial Expression Scale (SPFES), developed and
+validated by McLennan et al.\ \citep{mclennan2016}, scores five facial areas,
+including ear position, that separate sheep with footrot or mastitis from
+healthy controls. Ear posture in particular has been established as an
+indicator of emotional valence in sheep by multiple independent groups
+\citep{reefmann2009,boissy2011}. SPFES was validated on still photographs (one
+frontal and one profile view per animal per time point) scored by trained
+observers; it specifies no procedure for continuous video. Applying it over time
+at even a modest sampling rate would require a scoring decision per animal per
+sampled moment. Scaling to continuous monitoring across multiple animals and
+days is operationally infeasible without automation.
 
 The gap is not in the biological validity of ear-angle features; it is in the
 measurement infrastructure. No automated system extracts ear-angle measurements
@@ -164,19 +166,26 @@ pipeline that built it.
 \section{Related Work}
 
 \subsection{Ovine Facial Expression Scales and Ear Posture}
-McLennan and Mahmoud \citep{mclennan2019} developed the SPFES, identifying five
-facial action units --- orbital tightening, cheek tightening, ear posture, lip
-and jaw tension, and nostril and philtrum shape --- that trained observers score
-to assess pain in sheep. Their automated SPFES system used hand-crafted features
-and required manually annotated facial landmarks. The ear-posture unit
-classifies ear position into three categories (forward/alert, neutral,
-backward/flattened), with backward posture a strong pain indicator. Reefmann et
+McLennan et al.\ \citep{mclennan2016} developed the SPFES, which scores five
+facial areas --- orbital tightening, cheek (masseter) tightening, ear position,
+lip and jaw profile, and nostril and philtrum shape --- each as 0 (not present),
+1 (partially present) or 2 (present), summed to a total pain score with a
+maximum of 10. In the validation study the scale separated footrot and mastitis
+cases from controls (AUC 0.81 and 0.80) with an inter-observer ICC of 0.86. The
+ear unit is scored categorically: the ears ``become fully rotated ventrally and
+caudally and the inner pinna of the ear becomes less visible,'' with the note
+that baseline ear carriage varies between breeds. SPFES specifies no angular
+thresholds. McLennan and Mahmoud \citep{mclennan2019} describe an automated
+SPFES pipeline (face detection, facial-landmark localization, action-unit
+classification, scoring); the action-unit classifiers of Lu et al.\
+\citep{lu2017sheepau} used hand-crafted appearance features over eight manually
+annotated landmarks, including both ear tips and ear roots. Reefmann et
 al.\ \citep{reefmann2009} and Boissy et al.\ \citep{boissy2011} independently
 established ear postures as indicators of emotional valence, finding that
 asymmetric or backward positions correlate with negative affective states.
-These studies provide the biological grounding for ear-angle measurement but
-rely on trained human observers for frame-by-frame scoring. The gap we address
-is the absence of an automated measurement pipeline.
+These studies provide the biological grounding for ear-position measurement but
+rely on trained human observers for scoring. The gap we address is the absence
+of an automated measurement pipeline.
 
 \subsection{Foundation Models for Agriculture}
 The Segment Anything Model family \citep{kirillov2023segment,ravi2024sam2,ravi2025sam3}
@@ -494,11 +503,14 @@ Table~\ref{tab:earangle} reports the derived ear-angle residual $\sigma$. This i
 the pipeline's output scalar: a stationary sheep should produce a flat ear-angle
 trace, and the deviation from flatness is the measurement noise floor
 (Figure~\ref{fig:earangle}). v0.4 achieves ${\sim}4\dgr$ jitter on both ears, a
-39\% (left) and 33\% (right) reduction from v0.2. For reference, the SPFES
-ear-posture bands span $40\dgr$ between the ``alert'' ($\geq 30\dgr$) and
-``down/back'' ($\leq -10\dgr$) thresholds \citep{mclennan2019}; a $4\dgr$ noise
-floor is ${\sim}10\%$ of that span --- a scale comparison only, not a claim that
-the instrument is calibrated for SPFES band assignment. The stock baseline
+39\% (left) and 33\% (right) reduction from v0.2. For reference, this project's
+ear-angle reference bands place ``alert'' at $\geq 30\dgr$ and ``down/back'' at
+$\leq -10\dgr$, a $40\dgr$ span. These bands are an operationalization informed
+by the ear-posture ethograms of Reefmann et al.\ and Boissy et al.\
+\citep{reefmann2009,boissy2011}; SPFES itself scores ear position categorically
+and specifies no degree thresholds \citep{mclennan2016}. A $4\dgr$ noise floor
+is ${\sim}10\%$ of that span --- a scale comparison only, not a claim that the
+instrument is calibrated for SPFES scoring. The stock baseline
 produces zero keypoints and therefore no ear-angle measurement at all.
 
 \begin{table}[t]
@@ -524,9 +536,10 @@ produces zero keypoints and therefore no ear-angle measurement at all.
   traces indicate keypoint jitter. The large v0.2$\rightarrow$v0.4 improvement is
   visible, while v0.7 overlaps v0.4 --- consistent with the post-v0.4 plateau
   (Table~\ref{tab:progression}). Legend $\sigma$ values are residual standard
-  deviations. Shaded bands are the SPFES reference zones (green $\geq 30\dgr$,
-  amber $-10\dgr$ to $30\dgr$, red $\leq -10\dgr$); they are literature reference
-  bands, not diagnostic cutoffs.}
+  deviations. Shaded bands are this project's ear-angle reference zones (green
+  $\geq 30\dgr$, amber $-10\dgr$ to $30\dgr$, red $\leq -10\dgr$), informed by
+  published ear-posture ethograms \citep{reefmann2009,boissy2011}; they are not
+  SPFES categories and not diagnostic cutoffs.}
   \label{fig:earangle}
 \end{figure}
 
@@ -638,7 +651,7 @@ and Figure~\ref{fig:winsens} report the resulting distributions.
   \caption{Ear-angle residual $\sigavg$ for every $5$\,s window slid across the
   target's detected span, versus within-window head motion. Red star: the
   hand-picked paper window; dashed line: the median window. Across all windows
-  and both clips $\sigavg$ stays a small fraction of the SPFES $40\dgr$ band and
+  and both clips $\sigavg$ stays a small fraction of the $40\dgr$ reference-band span and
   rises only modestly with head motion --- the reported noise floor is not an
   artifact of selecting the stillest segment.}
   \label{fig:winsens}
@@ -648,15 +661,15 @@ The hand-picked window does sit low in the HO-1 v0.4 distribution (18th
 percentile), confirming the selection mechanism is real --- but its magnitude is
 small. The median window scores $4.55\dgr$ against the reported $4.07\dgr$, and
 \emph{even the noisiest} $5$\,s window of that sheep reaches only $5.69\dgr$
-(${\sim}14\%$ of the SPFES $40\dgr$ span). For v0.7 the paper window is
+(${\sim}14\%$ of the $40\dgr$ reference span). For v0.7 the paper window is
 mid-distribution (43rd percentile), and on HO-2 it is above the median (75th
 percentile) --- a higher-motion window than typical, so the reported $2.61\dgr$
 is, if anything, conservative. Within-window motion correlates with $\sigavg$
 only moderately ($r = 0.29$--$0.56$), so motion explains part but not most of the
 window-to-window variance. The noise floor is therefore not an artifact of
 selecting the stillest segment: across every window of both targets $\sigavg$
-stays between ${\sim}1.3\dgr$ and ${\sim}8.4\dgr$, a small fraction of the SPFES
-band in all cases.
+stays between ${\sim}1.3\dgr$ and ${\sim}8.4\dgr$, a small fraction of the
+reference-band span in all cases.
 
 \subsection{v0.4 on Held-Out versus In-Distribution}
 \label{sec:indist}
@@ -746,7 +759,7 @@ HO-1 the left/right $\sigma$ were roughly symmetric; here v0.2 shows a
 pronounced asymmetry ($5.37\dgr$ left vs.\ $2.24\dgr$ right) that resolves by v0.3
 and re-emerges smaller in v0.4 and v0.7. This may reflect genuine anatomical
 asymmetry in this sheep's ear carriage or a systematic left/right bias from the
-viewing angle. v0.7's $\sigavg = 2.84\dgr$ is $7.1\%$ of the SPFES $40\dgr$ band.
+viewing angle. v0.7's $\sigavg = 2.84\dgr$ is $7.1\%$ of the $40\dgr$ reference-band span.
 Note that on this clip v0.4's $\sigavg$ is $2.61\dgr$ --- slightly lower than
 v0.7's $2.84\dgr$; the two are within each other's bootstrap intervals
 (Table~\ref{tab:ci}), so v0.7 is not an improvement over v0.4 here.
@@ -802,7 +815,7 @@ performance; the two-clip comparison makes this explicit.
     $\sigma_{\text{left ear}}$ (\dgr)  & 4.06                  & 2.50                  & 2.39 \\
     $\sigma_{\text{right ear}}$ (\dgr) & 4.09                  & 2.72                  & 3.29 \\
     \textbf{$\sigavg$ (\dgr)}          & \textbf{4.08}         & \textbf{2.61}         & \textbf{2.84} \\
-    $\sigavg$ as \% of SPFES $40\dgr$  & 10.2\%                & 6.5\%                 & 7.1\% \\
+    $\sigavg$ as \% of $40\dgr$ ref.\ span & 10.2\%                & 6.5\%                 & 7.1\% \\
     Reviewed instances                 & 405                   & 405                   & 523 \\
     Training videos                    & 8                     & 8                     & 11 \\
     \bottomrule
@@ -869,8 +882,10 @@ animal-level held-out evaluation requires a second flock. A multi-clip ablation
 (3--5 clips from different sessions and weather) would strengthen the
 generalization claim.
 
-\paragraph{Ambient-vs-clinical gap.} The SPFES thresholds \citep{mclennan2019}
-were validated in clinical pain conditions with trained veterinary observers.
+\paragraph{Ambient-vs-clinical gap.} SPFES \citep{mclennan2016} was validated in
+clinical pain conditions (footrot, mastitis) with trained observers scoring
+still photographs, and the ear-posture ethograms behind this project's reference
+bands \citep{reefmann2009,boissy2011} come from controlled settings.
 Generalizing them to ambient pasture observation --- where sheep move their ears
 for vigilance, social signaling, insect avoidance, and wind --- is an unresolved
 scientific question. This instrument can extract ear angles; it cannot tell you

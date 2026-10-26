@@ -5,7 +5,7 @@ from YOLOE-seg (v2). Kept geometrically identical to sheep-seg v1 so that the
 two pipelines are directly comparable on the same clips.
 
 Published references:
-- McLennan et al. 2019: SPFES ear-position action unit
+- McLennan et al. 2016/2019: SPFES ear-position action unit (0/1/2; no degree thresholds)
 - Reefmann et al. 2009: ear posture taxonomy (forward/back/asymmetric/passive)
 - Boissy et al. 2011: ear posture as emotional valence indicator
 """
@@ -136,7 +136,7 @@ def classify_ear_position(angle_relative_to_head: float) -> EarPosition:
 
 def normalize_angle(angle: float) -> float:
     """Collapse to [-90, 90]. PCA and arctan2 produce 180° flips that are
-    meaningless in the SPFES window (ear angles live in roughly [-60, +60])."""
+    meaningless for sheep ears (angles live in roughly [-60, +60])."""
     while angle > 180:
         angle -= 360
     while angle < -180:

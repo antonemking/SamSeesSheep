@@ -52,10 +52,11 @@ INFER_IMGSZ = int(os.getenv("INFER_IMGSZ", "960"))
 # running the YOLOE parts pipeline, where head detections peak ~0.30.
 DETECTION_CONF = float(os.getenv("DETECTION_CONF", "0.25"))
 
-# SPFES-derived ear-angle thresholds. Angle is measured relative to the dorsal
-# head axis (nose → ear-midpoint). Values copied verbatim from sheep-seg v1 so
-# the chart bands match across both tools and stay traceable to the same lit:
-# McLennan & Mahmoud 2019 (SPFES), Reefmann 2009, Boissy 2011.
+# Ear-angle reference bands (project operationalization, not SPFES categories).
+# Angle is measured relative to the dorsal head axis (nose → ear-midpoint).
+# Values copied verbatim from sheep-seg v1 so the chart bands match across both
+# tools. Informed by Reefmann 2009 and Boissy 2011; SPFES (McLennan 2016) scores
+# ear position 0/1/2 and specifies no degree thresholds.
 EAR_UP_THRESHOLD_DEG = 30.0
 EAR_DOWN_THRESHOLD_DEG = -10.0
 

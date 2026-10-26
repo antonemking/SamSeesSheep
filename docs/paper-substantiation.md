@@ -74,7 +74,7 @@ in `bench_bootstrap_ci.json`.
 | Hero video "2036×640 px, 7.5 s" (Fig. 1) | From the archived `.mp4`; verifiable once the archive is published. |
 | Clip provenance: 5 Katahdin ewes, Middletown DE, iPhone 1080p/30fps, April–May 2026; HO-2 "61 MB / 986 frames / ~30 fps" | Dataset attestation; standard for a dataset paper. Not machine-checkable. |
 | "~6 min" training time, "2.5 M parameters" | External/architecture spec (RunPod; YOLO26n-pose). |
-| SPFES 40° band, ≥30° / ≤−10° thresholds | Literature (`\citep{mclennan2019}`). |
+| SPFES 40° band, ≥30° / ≤−10° thresholds | **Corrected 2026-10-26.** SPFES (McLennan et al. 2016) scores ear position categorically (0/1/2) and specifies no degree thresholds; the bands are this project's operationalization informed by Reefmann 2009 / Boissy 2011. Paper, README, ARCHITECTURE, VALIDATION, UI strings and code comments now say so (`mclennan2016`, `lu2017sheepau` added to `paper.bib`). |
 
 ---
 

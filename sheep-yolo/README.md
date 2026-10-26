@@ -53,7 +53,7 @@ The residual σ metric strips slow head drift (property of the sheep) and isolat
 uv run python scripts/render_ekg.py Test_Clip_Morning
 ```
 
-Produces a synced multi-lane ear-angle chart — one trace per tracked sheep, with SPFES alert bands and circle-crop face thumbnails. Renders to `artifacts/synced-lanes-*.mp4`.
+Produces a synced multi-lane ear-angle chart — one trace per tracked sheep, with the project's ear-angle reference bands and circle-crop face thumbnails. Renders to `artifacts/synced-lanes-*.mp4`.
 
 With the pro renderer:
 
@@ -111,7 +111,7 @@ See `backend/config.py` for the full list:
 
 ## Validation references
 
-- McLennan & Mahmoud 2019 — Sheep Pain Facial Expression Scale (SPFES)
+- McLennan et al. 2016; McLennan & Mahmoud 2019 — Sheep Pain Facial Expression Scale (SPFES; ears scored 0/1/2, no degree thresholds — the degree bands here are the project's own)
 - Reefmann et al. 2009 — ear posture taxonomy
 - Boissy et al. 2011 — cognitive sciences, ear postures, emotions in sheep
 

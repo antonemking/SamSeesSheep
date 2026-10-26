@@ -176,7 +176,7 @@ V04_RGB = (V04_BGR[2] / 255, V04_BGR[1] / 255, V04_BGR[0] / 255)
 def _safe_angle(midline_vec: np.ndarray, ear_vec: np.ndarray) -> float:
     """Signed angle (deg) between ear_vec and midline_vec. Positive when the
     ear tip lies on the snout-side of the head midline (alert/forward),
-    negative when behind (drooping/back). Matches the SPFES convention used
+    negative when behind (drooping/back). Matches the sign convention used
     in the labeler observability chart."""
     cross = midline_vec[0] * ear_vec[1] - midline_vec[1] * ear_vec[0]
     dot = midline_vec[0] * ear_vec[0] + midline_vec[1] * ear_vec[1]
@@ -232,9 +232,9 @@ def make_ear_angle_chart(targets: dict[str, np.ndarray], fps: float,
                           out_path: Path) -> Path:
     """Two-row matplotlib time series: left ear (top) and right ear (bottom).
     Each row overlays v0.2/v0.3/v0.4. The point is visual: v0.4's line is
-    flat, v0.2's bounces. SPFES bands (green/amber/red) drawn behind as
-    literature reference context — they're not measurement thresholds in this
-    clip, just a reading aid that matches the labeler dashboard."""
+    flat, v0.2's bounces. Reference bands (green/amber/red) drawn behind as
+    context — the project's literature-informed bands, not SPFES categories and
+    not measurement thresholds; a reading aid that matches the labeler dashboard."""
     a, b = WINDOW
     n = b - a
     t = np.arange(n) / fps
@@ -242,7 +242,7 @@ def make_ear_angle_chart(targets: dict[str, np.ndarray], fps: float,
     colors = {"v0.2": V02_RGB, "v0.3": V03_RGB, "v0.4": V04_RGB}
     series_pairs = {label: ear_angle_series(arr) for label, arr in targets.items()}
     for ax, ear_idx, ear_name in zip(axes, (0, 1), ("Left", "Right")):
-        # SPFES bands (per labeler dashboard convention)
+        # reference bands (per labeler dashboard convention)
         ax.axhspan(-100, -10, color="red", alpha=0.05, zorder=0)
         ax.axhspan(-10, 30, color="orange", alpha=0.05, zorder=0)
         ax.axhspan(30, 200, color="green", alpha=0.05, zorder=0)

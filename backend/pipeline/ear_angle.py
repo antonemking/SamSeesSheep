@@ -4,7 +4,7 @@ Computes the angle of each ear relative to the dorsal head axis
 using geometric analysis of the segmentation mask contours.
 
 Published literature reference:
-- McLennan et al. (2019): SPFES ear-position action unit
+- McLennan et al. (2016, 2019): SPFES ear-position action unit (scored 0/1/2; no degree thresholds)
 - Reefmann et al. (2009): ear posture taxonomy (forward, backward, asymmetric, passive)
 - Boissy et al. (2011): ear posture as emotional valence indicator
 """
@@ -179,7 +179,8 @@ def _compute_ear_direction(
 def _classify_ear_position(angle_relative_to_head: float) -> EarPosition:
     """Classify ear position based on angle relative to dorsal head axis.
 
-    Thresholds derived from SPFES literature:
+    Reference bands (project operationalization informed by Reefmann 2009 and
+    Boissy 2011; SPFES itself specifies no degree thresholds):
     - Up/Alert: ear rotated > 30° above the head axis (forward and up)
     - Neutral: ear between -10° and 30° relative to head axis
     - Down/Back: ear rotated > 10° below the head axis
@@ -196,7 +197,7 @@ def _normalize_angle(angle: float) -> float:
     """Normalize angle to [-90, 90] range.
 
     PCA eigenvectors have a 180-degree direction ambiguity — the axis
-    can point either way. Since ear angles in the SPFES context are
+    can point either way. Since sheep ear angles in this convention are
     always in roughly [-60, +60], anything outside ±90 is a PCA flip.
     """
     while angle > 180:

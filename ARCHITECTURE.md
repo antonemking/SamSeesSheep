@@ -190,12 +190,12 @@ Ear angle is computed in the labeler for QA visualization and in the benchmark f
 1. **Head midline**: PCA on the head mask yields the dorsal head axis. Ear-midpoint position relative to head centroid disambiguates direction (ears mark the dorsal/poll end). Falls back to image-vertical "up" when no ears are available. When nose is detected, `_compute_anatomical_midline` (nose → ear-midpoint) is preferred over PCA.
 2. **Ear direction**: For each ear, base = mask point closest to head centroid, tip = mask point farthest from head centroid. Direction = tip − base, normalized.
 3. **Ear angle relative to head**: `arctan2` of ear direction relative to head midline. Image coords have y increasing downward, so the y component is negated before `arctan2`.
-4. **Classification bands** (SPFES literature):
+4. **Reference bands** (this project's operationalization, not SPFES categories):
    - Green ≥ 30°: up/alert
    - Amber −10° to 30°: neutral
    - Red ≤ −10°: down/back
 
-These bands are QA aids, not diagnostic cutoffs. Trust deltas, not absolutes.
+These bands are QA aids, not diagnostic cutoffs. They are informed by the ear-posture ethograms of Reefmann et al. 2009 and Boissy et al. 2011. SPFES itself (McLennan et al. 2016) scores ear position categorically (0/1/2, "fully rotated ventrally and caudally") and specifies no degree thresholds. Trust deltas, not absolutes.
 
 ## σ benchmark methodology
 

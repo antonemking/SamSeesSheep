@@ -20,8 +20,9 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 LABELS_DIR.mkdir(parents=True, exist_ok=True)
 
-# Ear angle thresholds (derived from SPFES literature)
-# McLennan et al. 2019, Reefmann et al. 2009
+# Ear angle reference bands: this project's operationalization, informed by the
+# ear-posture ethograms of Reefmann et al. 2009 and Boissy et al. 2011. SPFES
+# (McLennan et al. 2016) scores ear position 0/1/2 and gives no degree thresholds.
 # Ear angle relative to dorsal head axis:
 #   > 30 degrees above horizontal = "up/alert" (positive valence or vigilance)
 #   -10 to 30 degrees = "neutral"

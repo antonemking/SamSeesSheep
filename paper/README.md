@@ -23,7 +23,7 @@ as-is.
 | File | What |
 |---|---|
 | `paper.tex` | The paper. |
-| `paper.bib` | 13 references (copy of repo-root `paper.bib`). |
+| `paper.bib` | 15 references (copy of repo-root `paper.bib`). |
 | `figures/hero.png` | Static frame from `synced-lanes-6ewes-pro-Test_Clip_Morning.mp4` (Fig. 1). |
 | `figures/earangle-img3651.png` | Ear-angle traces, HO-1 (`IMG_3651`) v0.2/v0.3/v0.4/v0.7 (Fig. 3). |
 

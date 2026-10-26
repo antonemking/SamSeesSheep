@@ -3,7 +3,7 @@
 Open-vocabulary YOLOE-seg with text prompts for "sheep head", "sheep ear",
 "sheep nose". Per-sheep tracking is handled by Ultralytics' built-in tracker
 (ByteTrack by default). Masks feed into the same ear-angle geometry used in
-v1, so chart bands and SPFES thresholds remain directly comparable.
+v1, so chart bands and reference thresholds remain directly comparable.
 
 This pipeline is deliberately "out of the box": no fine-tuning, no custom
 weights, no visual prompts. If YOLOE returns zero part detections on a clip,
