@@ -28,7 +28,7 @@ The project went through two scope shifts since day 0. This section supersedes a
 
 ### Scope history
 
-- **v0 (day 0)** — Intended as a welfare-scoring pipeline against SPFES thresholds. Unrealistic at our evidence level.
+- **v0 (day 0)** — Intended as a welfare-scoring pipeline against degree thresholds we then mis-attributed to SPFES (SPFES specifies none; corrected 2026-10-26). Unrealistic at our evidence level.
 - **v0.1 (2026-04 simplify branch)** — Descoped to "visualization artifact": SAM 3 Video → per-frame ear angles → smoothed EKG chart. No welfare claim. Clean but narrow.
 - **v0.2 (2026-04)** — Re-scoped again after peer review. SAM 3 is the **annotation backbone** (not the inference backbone). The project's outputs are (a) a growing reviewed-keypoint dataset and (b) a trained YOLO-pose model small enough to run at the edge. The visualization chart persists as a labeling-QA view.
 
@@ -162,9 +162,9 @@ This project commits, structurally, to the following anti-overclaim norms. Each 
 
 **v0.7.0** — Current. Pipeline validated against two held-out clips (IMG_3651 + Test_Clip_Morning). Training progression published across 7 versions (v0.2–v0.7, 98→523 reviewed instances). Breed confirmed as Katahdin. Weights live in monorepo at `sheep-yolo/weights/`.
 
-**v0.2.0** — Scope reset. Pipeline simplified to SAM 3 Video (head + ear) with head-PCA midline and SPFES threshold bands. Photo flow, SAM 2.1, depth/mesh, VLM orchestrators, and narrative generation have been removed from the critical path (see `CHANGELOG.md`). Validation against documented stress events is now an explicit future-work item, not a v0 deliverable.
+**v0.2.0** — Scope reset. Pipeline simplified to SAM 3 Video (head + ear) with head-PCA midline and the project's degree reference bands (then mislabeled "SPFES threshold bands"; corrected 2026-10-26). Photo flow, SAM 2.1, depth/mesh, VLM orchestrators, and narrative generation have been removed from the critical path (see `CHANGELOG.md`). Validation against documented stress events is now an explicit future-work item, not a v0 deliverable.
 
-**v0.1.0** — Pipeline built. SAM 2.1 hiera-small segmentation + Depth Anything V2 depth mesh operational. Ear angle extraction via PCA with McLennan SPFES thresholds. No systematic measurements yet — claim space is set, measurement begins Weekend 3.
+**v0.1.0** — Pipeline built. SAM 2.1 hiera-small segmentation + Depth Anything V2 depth mesh operational. Ear angle extraction via PCA with degree bands then attributed to McLennan's SPFES (SPFES specifies no degree thresholds; corrected 2026-10-26). No systematic measurements yet — claim space is set, measurement begins Weekend 3.
 
 This document will be versioned alongside the code. Every release will increment the version of this document and note what changed in [`CHANGELOG.md`](./CHANGELOG.md).
 

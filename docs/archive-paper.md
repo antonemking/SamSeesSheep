@@ -16,7 +16,10 @@ antone@lorewood.dev
 > `NCC < 0.23` clip-screening threshold (dropped), a `~10 MB` model size (the
 > released `best.pt` is ~6 MB), the `IMG_3651` / `Test_Clip_Morning` clip names
 > (now HO-1 / HO-2), and "monotonically improving" phrasing that the final version
-> bounds to v0.2→v0.4. The peer review that drove the revisions is in
+> bounds to v0.2→v0.4 — and the "SPFES ear-posture bands span 40°" /
+> "SPFES thresholds" wording, which is wrong: SPFES (McLennan et al. 2016)
+> scores ear position 0/1/2 with no degree thresholds; the bands are this
+> project's own (corrected 2026-10-26). The peer review that drove the revisions is in
 > `fable5-peer-review.md`; the full substantiation audit is in
 > `paper-substantiation.md`.
 
