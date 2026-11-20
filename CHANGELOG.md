@@ -12,6 +12,10 @@ The [`VALIDATION.md`](./VALIDATION.md) document is versioned alongside the code.
 
 ## [Unreleased]
 
+### Added — TypeSafe Jev sheep-triage experiment
+
+- `experiments/sheep-triage-jev/` — YOLO-pose tracks to a per-track feature summary, then an optional TypeSafe Jev Noul that returns `look` or `dont`. Pose-only runs need no API key. The key stays in `TYPESAFE_API_KEY`. Jev does not run on a Pi. Not a welfare or pain score.
+
 ### Added — 2026-05-13 — sheep-pose v0.4 and the first clean held-out benchmark
 
 Third labeling round: 313 → 405 reviewed sheep-head instances across 6 → 8 videos. Same YOLO26n-pose architecture, same recipe, same compute as v0.2 and v0.3. Trained on the RunPod 4090 in ~6 min. Val pose mAP50-95 went 0.643 → 0.732.
